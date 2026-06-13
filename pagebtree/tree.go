@@ -19,11 +19,20 @@ type Tree struct {
 	pageCache     pageCache
 }
 
+type Options struct {
+	PageCacheCapacity int
+}
+
 func New(degree int) *Tree {
+	return NewWithOptions(degree, Options{})
+}
+
+func NewWithOptions(degree int, options Options) *Tree {
 	return &Tree{
-		pages:    map[PageID]*page{},
-		nextPage: 1,
-		degree:   normalizeDegree(degree),
+		pages:     map[PageID]*page{},
+		nextPage:  1,
+		degree:    normalizeDegree(degree),
+		pageCache: newPageCache(options.PageCacheCapacity),
 	}
 }
 

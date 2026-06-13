@@ -16,9 +16,11 @@ type Stats struct {
 	ReusedPages            int
 	Storage                string
 	PageCacheEntries       int
+	PageCacheCapacity      int
 	PageCacheHits          int
 	PageCacheMisses        int
 	PageCacheInvalidations int
+	PageCacheEvictions     int
 }
 
 func statsFor(t *Tree) Stats {
@@ -34,9 +36,11 @@ func statsFor(t *Tree) Stats {
 	}
 	cacheStats := t.pageCache.snapshot()
 	stats.PageCacheEntries = cacheStats.Entries
+	stats.PageCacheCapacity = cacheStats.Capacity
 	stats.PageCacheHits = cacheStats.Hits
 	stats.PageCacheMisses = cacheStats.Misses
 	stats.PageCacheInvalidations = cacheStats.Invalidations
+	stats.PageCacheEvictions = cacheStats.Evictions
 	return stats
 }
 

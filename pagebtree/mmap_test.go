@@ -444,6 +444,39 @@ func TestMmapRangeBetweenStopsBeforeEndAndBoundsPrefetch(t *testing.T) {
 	}
 }
 
+func TestMmapTreePageCacheCapacityBoundsBranchRoutingEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128, PageCacheCapacity: 1})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	for i := 0; i < 80; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if tree.Stats().Height < 3 {
+		t.Fatalf("Height = %d, want a tree with multiple branch pages", tree.Stats().Height)
+	}
+
+	for _, key := range []string{"key-05", "key-35", "key-75"} {
+		if _, ok := tree.Get(key); !ok {
+			t.Fatalf("Get(%q) missed", key)
+		}
+	}
+
+	stats := tree.Stats()
+	if stats.PageCacheCapacity != 1 {
+		t.Fatalf("PageCacheCapacity = %d, want 1", stats.PageCacheCapacity)
+	}
+	if stats.PageCacheEntries != 1 {
+		t.Fatalf("PageCacheEntries = %d, want bounded mmap cache to keep 1 entry", stats.PageCacheEntries)
+	}
+	if stats.PageCacheEvictions == 0 {
+		t.Fatalf("PageCacheEvictions = 0, want eviction after visiting multiple branch pages")
+	}
+}
+
 func TestMmapSyncFlushesDataPagesBeforePublishingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

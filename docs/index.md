@@ -39,7 +39,7 @@ btree/
 
 pagebtree/
   page.go       Slotted page header, slots, and cells
-  page_cache.go Derived branch-routing cache keyed by page checksum
+  page_cache.go Bounded derived branch-routing cache keyed by page checksum
   search.go     Point lookup, lower-bound/bounded range, recursive fallback range, and linked-leaf scans
   leaf_links.go Leaf sibling links for current root pages
   overflow.go   Overflow references and chained large-value pages

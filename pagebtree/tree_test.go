@@ -635,6 +635,57 @@ func TestGetCachesBranchRoutingMetadata(t *testing.T) {
 	}
 }
 
+func TestPageCacheCapacityBoundsBranchRoutingEntries(t *testing.T) {
+	tree := NewWithOptions(2, Options{PageCacheCapacity: 1})
+	for i := 0; i < 80; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if tree.Stats().Height < 3 {
+		t.Fatalf("Height = %d, want a tree with multiple branch pages", tree.Stats().Height)
+	}
+
+	for _, key := range []string{"key-05", "key-35", "key-75"} {
+		if _, ok := tree.Get(key); !ok {
+			t.Fatalf("Get(%q) missed", key)
+		}
+	}
+
+	stats := tree.Stats()
+	if stats.PageCacheCapacity != 1 {
+		t.Fatalf("PageCacheCapacity = %d, want 1", stats.PageCacheCapacity)
+	}
+	if stats.PageCacheEntries != 1 {
+		t.Fatalf("PageCacheEntries = %d, want bounded cache to keep 1 entry", stats.PageCacheEntries)
+	}
+	if stats.PageCacheEvictions == 0 {
+		t.Fatalf("PageCacheEvictions = 0, want eviction after visiting multiple branch pages")
+	}
+}
+
+func TestPageCacheCanBeDisabled(t *testing.T) {
+	tree := NewWithOptions(2, Options{PageCacheCapacity: -1})
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	if _, ok := tree.Get("key-17"); !ok {
+		t.Fatalf("Get(key-17) missed")
+	}
+	stats := tree.Stats()
+	if stats.PageCacheCapacity != 0 {
+		t.Fatalf("PageCacheCapacity = %d, want disabled cache capacity 0", stats.PageCacheCapacity)
+	}
+	if stats.PageCacheEntries != 0 {
+		t.Fatalf("PageCacheEntries = %d, want disabled cache to keep no entries", stats.PageCacheEntries)
+	}
+	if stats.PageCacheHits != 0 {
+		t.Fatalf("PageCacheHits = %d, want disabled cache to record no hits", stats.PageCacheHits)
+	}
+	if stats.PageCacheMisses == 0 {
+		t.Fatalf("PageCacheMisses = 0, want disabled cache to still count decoded branch misses")
+	}
+}
+
 func TestPageCacheRefreshesBranchRoutingWhenChecksumChanges(t *testing.T) {
 	cache := pageCache{}
 	branch := newPage(9, flagBranch)
@@ -656,6 +707,34 @@ func TestPageCacheRefreshesBranchRoutingWhenChecksumChanges(t *testing.T) {
 	}
 	if cache.stats.Invalidations == 0 {
 		t.Fatalf("cache invalidations = 0, want checksum change to refresh entry")
+	}
+}
+
+func TestPageCacheEvictsLeastRecentlyUsedBranch(t *testing.T) {
+	cache := newPageCache(2)
+	first := newPage(1, flagBranch)
+	mustWriteBranchParts(first, []string{"m"}, []PageID{10, 11})
+	second := newPage(2, flagBranch)
+	mustWriteBranchParts(second, []string{"m"}, []PageID{20, 21})
+	third := newPage(3, flagBranch)
+	mustWriteBranchParts(third, []string{"m"}, []PageID{30, 31})
+
+	cache.searchBranchChild(first, "a")
+	cache.searchBranchChild(second, "a")
+	cache.searchBranchChild(first, "a")
+	cache.searchBranchChild(third, "a")
+
+	if _, ok := cache.branches[first.id]; !ok {
+		t.Fatalf("recently used branch %d was evicted", first.id)
+	}
+	if _, ok := cache.branches[second.id]; ok {
+		t.Fatalf("least recently used branch %d remained cached", second.id)
+	}
+	if _, ok := cache.branches[third.id]; !ok {
+		t.Fatalf("new branch %d was not cached", third.id)
+	}
+	if cache.stats.Evictions != 1 {
+		t.Fatalf("evictions = %d, want 1", cache.stats.Evictions)
 	}
 }
 

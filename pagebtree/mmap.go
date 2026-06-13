@@ -41,9 +41,10 @@ const firstTreePageID = PageID(metaPageCount)
 const maxMetaFreePages = (PageSize - metaFreeListOff) / 8
 
 type MmapOptions struct {
-	Degree        int
-	MaxPages      int
-	AccessPattern MmapAccessPattern
+	Degree            int
+	MaxPages          int
+	AccessPattern     MmapAccessPattern
+	PageCacheCapacity int
 }
 
 type mmapArena struct {
@@ -127,10 +128,11 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	}
 
 	tree := &Tree{
-		pages:    map[PageID]*page{},
-		nextPage: firstTreePageID,
-		degree:   normalizeDegree(options.Degree),
-		arena:    arena,
+		pages:     map[PageID]*page{},
+		nextPage:  firstTreePageID,
+		degree:    normalizeDegree(options.Degree),
+		arena:     arena,
+		pageCache: newPageCache(options.PageCacheCapacity),
 	}
 
 	if arena.initialized() {
@@ -185,10 +187,11 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 		readOnly: true,
 	}
 	tree := &Tree{
-		pages:    map[PageID]*page{},
-		nextPage: firstTreePageID,
-		arena:    arena,
-		readOnly: true,
+		pages:     map[PageID]*page{},
+		nextPage:  firstTreePageID,
+		arena:     arena,
+		readOnly:  true,
+		pageCache: newPageCache(DefaultPageCacheCapacity),
 	}
 	if err := tree.loadMeta(); err != nil {
 		arena.close()

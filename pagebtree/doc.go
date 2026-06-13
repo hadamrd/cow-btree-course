@@ -30,6 +30,8 @@
 // kernel page cache without adding a second Go heap page cache. MmapCacheStats
 // uses mincore on Unix to show how many mapped OS pages are resident in that
 // kernel cache. Current-tree Get also keeps a small checksum-keyed cache of
-// decoded branch routing metadata; Stats exposes its entries, hits, misses, and
-// invalidations.
+// decoded branch routing metadata. That derived cache is bounded by
+// least-recently-used eviction and can be sized through Options or MmapOptions;
+// Stats exposes its capacity, entries, hits, misses, invalidations, and
+// evictions.
 package pagebtree
