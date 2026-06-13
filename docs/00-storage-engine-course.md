@@ -600,6 +600,9 @@ Serious pieces in this repository:
 - Process-exit crash probes that kill a child writer at sync-publication,
   mmap-growth, compact-shrink, large-freelist spill, and large-reclaim spill
   fault points, then reopen the same database from a fresh process.
+- Reproducible microbenchmarks for page and mmap get, seek/next, bounded range,
+  insert, delete, reopen, and sync paths. Run a short local pass with
+  `go test ./pagebtree -run '^$' -bench 'Benchmark(PageTree|MmapTree)' -benchtime=100x`.
 
 Still research or incomplete compared with a production engine:
 
@@ -617,6 +620,7 @@ Still research or incomplete compared with a production engine:
 - No byte-balanced deletion across variable-size records.
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.
+- No benchstat baseline history or CI performance gate yet.
 - No multi-database catalog, duplicate keys, or comparator plugins.
 - No portability story beyond the Unix mmap path and non-Unix stubs.
 

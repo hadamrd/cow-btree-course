@@ -22,6 +22,8 @@ What is credible today:
 - A bounded derived branch-routing cache that does not duplicate raw page bytes.
 - Snapshot-backed cursors for incremental ordered reads.
 - A persisted mmap key-order identifier for the current bytewise page ordering.
+- Reproducible Go microbenchmarks for page and mmap get, seek/next, range,
+  insert, delete, reopen, and sync paths.
 
 ## P0 Gaps
 
@@ -49,7 +51,7 @@ research frontier.
 | Sparse-file punching | Reusable interior pages remain allocated by the filesystem. | Interior free pages stay inside the file. | Experiment with hole punching for page-size-aligned free extents while preserving mmap semantics. |
 | Multi-process robustness | Reader tables need stronger owner identity than PID alone. | Slots use PID, revision, and token, with stale PID cleanup and fail-closed validation. | Include boot/session identity or start time to reduce PID reuse ambiguity. |
 | Observability | A serious engine should explain stalls, reclaim pressure, and recovery decisions. | Stats expose many counters, but no structured trace/event stream. | Add optional event hooks for sync phases, recovery candidate rejection, and reclaim decisions. |
-| Benchmarks | Without benchmarks, optimization claims are weak. | Tests validate behavior but do not track performance. | Add reproducible microbenchmarks for get, seek/next, range, insert, delete, reopen, and sync. |
+| Benchmarks | Without benchmarks, optimization claims are weak. | Started: `pagebtree/bench_test.go` covers page and mmap point `Get`, cursor seek/next, bounded range scans, sequential insert/delete, mmap sync-after-put, mmap delete+sync, and mmap reopen validation. | Add benchstat comparison scripts, larger workload profiles, and CI/manual baseline guidance. |
 
 ## P2 Gaps
 

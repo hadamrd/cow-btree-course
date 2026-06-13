@@ -22,6 +22,7 @@ go run ./cmd/cowbtree
 go run ./cmd/pagebtree-demo
 go run ./cmd/mmapbtree-demo
 go run ./cmd/mdbkernel-demo
+go test ./pagebtree -run '^$' -bench 'Benchmark(PageTree|MmapTree)' -benchtime=100x
 ```
 
 ```go
