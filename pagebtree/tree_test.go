@@ -174,6 +174,72 @@ func TestRangeReturnsSortedKeysFromPages(t *testing.T) {
 	}
 }
 
+func TestRangeFromStartsAtLowerBound(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var got []string
+	tree.RangeFrom("key-17", func(key string, value []byte) bool {
+		got = append(got, key)
+		return true
+	})
+
+	want := sequentialKeys(40)[17:]
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RangeFrom(key-17) = %v, want %v", got, want)
+	}
+}
+
+func TestRangeFromUsesLowerBoundWhenKeyIsAbsent(t *testing.T) {
+	tree := New(2)
+	for _, i := range []int{0, 5, 10, 20, 30} {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var got []string
+	tree.RangeFrom("key-12", func(key string, value []byte) bool {
+		got = append(got, key)
+		return true
+	})
+
+	want := []string{"key-20", "key-30"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RangeFrom(key-12) = %v, want %v", got, want)
+	}
+}
+
+func TestSnapshotRangeFromReadsOldRootLowerBound(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 30; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("before-%02d", i)))
+	}
+	snapshot := tree.Snapshot()
+	defer snapshot.Close()
+
+	for i := 20; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("after-%02d", i)))
+	}
+
+	var got []string
+	snapshot.RangeFrom("key-25", func(key string, value []byte) bool {
+		got = append(got, fmt.Sprintf("%s=%s", key, value))
+		return true
+	})
+
+	want := []string{
+		"key-25=before-25",
+		"key-26=before-26",
+		"key-27=before-27",
+		"key-28=before-28",
+		"key-29=before-29",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("snapshot RangeFrom(key-25) = %v, want %v", got, want)
+	}
+}
+
 func TestLeafSplitsMaintainNextLeafLinks(t *testing.T) {
 	tree := New(2)
 	for i := 0; i < 40; i++ {

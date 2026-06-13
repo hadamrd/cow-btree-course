@@ -41,6 +41,10 @@ tree.Put("k01", []byte("value-01"))
 
 value, ok := tree.Get("k01")
 old, deleted := tree.Delete("k01")
+tree.RangeFrom("k10", func(key string, value []byte) bool {
+    // visit keys >= k10 in sorted order
+    return true
+})
 ```
 
 ## Course Map
@@ -58,7 +62,7 @@ Start with [`docs/index.md`](docs/index.md), then read in order:
 
 ## Deliberate Scope
 
-This is a teaching implementation, not a production storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, linked leaf key/value pages, overflow pages, educational deletion, reader-pinned retired pages, a reusable freelist, and an optional growable mmap-backed page file with dirty-page `Sync`, `madvise` access-pattern hints, and `mincore` cache residency stats. Full deletion rebalancing, write-ahead logging, and durability hardening are left as guided exercises.
+This is a teaching implementation, not a production storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, linked leaf key/value pages, lower-bound range scans, overflow pages, educational deletion, reader-pinned retired pages, a reusable freelist, and an optional growable mmap-backed page file with dirty-page `Sync`, `madvise` access-pattern hints, and `mincore` cache residency stats. Full deletion rebalancing, write-ahead logging, and durability hardening are left as guided exercises.
 
 ## License
 

@@ -38,6 +38,13 @@ func (s *Snapshot) Range(visit func(string, []byte) bool) {
 	rangePage(s.pages, s.root, visit)
 }
 
+func (s *Snapshot) RangeFrom(start string, visit func(string, []byte) bool) {
+	if s == nil || s.closed {
+		return
+	}
+	rangePageFrom(s.pages, s.root, start, visit)
+}
+
 func (s *Snapshot) Stats() Stats {
 	if s == nil {
 		return Stats{}

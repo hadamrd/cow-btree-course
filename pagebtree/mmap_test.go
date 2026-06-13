@@ -318,6 +318,56 @@ func TestMmapRangeAvoidsLeafPrefetchWhileReadersAreActive(t *testing.T) {
 	}
 }
 
+func TestMmapRangeFromStartsAtLowerBoundAndPrefetchesNextLeaves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, AccessPattern: MmapAccessRandom})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var advised []PageID
+	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == MmapAccessWillNeed {
+			if end != start+1 {
+				t.Fatalf("advised range = [%d,%d), want single page", start, end)
+			}
+			advised = append(advised, start)
+		}
+	}
+
+	var got []string
+	tree.RangeFrom("key-17", func(key string, value []byte) bool {
+		got = append(got, key)
+		return true
+	})
+
+	want := sequentialKeys(40)[17:]
+	if !slices.Equal(got, want) {
+		t.Fatalf("RangeFrom(key-17) = %v, want %v", got, want)
+	}
+	if len(advised) == 0 {
+		t.Fatalf("RangeFrom did not advise any next leaf pages")
+	}
+
+	startLeaf := leafForKey(tree.pages, tree.root, "key-17")
+	if startLeaf == 0 {
+		t.Fatalf("leafForKey(key-17) returned 0")
+	}
+	wantFirstAdvice := tree.pages[startLeaf].nextLeaf()
+	if wantFirstAdvice == 0 {
+		t.Fatalf("start leaf %d has no next leaf; test needs multiple leaves", startLeaf)
+	}
+	if advised[0] != wantFirstAdvice {
+		t.Fatalf("first advised page = %d, want next leaf %d after start leaf %d", advised[0], wantFirstAdvice, startLeaf)
+	}
+}
+
 func TestMmapSyncFlushesDataPagesBeforePublishingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

@@ -91,6 +91,17 @@ func (t *Tree) Range(visit func(string, []byte) bool) {
 	rangePage(t.pages, t.root, visit)
 }
 
+// RangeFrom visits keys greater than or equal to start in sorted order.
+func (t *Tree) RangeFrom(start string, visit func(string, []byte) bool) {
+	if t.closed {
+		return
+	}
+	if t.activeReaderCount() == 0 && rangeLinkedLeavesFrom(t.pages, t.root, start, t.rangePrefetcher(), visit) {
+		return
+	}
+	rangePageFrom(t.pages, t.root, start, visit)
+}
+
 func (t *Tree) rangePrefetcher() func(PageID) {
 	if t.arena == nil {
 		return nil

@@ -32,3 +32,18 @@ func ExampleTree_Snapshot() {
 	// blue
 	// green
 }
+
+func ExampleTree_RangeFrom() {
+	tree := pagebtree.New(2)
+	for _, key := range []string{"alpha", "bravo", "charlie", "delta"} {
+		tree.Put(key, []byte(key+"-value"))
+	}
+
+	tree.RangeFrom("charlie", func(key string, value []byte) bool {
+		fmt.Println(key, string(value))
+		return true
+	})
+	// Output:
+	// charlie charlie-value
+	// delta delta-value
+}

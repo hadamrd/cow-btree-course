@@ -46,6 +46,35 @@ func rangePage(pages map[PageID]*page, root PageID, visit func(string, []byte) b
 	return rangePage(pages, children[len(children)-1], visit)
 }
 
+func rangePageFrom(pages map[PageID]*page, root PageID, start string, visit func(string, []byte) bool) bool {
+	if root == 0 {
+		return true
+	}
+
+	p := pages[root]
+	if p.isLeaf() {
+		entries := p.leafEntries()
+		index, _ := slices.BinarySearchFunc(entries, start, func(entry leafEntry, key string) int {
+			return compareStrings(entry.key, key)
+		})
+		for _, entry := range entries[index:] {
+			if !visit(entry.key, resolveLeafValue(pages, entry.value, entry.slotFlags)) {
+				return false
+			}
+		}
+		return true
+	}
+
+	keys, children := p.branchParts()
+	index := childIndex(keys, start)
+	for ; index < len(children); index++ {
+		if !rangePageFrom(pages, children[index], start, visit) {
+			return false
+		}
+	}
+	return true
+}
+
 func rangeLinkedLeaves(pages map[PageID]*page, root PageID, prefetch func(PageID), visit func(string, []byte) bool) bool {
 	leaf := leftmostLeaf(pages, root)
 	seen := map[PageID]bool{}
@@ -61,6 +90,40 @@ func rangeLinkedLeaves(pages map[PageID]*page, root PageID, prefetch func(PageID
 		}
 		prefetchNextLeaves(pages, p.nextLeaf(), rangePrefetchLeafWindow, prefetch)
 		for _, entry := range p.leafEntries() {
+			if !visit(entry.key, resolveLeafValue(pages, entry.value, entry.slotFlags)) {
+				return true
+			}
+		}
+		leaf = p.nextLeaf()
+	}
+	return true
+}
+
+func rangeLinkedLeavesFrom(pages map[PageID]*page, root PageID, start string, prefetch func(PageID), visit func(string, []byte) bool) bool {
+	leaf := leafForKey(pages, root, start)
+	seen := map[PageID]bool{}
+	firstLeaf := true
+	for leaf != 0 {
+		if seen[leaf] {
+			return true
+		}
+		seen[leaf] = true
+
+		p := pages[leaf]
+		if p == nil || !p.isLeaf() {
+			return false
+		}
+		prefetchNextLeaves(pages, p.nextLeaf(), rangePrefetchLeafWindow, prefetch)
+
+		entries := p.leafEntries()
+		index := 0
+		if firstLeaf {
+			index, _ = slices.BinarySearchFunc(entries, start, func(entry leafEntry, key string) int {
+				return compareStrings(entry.key, key)
+			})
+			firstLeaf = false
+		}
+		for _, entry := range entries[index:] {
 			if !visit(entry.key, resolveLeafValue(pages, entry.value, entry.slotFlags)) {
 				return true
 			}
@@ -100,6 +163,20 @@ func leftmostLeaf(pages map[PageID]*page, root PageID) PageID {
 			return root
 		}
 		root = p.leftmostChild()
+	}
+	return 0
+}
+
+func leafForKey(pages map[PageID]*page, root PageID, key string) PageID {
+	for root != 0 {
+		p := pages[root]
+		if p == nil {
+			return 0
+		}
+		if p.isLeaf() {
+			return root
+		}
+		root = p.searchBranchChild(key)
 	}
 	return 0
 }
