@@ -33,7 +33,7 @@ storage-engine artifact.
 | Transaction batching | Real engines commit a unit of work, not one implicit root publish per call. | Started: `WriteBatch` stages point `Put`/`Delete` operations, hides them until `Commit`, and publishes one tree revision across memory and mmap trees. `Sync` remains the mmap durability boundary. | Add richer transaction ergonomics: old-value reporting, explicit errors, panic-safe rollback, and cursor/range-aware write experiments. |
 | Cursor API | Real B+tree users need `seek`/`next` control, not only callback scans. | Closed in this pass with snapshot-backed forward cursors. | Extend cursors with bounded end keys, reverse traversal, and delete-through-cursor experiments. |
 | Comparator and key model | Production B+trees cannot be hardwired to Go string ordering. | Page cells store strings and compare byte-by-byte through string order. | Introduce byte-key APIs and an explicit comparator boundary before adding prefix compression. |
-| Fuzz and model checking | Handwritten tests miss malformed-page combinations and delete/split corner cases. | Tests are broad but example-driven. | Add go fuzz targets comparing `pagebtree` against a sorted-map model across put/delete/range/cursor operations. |
+| Fuzz and model checking | Handwritten tests miss malformed-page combinations and delete/split corner cases. | Started: `FuzzPageTreeMatchesSortedMapModel` compares `pagebtree` with a sorted-map oracle across put, delete, batch, get, range, cursor, and `Check` operations. | Extend model checking to mmap reopen/sync cycles, overflow-heavy values, and malformed-page generators. |
 
 ## P1 Gaps
 
