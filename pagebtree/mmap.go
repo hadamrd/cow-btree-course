@@ -1068,6 +1068,9 @@ func (t *Tree) resolveMetaFreelist(record *metaRecord) ([]PageID, error) {
 		if p.flags() != flagFreelist {
 			return nil, fmt.Errorf("%w: page %d in freelist metadata chain is not a freelist page", ErrFreelist, id)
 		}
+		if p.freelistCount() == 0 {
+			return nil, fmt.Errorf("%w: empty freelist metadata page %d", ErrFreelist, id)
+		}
 		freelistPages = append(freelistPages, id)
 		for _, freeID := range p.freelistIDs() {
 			if len(free) >= record.freeCount {
@@ -1112,6 +1115,9 @@ func (t *Tree) resolveMetaReclaim(record *metaRecord) ([]PageID, error) {
 		}
 		if p.flags() != flagReclaim {
 			return nil, fmt.Errorf("%w: page %d in reclaim metadata chain is not a reclaim page", ErrFreelist, id)
+		}
+		if p.reclaimCount() == 0 {
+			return nil, fmt.Errorf("%w: empty reclaim metadata page %d", ErrFreelist, id)
 		}
 		reclaimPages = append(reclaimPages, id)
 		for _, entry := range p.reclaimRecords() {

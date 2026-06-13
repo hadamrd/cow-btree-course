@@ -3344,6 +3344,79 @@ func TestMmapTreeRejectsReclaimPageWithCorruptFreeUpper(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsEmptyReclaimChainPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 512})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	for i := 0; i < 320; i++ {
+		writer.Put(fmt.Sprintf("key-%03d", i), []byte(fmt.Sprintf("value-%03d", i)))
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close initial writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	writer, err = OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 512})
+	if err != nil {
+		reader.Close()
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+	for i := 0; i < 260; i++ {
+		if _, ok := writer.Delete(fmt.Sprintf("key-%03d", i)); !ok {
+			writer.Close()
+			reader.Close()
+			t.Fatalf("Delete key-%03d = false, want true", i)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		reader.Close()
+		t.Fatalf("Close writer with external reader: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close reader: %v", err)
+	}
+
+	newestIndex, record := newestMetaPage(t, path)
+	for index := 0; index < metaPageCount; index++ {
+		if index != newestIndex {
+			corruptMetaPage(t, path, index)
+		}
+	}
+	if record.freeRoot == 0 {
+		t.Fatalf("newest metadata has no reclaim root")
+	}
+	tailRoot := reclaimPageNext(t, path, record.freeRoot)
+	if tailRoot == 0 {
+		t.Fatalf("reclaim chain has one page; need a multipage chain for this invariant")
+	}
+	tailRecords := reclaimChainRecordCount(t, path, tailRoot)
+	if tailRecords == 0 {
+		t.Fatalf("reclaim chain tail has no records")
+	}
+	rewriteReclaimPageRecords(t, path, record.freeRoot, nil)
+	replaceMetaBytesAt(t, path, newestIndex, func(data []byte) {
+		binary.LittleEndian.PutUint64(data[metaFreeCountOff:], uint64(tailRecords))
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with empty reclaim chain page")
+	}
+	if !errors.Is(err, ErrFreelist) {
+		t.Fatalf("OpenMmap empty reclaim chain error = %v, want ErrFreelist", err)
+	}
+	if !strings.Contains(err.Error(), "empty reclaim metadata page") {
+		t.Fatalf("OpenMmap empty reclaim chain error = %v, want empty reclaim page detail", err)
+	}
+}
+
 func TestMmapReadOnlyPinsReaderTableBeforeLoadingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -4237,6 +4310,53 @@ func rewriteReclaimPageRecords(t *testing.T, path string, pageID PageID, records
 	if err := file.Sync(); err != nil {
 		t.Fatalf("Sync reclaim page %d: %v", pageID, err)
 	}
+}
+
+func reclaimPageNext(t *testing.T, path string, pageID PageID) PageID {
+	t.Helper()
+
+	p := readReclaimPage(t, path, pageID)
+	return p.reclaimNext()
+}
+
+func reclaimChainRecordCount(t *testing.T, path string, pageID PageID) int {
+	t.Helper()
+
+	total := 0
+	seen := map[PageID]bool{}
+	for id := pageID; id != 0; {
+		if seen[id] {
+			t.Fatalf("reclaim chain loops through page %d", id)
+		}
+		seen[id] = true
+		p := readReclaimPage(t, path, id)
+		total += p.reclaimCount()
+		id = p.reclaimNext()
+	}
+	return total
+}
+
+func readReclaimPage(t *testing.T, path string, pageID PageID) *page {
+	t.Helper()
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("OpenFile read reclaim page: %v", err)
+	}
+	defer file.Close()
+
+	buf := make([]byte, PageSize)
+	if _, err := file.ReadAt(buf, int64(pageID)*PageSize); err != nil {
+		t.Fatalf("ReadAt reclaim page %d: %v", pageID, err)
+	}
+	p := &page{id: pageID, data: buf}
+	if !p.validChecksum() {
+		t.Fatalf("reclaim page %d checksum invalid", pageID)
+	}
+	if p.flags() != flagReclaim {
+		t.Fatalf("page %d flags = %x, want reclaim", pageID, p.flags())
+	}
+	return p
 }
 
 func newestMetaPage(t *testing.T, path string) (int, metaRecord) {
