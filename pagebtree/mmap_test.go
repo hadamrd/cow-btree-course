@@ -1264,6 +1264,51 @@ func TestMmapSyncRestoresMetaPageWhenMetaFlushFails(t *testing.T) {
 	}
 }
 
+func TestMmapSyncRejectsFreelistTooLargeForMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 1024})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer func() {
+		tree.free = nil
+		_ = tree.Close()
+	}()
+
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	clear(tree.arena.dirtyPages)
+
+	metaIndex := int(tree.Revision() % metaPageCount)
+	metaPage := tree.arena.data[metaIndex*PageSize : (metaIndex+1)*PageSize]
+	before := cloneBytes(metaPage)
+	tree.free = make([]PageID, maxMetaFreePages+1)
+	for i := range tree.free {
+		tree.free[i] = firstTreePageID + PageID(i)
+	}
+
+	var syncErr error
+	var panicValue any
+	func() {
+		defer func() {
+			panicValue = recover()
+		}()
+		syncErr = tree.Sync()
+	}()
+	if panicValue != nil {
+		t.Fatalf("Sync panicked for oversized freelist: %v", panicValue)
+	}
+	if !errors.Is(syncErr, ErrMetaInvariant) {
+		t.Fatalf("Sync oversized freelist error = %v, want ErrMetaInvariant", syncErr)
+	}
+	if !bytes.Equal(metaPage, before) {
+		t.Fatalf("metadata page changed after oversized freelist Sync failure")
+	}
+}
+
 func TestMmapSyncFlushesOnlyDirtyDataPages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -2753,7 +2798,9 @@ func replaceNewestMetaRecord(t *testing.T, path string, rewrite func(metaRecord)
 	defer file.Close()
 
 	buf := make([]byte, PageSize)
-	writeMetaPage(buf, record)
+	if err := writeMetaPage(buf, record); err != nil {
+		t.Fatalf("writeMetaPage rewrite meta %d: %v", index, err)
+	}
 	if _, err := file.WriteAt(buf, int64(index*PageSize)); err != nil {
 		t.Fatalf("WriteAt rewrite meta %d: %v", index, err)
 	}

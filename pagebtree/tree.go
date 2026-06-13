@@ -245,8 +245,7 @@ func (t *Tree) Sync() error {
 		return nil
 	}
 	if t.arena == nil {
-		t.persistMeta()
-		return nil
+		return t.persistMeta()
 	}
 	return t.syncMmap()
 }

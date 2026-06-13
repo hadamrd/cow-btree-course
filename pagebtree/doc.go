@@ -42,7 +42,9 @@
 // referenced number of payload bytes.
 // Reopen also rejects metadata whose stored length does not match the reachable
 // leaf-key count, plus persisted freelist IDs that exceed metadata capacity,
-// are out of range, duplicated, or still reachable.
+// are out of range, duplicated, or still reachable. Sync rejects an in-memory
+// freelist that is too large for the bounded educational metadata encoding
+// instead of panicking or writing a truncated list.
 // OpenMmapReadOnly opens mmap files with a shared read lock and rejects
 // mutations through the returned tree handle. Mmap-backed trees default to
 // random-access kernel advice, and expose Advise so callers can pass random,

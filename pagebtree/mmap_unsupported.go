@@ -73,7 +73,9 @@ func (a *mmapArena) close() error {
 	return nil
 }
 
-func (t *Tree) persistMeta() {}
+func (t *Tree) persistMeta() error {
+	return nil
+}
 
 func (t *Tree) loadMeta() error {
 	return errors.New("mmap page storage is only available on Unix-like platforms")

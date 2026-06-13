@@ -842,13 +842,13 @@ func compareUint64Desc(left, right uint64) int {
 	}
 }
 
-func (t *Tree) persistMeta() {
+func (t *Tree) persistMeta() error {
 	if t.arena == nil || t.arena.readOnly {
-		return
+		return nil
 	}
 
 	index := int(t.revision % metaPageCount)
-	writeMetaPage(t.arena.data[index*PageSize:(index+1)*PageSize], metaRecord{
+	return writeMetaPage(t.arena.data[index*PageSize:(index+1)*PageSize], metaRecord{
 		root:     t.root,
 		nextPage: t.nextPage,
 		length:   t.length,
@@ -876,7 +876,10 @@ func (t *Tree) publishMeta() error {
 	index := int(t.revision % metaPageCount)
 	metaPage := t.arena.data[index*PageSize : (index+1)*PageSize]
 	previous := cloneBytes(metaPage)
-	t.persistMeta()
+	if err := t.persistMeta(); err != nil {
+		copy(metaPage, previous)
+		return err
+	}
 	if err := t.arena.syncMetaPage(index); err != nil {
 		copy(metaPage, previous)
 		return err
@@ -977,9 +980,9 @@ func isZeroPage(data []byte) bool {
 	return true
 }
 
-func writeMetaPage(data []byte, record metaRecord) {
+func writeMetaPage(data []byte, record metaRecord) error {
 	if len(record.free) > maxMetaFreePages {
-		panic("freelist too large for educational meta-page encoding")
+		return fmt.Errorf("%w: metadata free count %d exceeds %d", ErrMetaInvariant, len(record.free), maxMetaFreePages)
 	}
 
 	clear(data)
@@ -998,6 +1001,7 @@ func writeMetaPage(data []byte, record metaRecord) {
 		binary.LittleEndian.PutUint64(data[offset:], uint64(id))
 	}
 	binary.LittleEndian.PutUint32(data[metaChecksumOff:], metaChecksum(data))
+	return nil
 }
 
 func metaChecksum(data []byte) uint32 {
