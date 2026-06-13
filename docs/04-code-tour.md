@@ -86,6 +86,7 @@ flowchart LR
 Read this package after the pointer-based `btree` package. The important files are:
 
 - `pagebtree/page.go` for the slotted page header, slot directory, cells, and direct slot search helpers.
+- `pagebtree/search.go` for point lookup, recursive fallback range traversal, and linked-leaf current-tree scans.
 - `pagebtree/leaf_links.go` for maintaining current-root leaf sibling links after copy-on-write edits.
 - `pagebtree/overflow.go` for overflow references and chained large-value pages.
 - `pagebtree/tree.go` for `Put`, `Get`, snapshots, and root page publication.

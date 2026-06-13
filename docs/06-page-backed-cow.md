@@ -134,7 +134,9 @@ flowchart LR
 
 Copy-on-write makes leaf links more subtle than they first look. A copied leaf may still contain a link that was correct for an older root version. Relinking that leaf in place would rewrite page bytes that an active snapshot may still be able to see.
 
-The implementation therefore relinks leaves reachable from the current root only when no readers are active. If a `Put` or `Delete` happens while a snapshot is open, the current root is still published immediately, but leaf-link repair is deferred. When the last snapshot closes, `Snapshot.Close` releases the reader pin and repairs the current leaf chain, marking changed mmap pages dirty. Public `Range` still walks the tree recursively for clarity; the leaf chain is a persisted page-layout invariant and a stepping stone toward scan-oriented range traversal.
+The implementation therefore relinks leaves reachable from the current root only when no readers are active. If a `Put` or `Delete` happens while a snapshot is open, the current root is still published immediately, but leaf-link repair is deferred. When the last snapshot closes, `Snapshot.Close` releases the reader pin and repairs the current leaf chain, marking changed mmap pages dirty.
+
+Current-tree `Range` uses the leaf chain when no active reader can make those links stale. If a reader is active, `Range` falls back to the recursive branch walk so it still returns the current keys even while link repair is deferred. Snapshot ranges also keep the recursive walk because they are teaching the old-root view directly.
 
 ## Overflow Values
 
@@ -178,7 +180,7 @@ The page package models page identity, root publication, and slotted cell storag
 - Pages are kept in an in-memory map rather than written to disk.
 - The implementation rewrites a copied page from decoded entries during insertion and deletion; it does not do in-place cell compaction.
 - `Get` searches slots directly, but insertion still decodes page contents before rewriting the copied page.
-- Leaf pages carry next-leaf links, but public `Range` still uses a recursive tree walk.
+- Current-tree `Range` uses next-leaf links only when no active reader can make them stale; snapshot ranges still use a recursive tree walk.
 - Byte-full leaf rewrites spill inline cells to overflow pages, but the tree still does not do byte-balanced redistribution between sibling leaves.
 - `Delete` removes records, retires overflow pages, removes empty children, and collapses a one-child root; it does not yet implement full sibling borrow/merge rebalancing.
 - Branch pages contain separator keys and child page ids; values live in leaves.

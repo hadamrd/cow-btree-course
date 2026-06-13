@@ -226,6 +226,98 @@ func TestMmapTreePersistsLeafNextLinksAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMmapRangeAdvisesNextLeafPages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, AccessPattern: MmapAccessRandom})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	leafIDs := make([]PageID, 0)
+	collectLeavesInOrder(tree.pages, tree.root, &leafIDs)
+	leafSet := map[PageID]bool{}
+	for _, id := range leafIDs {
+		leafSet[id] = true
+	}
+
+	var advised []PageID
+	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern != MmapAccessWillNeed {
+			return
+		}
+		if end != start+1 {
+			t.Fatalf("advised range = [%d,%d), want single-page leaf range", start, end)
+		}
+		advised = append(advised, start)
+	}
+
+	var got []string
+	tree.Range(func(key string, value []byte) bool {
+		got = append(got, key)
+		return true
+	})
+
+	if !slices.Equal(got, sequentialKeys(40)) {
+		t.Fatalf("Range keys = %v, want sequential keys", got)
+	}
+	if len(advised) == 0 {
+		t.Fatalf("Range did not advise any next leaf pages")
+	}
+	for _, id := range advised {
+		if !leafSet[id] {
+			t.Fatalf("Range advised page %d, want only leaf pages from %v", id, leafIDs)
+		}
+	}
+	if advised[0] != leafIDs[1] {
+		t.Fatalf("first advised page = %d, want second leaf page %d", advised[0], leafIDs[1])
+	}
+}
+
+func TestMmapRangeAvoidsLeafPrefetchWhileReadersAreActive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, AccessPattern: MmapAccessRandom})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	snapshot := tree.Snapshot()
+	defer snapshot.Close()
+
+	tree.Put("key-99", []byte("new-right-edge"))
+
+	var advised []PageID
+	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == MmapAccessWillNeed {
+			advised = append(advised, start)
+		}
+	}
+
+	var got []string
+	tree.Range(func(key string, value []byte) bool {
+		got = append(got, key)
+		return true
+	})
+
+	want := append(sequentialKeys(40), "key-99")
+	if !slices.Equal(got, want) {
+		t.Fatalf("Range with active reader = %v, want current keys %v", got, want)
+	}
+	if len(advised) != 0 {
+		t.Fatalf("Range advised leaf pages with active reader: %v", advised)
+	}
+}
+
 func TestMmapSyncFlushesDataPagesBeforePublishingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

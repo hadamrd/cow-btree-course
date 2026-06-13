@@ -53,6 +53,7 @@ type mmapArena struct {
 	dirtyPages       map[PageID]bool
 	syncObserver     func(string)
 	dataSyncObserver func(start, end PageID)
+	adviceObserver   func(pattern MmapAccessPattern, start, end PageID)
 }
 
 type MmapAccessPattern int
@@ -378,6 +379,46 @@ func (a *mmapArena) advise(pattern MmapAccessPattern) error {
 	}
 	a.accessPattern = pattern
 	return unix.Madvise(a.data, advice)
+}
+
+func (a *mmapArena) advisePageRange(startPage, endPage PageID, pattern MmapAccessPattern) error {
+	if a == nil || len(a.data) == 0 {
+		return nil
+	}
+	if startPage < firstTreePageID || endPage < startPage {
+		return fmt.Errorf("invalid mmap advice page range [%d,%d)", startPage, endPage)
+	}
+	endByte := int(endPage) * PageSize
+	if endByte > len(a.data) {
+		return fmt.Errorf("mmap advice page range [%d,%d) exceeds mmap size %d", startPage, endPage, len(a.data))
+	}
+	advice, err := mmapAdvice(pattern)
+	if err != nil {
+		return err
+	}
+	if a.adviceObserver != nil {
+		a.adviceObserver(pattern, startPage, endPage)
+	}
+	return a.madviseRange(int(startPage)*PageSize, endByte, advice)
+}
+
+func (a *mmapArena) madviseRange(start, end, advice int) error {
+	if start < 0 || end < start || end > len(a.data) {
+		return fmt.Errorf("madvise range [%d,%d) outside mmap size %d", start, end, len(a.data))
+	}
+	if start == end {
+		return nil
+	}
+	osPageSize := unix.Getpagesize()
+	alignedStart := start - start%osPageSize
+	alignedEnd := end
+	if remainder := alignedEnd % osPageSize; remainder != 0 {
+		alignedEnd += osPageSize - remainder
+	}
+	if alignedEnd > len(a.data) {
+		alignedEnd = len(a.data)
+	}
+	return unix.Madvise(a.data[alignedStart:alignedEnd], advice)
 }
 
 func (a *mmapArena) cacheStats() (MmapCacheStats, error) {

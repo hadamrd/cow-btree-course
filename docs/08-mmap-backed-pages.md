@@ -74,6 +74,20 @@ The important caching point is that mmap already uses the kernel page cache. Add
 
 These are hints, not contracts. The kernel can ignore them or combine them with its own readahead heuristics. Correctness comes from the page checksums, copy-on-write roots, and metadata validation, not from prefetch behavior.
 
+`Range` now uses the B+tree's leaf links to make smaller hints than a whole-file sequential policy. When no active reader has deferred leaf-link repair, the scan walks leaf-to-leaf and asks the kernel to prefetch a small window of exact next leaf pages with `MADV_WILLNEED`. It does not ask Linux to guess far ahead across the whole mapping. If readers are active and current leaf links may be stale, `Range` falls back to the recursive branch walk and skips leaf prefetch.
+
+```mermaid
+flowchart LR
+    L1["current leaf"] --> L2["next leaf"]
+    L2 --> L3["next next leaf"]
+    L3 --> L4["later leaf"]
+
+    S["Range"] --> A["read current leaf"]
+    S --> P["MADV_WILLNEED exact next leaves"]
+    P -. page id .-> L2
+    P -. page id .-> L3
+```
+
 The package also exposes `MmapCacheStats`, backed by `mincore` on Unix. This is an observability tool, not an application cache. It reports:
 
 - mapped file bytes
@@ -92,10 +106,10 @@ flowchart TD
     B --> L["leaf page"]
     L --> V["value or overflow chain"]
 
-    S["Range scan"] --> Q["Advise sequential / will-need"]
-    Q --> P1["leaf page N"]
-    P1 --> P2["leaf page N+1"]
-    P2 --> P3["leaf page N+2"]
+    S["Range scan"] --> Q["Will-need exact next leaves"]
+    Q --> P1["current leaf page"]
+    P1 --> P2["next linked leaf"]
+    P2 --> P3["next linked leaf"]
 
     C["MmapCacheStats"] --> M["mincore"]
     M --> K["resident OS pages"]

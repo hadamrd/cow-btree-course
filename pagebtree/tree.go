@@ -85,7 +85,24 @@ func (t *Tree) Range(visit func(string, []byte) bool) {
 	if t.closed {
 		return
 	}
+	if t.activeReaderCount() == 0 && rangeLinkedLeaves(t.pages, t.root, t.rangePrefetcher(), visit) {
+		return
+	}
 	rangePage(t.pages, t.root, visit)
+}
+
+func (t *Tree) rangePrefetcher() func(PageID) {
+	if t.arena == nil {
+		return nil
+	}
+	advised := map[PageID]bool{}
+	return func(id PageID) {
+		if advised[id] {
+			return
+		}
+		advised[id] = true
+		_ = t.arena.advisePageRange(id, id+1, MmapAccessWillNeed)
+	}
 }
 
 func (t *Tree) Snapshot() *Snapshot {
