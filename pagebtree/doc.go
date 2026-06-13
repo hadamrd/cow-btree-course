@@ -29,8 +29,8 @@
 // Persisted leaf next pointers must match the branch-order leaf sequence.
 // Overflow chains must contain exactly the referenced number of payload bytes.
 // Reopen also rejects metadata whose stored length does not match the reachable
-// leaf-key count, plus persisted freelist IDs that are out of range, duplicated,
-// or still reachable.
+// leaf-key count, plus persisted freelist IDs that exceed metadata capacity,
+// are out of range, duplicated, or still reachable.
 // OpenMmapReadOnly opens mmap files with a shared read lock and rejects
 // mutations through the returned tree handle. Mmap-backed trees expose Advise so
 // callers can pass random, sequential, or will-need access-pattern hints to the

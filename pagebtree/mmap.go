@@ -720,7 +720,7 @@ func (t *Tree) loadMeta() error {
 			lastErr = err
 			continue
 		}
-		if err := t.validateFreelist(record.free, reachable); err != nil {
+		if err := t.validateFreelist(record.free, record.maxPages, reachable); err != nil {
 			lastErr = err
 			continue
 		}
@@ -922,9 +922,13 @@ func (t *Tree) validateReachablePages() (map[PageID]bool, error) {
 	return seen, nil
 }
 
-func (t *Tree) validateFreelist(free []PageID, reachable map[PageID]bool) error {
+func (t *Tree) validateFreelist(free []PageID, maxPages int, reachable map[PageID]bool) error {
 	seenFree := map[PageID]bool{}
+	maxReusablePage := firstTreePageID + PageID(maxPages)
 	for _, id := range free {
+		if id >= maxReusablePage {
+			return fmt.Errorf("%w: page %d beyond metadata capacity %d", ErrFreelist, id, maxPages)
+		}
 		if id < firstTreePageID || id >= t.nextPage {
 			return fmt.Errorf("%w: page %d outside reusable range [%d,%d)", ErrFreelist, id, firstTreePageID, t.nextPage)
 		}

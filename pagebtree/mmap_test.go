@@ -1270,6 +1270,45 @@ func TestMmapTreeRejectsOutOfRangePersistedFreelistEntry(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsPersistedFreelistEntryBeyondDeclaredCapacity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 30; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	snapshot := tree.Snapshot()
+	tree.Put("key-10", []byte("updated"))
+	snapshot.Close()
+	if len(tree.free) == 0 {
+		t.Fatalf("tree did not produce a free page after snapshot release")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	replaceNewestMetaRecord(t, path, func(record metaRecord) metaRecord {
+		record.maxPages = int(record.nextPage - firstTreePageID)
+		record.free = []PageID{firstTreePageID + PageID(record.maxPages)}
+		return record
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with persisted freelist entry beyond declared capacity")
+	}
+	if !errors.Is(err, ErrFreelist) {
+		t.Fatalf("OpenMmap freelist capacity error = %v, want ErrFreelist", err)
+	}
+	if !strings.Contains(err.Error(), "capacity") {
+		t.Fatalf("OpenMmap freelist capacity error = %v, want capacity detail", err)
+	}
+}
+
 func TestMmapTreeRejectsMetadataLengthThatDoesNotMatchReachableKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
