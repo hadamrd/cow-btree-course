@@ -246,6 +246,54 @@ func TestDeleteMergesUnderfullBranchWithRightSibling(t *testing.T) {
 	}
 }
 
+func TestDeleteRedistributesUnderfullBranchWhenMergeCannotFit(t *testing.T) {
+	tree := New(3)
+	seedBranchRedistributionAfterDeleteTree(tree)
+	snapshot := tree.Snapshot()
+
+	if got := tree.Stats().Height; got != 3 {
+		t.Fatalf("seeded tree height = %d, want 3", got)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check seeded tree before branch redistribution: %v", err)
+	}
+	old, deleted := tree.Delete("key-10")
+	if !deleted || string(old) != "value-10" {
+		t.Fatalf("Delete(key-10) = %q, %v; want value-10, true", old, deleted)
+	}
+	if got, ok := snapshot.Get("key-10"); !ok || string(got) != "value-10" {
+		t.Fatalf("snapshot Get(key-10) = %q, %v; want value-10, true", got, ok)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after branch redistribution: %v", err)
+	}
+
+	stats := tree.Stats()
+	if stats.Height != 3 {
+		t.Fatalf("height after branch redistribution = %d, want 3", stats.Height)
+	}
+	root := tree.pages[tree.root]
+	for _, child := range root.childIDs() {
+		branch := tree.pages[child]
+		if !branch.isBranch() {
+			t.Fatalf("root child %d is not a branch after redistribution", child)
+		}
+		if got := int(branch.slotCount()); got < minKeys(tree.degree) {
+			t.Fatalf("branch %d has %d keys after redistribution, want at least %d", child, got, minKeys(tree.degree))
+		}
+	}
+	wantKeys := append(sequentialKeys(10), sequentialKeys(16)[11:]...)
+	var gotKeys []string
+	tree.Range(func(key string, value []byte) bool {
+		gotKeys = append(gotKeys, key)
+		return true
+	})
+	if !reflect.DeepEqual(gotKeys, wantKeys) {
+		t.Fatalf("Range after branch redistribution = %v, want %v", gotKeys, wantKeys)
+	}
+	snapshot.Close()
+}
+
 func seedLeafRedistributionTree(tree *Tree) {
 	leftID := tree.allocPage()
 	rightID := tree.allocPage()
@@ -305,6 +353,40 @@ func seedBranchMergeAfterDeleteTree(tree *Tree) {
 	mustWriteBranchParts(root, []string{"key-06"}, []PageID{leftBranchID, rightBranchID})
 	tree.root = rootID
 	tree.length = 12
+	tree.revision = 1
+}
+
+func seedBranchRedistributionAfterDeleteTree(tree *Tree) {
+	leafIDs := make([]PageID, 0, 8)
+	for leafIndex := 0; leafIndex < 8; leafIndex++ {
+		id := tree.allocPage()
+		leaf := tree.newPage(id, flagLeaf)
+		tree.pages[id] = leaf
+		base := leafIndex * 2
+		tree.writeLeafEntries(leaf, []leafEntry{
+			{key: fmt.Sprintf("key-%02d", base), value: []byte(fmt.Sprintf("value-%02d", base))},
+			{key: fmt.Sprintf("key-%02d", base+1), value: []byte(fmt.Sprintf("value-%02d", base+1))},
+		})
+		if len(leafIDs) > 0 {
+			tree.pages[leafIDs[len(leafIDs)-1]].setNextLeaf(id)
+		}
+		leafIDs = append(leafIDs, id)
+	}
+
+	leftBranchID := tree.allocPage()
+	rightBranchID := tree.allocPage()
+	rootID := tree.allocPage()
+	leftBranch := tree.newPage(leftBranchID, flagBranch)
+	rightBranch := tree.newPage(rightBranchID, flagBranch)
+	root := tree.newPage(rootID, flagBranch)
+	tree.pages[leftBranchID] = leftBranch
+	tree.pages[rightBranchID] = rightBranch
+	tree.pages[rootID] = root
+	mustWriteBranchParts(leftBranch, []string{"key-02", "key-04", "key-06", "key-08"}, leafIDs[:5])
+	mustWriteBranchParts(rightBranch, []string{"key-12", "key-14"}, leafIDs[5:])
+	mustWriteBranchParts(root, []string{"key-10"}, []PageID{leftBranchID, rightBranchID})
+	tree.root = rootID
+	tree.length = 16
 	tree.revision = 1
 }
 

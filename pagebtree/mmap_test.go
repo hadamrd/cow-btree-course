@@ -336,6 +336,64 @@ func TestMmapTreePersistsBranchMergeAfterDelete(t *testing.T) {
 	}
 }
 
+func TestMmapTreePersistsBranchRedistributionAfterDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 3, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	seedBranchRedistributionAfterDeleteTree(tree)
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check seeded mmap tree before branch redistribution: %v", err)
+	}
+
+	if old, deleted := tree.Delete("key-10"); !deleted || string(old) != "value-10" {
+		t.Fatalf("Delete(key-10) = %q, %v; want value-10, true", old, deleted)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after branch redistribution: %v", err)
+	}
+	if got := tree.Stats().Height; got != 3 {
+		t.Fatalf("height after branch redistribution = %d, want 3", got)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("Check after reopen: %v", err)
+	}
+	root := reopened.pages[reopened.root]
+	for _, child := range root.childIDs() {
+		branch := reopened.pages[child]
+		if !branch.isBranch() {
+			t.Fatalf("reopened root child %d is not a branch", child)
+		}
+		if got := int(branch.slotCount()); got < minKeys(reopened.degree) {
+			t.Fatalf("reopened branch %d has %d keys, want at least %d", child, got, minKeys(reopened.degree))
+		}
+	}
+	if _, ok := reopened.Get("key-10"); ok {
+		t.Fatalf("reopened tree found deleted key-10")
+	}
+	wantKeys := append(sequentialKeys(10), sequentialKeys(16)[11:]...)
+	var gotKeys []string
+	reopened.Range(func(key string, value []byte) bool {
+		gotKeys = append(gotKeys, key)
+		return true
+	})
+	if !slices.Equal(gotKeys, wantKeys) {
+		t.Fatalf("reopened Range after branch redistribution = %v, want %v", gotKeys, wantKeys)
+	}
+}
+
 func TestMmapTreeRejectsUnderfullNonRootLeaf(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

@@ -6,9 +6,9 @@ import "slices"
 //
 // Like Put, Delete is copy-on-write: it copies the root and every page on the
 // search path before changing page bytes. It merges or redistributes underfull
-// leaf siblings, merges underfull branch siblings when their children fit in
-// one page, then rebuilds branch separators and collapses a one-child root. It
-// deliberately stops short of branch sibling borrow and redistribution.
+// leaf siblings, merges or redistributes underfull branch siblings, then
+// rebuilds branch separators and collapses a one-child root. It deliberately
+// stops short of branch sibling borrow and byte-balanced redistribution.
 func (t *Tree) Delete(key string) ([]byte, bool) {
 	if t.closed || t.readOnly || t.root == 0 {
 		return nil, false
@@ -156,6 +156,13 @@ func (t *Tree) mergeUnderfullBranch(children []PageID, index int) []PageID {
 				t.retirePage(children[index])
 				return append(children[:index], children[index+1:]...)
 			}
+			leftID := t.copyPage(children[index-1])
+			left = t.pages[leftID]
+			children[index-1] = leftID
+			split := len(mergedChildren) / 2
+			t.writeBranchChildren(left, mergedChildren[:split])
+			t.writeBranchChildren(child, mergedChildren[split:])
+			return children
 		}
 	}
 
@@ -168,6 +175,13 @@ func (t *Tree) mergeUnderfullBranch(children []PageID, index int) []PageID {
 				t.retirePage(children[index+1])
 				return append(children[:index+1], children[index+2:]...)
 			}
+			rightID := t.copyPage(children[index+1])
+			right = t.pages[rightID]
+			children[index+1] = rightID
+			split := len(mergedChildren) / 2
+			t.writeBranchChildren(child, mergedChildren[:split])
+			t.writeBranchChildren(right, mergedChildren[split:])
+			return children
 		}
 	}
 	return children
