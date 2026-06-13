@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"os"
+	"path/filepath"
 	"slices"
 	"unsafe"
 
@@ -51,6 +52,7 @@ type MmapOptions struct {
 
 type mmapArena struct {
 	file             *os.File
+	path             string
 	data             []byte
 	maxPages         int
 	locked           bool
@@ -59,6 +61,7 @@ type mmapArena struct {
 	dirtyPages       map[PageID]bool
 	syncObserver     func(string)
 	dataSyncObserver func(start, end PageID)
+	dirSyncObserver  func(path string)
 	adviceObserver   func(pattern MmapAccessPattern, start, end PageID)
 }
 
@@ -121,6 +124,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 
 	arena := &mmapArena{
 		file:       file,
+		path:       path,
 		data:       data,
 		maxPages:   maxPages,
 		locked:     true,
@@ -149,6 +153,10 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	}
 
 	if err := tree.Sync(); err != nil {
+		arena.close()
+		return nil, err
+	}
+	if err := arena.syncDirectory(); err != nil {
 		arena.close()
 		return nil, err
 	}
@@ -186,6 +194,7 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 
 	arena := &mmapArena{
 		file:     file,
+		path:     path,
 		data:     data,
 		maxPages: int(info.Size()/PageSize) - metaPageCount,
 		locked:   true,
@@ -252,6 +261,9 @@ func (t *Tree) remapMmap(newMaxPages int) error {
 
 	newSize := int64((newMaxPages + metaPageCount) * PageSize)
 	if err := t.arena.file.Truncate(newSize); err != nil {
+		return err
+	}
+	if err := t.arena.syncFileSize(); err != nil {
 		return err
 	}
 	if err := unix.Munmap(t.arena.data); err != nil {
@@ -353,6 +365,9 @@ func (t *Tree) shrinkMmap(newMaxPages int) error {
 	if err := t.arena.file.Truncate(newSize); err != nil {
 		return err
 	}
+	if err := t.arena.syncFileSize(); err != nil {
+		return err
+	}
 	if err := unix.Munmap(t.arena.data); err != nil {
 		return err
 	}
@@ -448,6 +463,32 @@ func (a *mmapArena) syncMetaPage(index int) error {
 		return err
 	}
 	return a.file.Sync()
+}
+
+func (a *mmapArena) syncFileSize() error {
+	if a == nil || a.readOnly {
+		return nil
+	}
+	if err := a.file.Sync(); err != nil {
+		return err
+	}
+	return a.syncDirectory()
+}
+
+func (a *mmapArena) syncDirectory() error {
+	if a == nil || a.path == "" {
+		return nil
+	}
+	dir := filepath.Dir(a.path)
+	if a.dirSyncObserver != nil {
+		a.dirSyncObserver(dir)
+	}
+	handle, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer handle.Close()
+	return handle.Sync()
 }
 
 func (a *mmapArena) msyncRange(start, end int) error {

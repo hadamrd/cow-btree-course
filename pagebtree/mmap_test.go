@@ -201,6 +201,33 @@ func TestMmapTreeGrowsMappingForOverflowPages(t *testing.T) {
 	}
 }
 
+func TestMmapGrowthSyncsDirectoryAfterTruncate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	var syncedDirs []string
+	tree.arena.dirSyncObserver = func(path string) {
+		syncedDirs = append(syncedDirs, path)
+	}
+
+	for i := 0; i < 80; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if len(syncedDirs) == 0 {
+		t.Fatalf("growth directory syncs = 0, want at least one sync after file growth")
+	}
+	for _, synced := range syncedDirs {
+		if synced != filepath.Dir(path) {
+			t.Fatalf("growth synced directory %q, want %q", synced, filepath.Dir(path))
+		}
+	}
+}
+
 func TestMmapTreePersistsLeafNextLinksAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -618,6 +645,10 @@ func TestMmapCompactTruncatesUnusedMappedCapacity(t *testing.T) {
 	}
 	beforeSize := fileSize(t, path)
 	beforeNext := tree.nextPage
+	var syncedDirs []string
+	tree.arena.dirSyncObserver = func(path string) {
+		syncedDirs = append(syncedDirs, path)
+	}
 
 	if err := tree.Compact(); err != nil {
 		t.Fatalf("Compact: %v", err)
@@ -637,6 +668,9 @@ func TestMmapCompactTruncatesUnusedMappedCapacity(t *testing.T) {
 	}
 	if afterSize != wantSize {
 		t.Fatalf("file size after Compact = %d, want %d", afterSize, wantSize)
+	}
+	if got, want := syncedDirs, []string{filepath.Dir(path)}; !slices.Equal(got, want) {
+		t.Fatalf("compact directory syncs = %v, want %v", got, want)
 	}
 }
 

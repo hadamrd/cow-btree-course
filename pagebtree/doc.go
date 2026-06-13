@@ -17,8 +17,10 @@
 // avoid even exact linked-leaf hints.
 // Mmap-backed trees track dirty copied pages so Sync can flush changed data
 // pages before publishing metadata, and they can grow the mapped file when
-// allocation reaches the current capacity. Compact can trim unused mapped
-// capacity and a suffix of already-free page ids when no snapshot is active.
+// allocation reaches the current capacity. File-size changes from growth and
+// compaction sync the data file and parent directory. Compact can trim unused
+// mapped capacity and a suffix of already-free page ids when no snapshot is
+// active.
 // Reopen validation checks metadata format, version, database page size,
 // persisted degree, and bounds against the mapped file and declared capacity,
 // page checksums, and slotted-page structure before decoding reachable cells,
