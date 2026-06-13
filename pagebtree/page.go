@@ -1,6 +1,10 @@
 package pagebtree
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"errors"
+	"hash/crc32"
+)
 
 // PageSize is the teaching target used in the docs. This package keeps page
 // contents in a fixed byte array so the code demonstrates the usual slotted
@@ -9,14 +13,17 @@ const PageSize = 4096
 
 type PageID uint64
 
+var ErrPageChecksum = errors.New("page checksum mismatch")
+
 const (
-	pageHeaderSize = 16
+	pageHeaderSize = 20
 	slotSize       = 8
 
 	headerFlagsOffset     = 0
 	headerSlotCountOffset = 2
 	headerFreeUpperOffset = 4
 	headerLeftmostOffset  = 8
+	headerChecksumOffset  = 16
 
 	flagLeaf   = uint16(0x01)
 	flagBranch = uint16(0x02)
@@ -44,6 +51,7 @@ func newPage(id PageID, flags uint16) *page {
 	p.setFlags(flags)
 	p.setSlotCount(0)
 	p.setFreeUpper(PageSize)
+	p.updateChecksum()
 	return p
 }
 
@@ -97,6 +105,25 @@ func (p *page) setLeftmostChild(id PageID) {
 	encodePageID(p.data[headerLeftmostOffset:headerLeftmostOffset+8], id)
 }
 
+func (p *page) checksum() uint32 {
+	return binary.LittleEndian.Uint32(p.data[headerChecksumOffset:])
+}
+
+func (p *page) updateChecksum() {
+	binary.LittleEndian.PutUint32(p.data[headerChecksumOffset:], p.computeChecksum())
+}
+
+func (p *page) validChecksum() bool {
+	return p.checksum() == p.computeChecksum()
+}
+
+func (p *page) computeChecksum() uint32 {
+	checksum := crc32.NewIEEE()
+	_, _ = checksum.Write(p.data[:headerChecksumOffset])
+	_, _ = checksum.Write(p.data[headerChecksumOffset+4 : PageSize])
+	return checksum.Sum32()
+}
+
 func slotBase(index int) int {
 	return pageHeaderSize + index*slotSize
 }
@@ -147,6 +174,7 @@ func (p *page) appendCell(key string, value []byte) bool {
 	})
 	p.setFreeUpper(cellOffset)
 	p.setSlotCount(uint16(slotIndex + 1))
+	p.updateChecksum()
 	return true
 }
 
@@ -155,6 +183,7 @@ func (p *page) reset(flags uint16) {
 	p.setFlags(flags)
 	p.setSlotCount(0)
 	p.setFreeUpper(PageSize)
+	p.updateChecksum()
 }
 
 func cloneBytes(value []byte) []byte {

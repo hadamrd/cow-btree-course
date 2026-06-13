@@ -233,7 +233,7 @@ func (t *Tree) loadMeta() error {
 		}
 		t.pages[id] = &page{id: id, data: data}
 	}
-	return nil
+	return t.validateReachablePages()
 }
 
 func (t *Tree) persistMeta() {
@@ -315,4 +315,36 @@ func metaChecksum(data []byte) uint32 {
 	_, _ = checksum.Write(data[:metaChecksumOff])
 	_, _ = checksum.Write(data[metaChecksumOff+4 : PageSize])
 	return checksum.Sum32()
+}
+
+func (t *Tree) validateReachablePages() error {
+	seen := map[PageID]bool{}
+	return t.validatePage(t.root, seen)
+}
+
+func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
+	if id == 0 || seen[id] {
+		return nil
+	}
+	seen[id] = true
+
+	p := t.pages[id]
+	if p == nil {
+		return fmt.Errorf("reachable page %d is missing", id)
+	}
+	if !p.validChecksum() {
+		return fmt.Errorf("%w: page %d", ErrPageChecksum, id)
+	}
+	if p.isLeaf() {
+		return nil
+	}
+	if !p.isBranch() {
+		return fmt.Errorf("page %d has invalid flags %x", id, p.flags())
+	}
+	for _, child := range p.childIDs() {
+		if err := t.validatePage(child, seen); err != nil {
+			return err
+		}
+	}
+	return nil
 }

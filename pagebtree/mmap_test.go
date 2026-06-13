@@ -221,6 +221,62 @@ func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsCorruptReachableDataPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	root := tree.Stats().Root
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	corruptPagePayload(t, path, root)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with corrupt reachable data page")
+	}
+	if !errors.Is(err, ErrPageChecksum) {
+		t.Fatalf("OpenMmap corrupt data page error = %v, want ErrPageChecksum", err)
+	}
+}
+
+func TestMmapTreeRejectsCorruptReachableChildPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	root := tree.pages[tree.root]
+	child := root.leftmostChild()
+	if child == 0 {
+		t.Fatalf("root has no leftmost child after many inserts")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	corruptPagePayload(t, path, child)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with corrupt reachable child page")
+	}
+	if !errors.Is(err, ErrPageChecksum) {
+		t.Fatalf("OpenMmap corrupt child error = %v, want ErrPageChecksum", err)
+	}
+}
+
 func corruptMetaPage(t *testing.T, path string, metaIndex int) {
 	t.Helper()
 
@@ -236,5 +292,23 @@ func corruptMetaPage(t *testing.T, path string, metaIndex int) {
 	}
 	if err := file.Sync(); err != nil {
 		t.Fatalf("Sync corrupt meta %d: %v", metaIndex, err)
+	}
+}
+
+func corruptPagePayload(t *testing.T, path string, id PageID) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile corrupt page %d: %v", id, err)
+	}
+	defer file.Close()
+
+	offset := int64(id)*PageSize + PageSize - 1
+	if _, err := file.WriteAt([]byte{0xff}, offset); err != nil {
+		t.Fatalf("WriteAt corrupt page %d: %v", id, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("Sync corrupt page %d: %v", id, err)
 	}
 }

@@ -100,6 +100,7 @@ func mustWriteLeafEntries(p *page, entries []leafEntry) {
 			panic("leaf page overflow")
 		}
 	}
+	p.updateChecksum()
 }
 
 func mustWriteBranchParts(p *page, keys []string, children []PageID) {
@@ -114,4 +115,5 @@ func mustWriteBranchParts(p *page, keys []string, children []PageID) {
 			panic("branch page overflow")
 		}
 	}
+	p.updateChecksum()
 }

@@ -48,6 +48,8 @@ offset = pageID * PageSize
 size   = PageSize
 ```
 
+Tree pages also carry CRC32 checksums in their slotted-page header. On reopen, `OpenMmap` walks the pages reachable from the chosen root and rejects corruption before serving reads.
+
 ## Why Mmap Helps
 
 With mmap, the operating system maps file pages into the process address space. Code can read and write page bytes through memory loads and stores, while the OS page cache handles bringing file pages in and flushing dirty pages out.
@@ -83,7 +85,7 @@ This chapter makes the project more serious, but it is still not a production da
 
 - freelist state is persisted in the metadata page, but only with a bounded educational encoding
 - writes call `msync`, but there is no complete crash-safe write-order protocol
-- metadata pages are checksummed, but data pages are not
+- metadata pages and reachable tree pages are checksummed, but there is no page-level repair
 - file locking is exclusive-writer only; there is no shared-reader lock table
 - there are no overflow pages for large records
 - search still decodes page entries into small Go slices for readability

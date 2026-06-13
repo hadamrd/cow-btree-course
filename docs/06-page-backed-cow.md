@@ -28,12 +28,12 @@ Each page uses the classic slotted-page shape:
 
 ```mermaid
 flowchart LR
-    H["header<br/>flags, slot count, freeUpper, leftmost child"] --> S["slot directory<br/>offset, keyLen, valueLen"]
+    H["header<br/>flags, slot count, freeUpper, leftmost child, checksum"] --> S["slot directory<br/>offset, keyLen, valueLen"]
     S --> F["free space"]
     C["cells<br/>key bytes + value bytes"] --> F
 ```
 
-The header and slots grow from the front of the page. Cells are copied from the end of the page backward. Leaf cells store key/value records. Branch cells store separator keys, and their value bytes encode the child page id to the right of that separator.
+The header and slots grow from the front of the page. Cells are copied from the end of the page backward. Leaf cells store key/value records. Branch cells store separator keys, and their value bytes encode the child page id to the right of that separator. The header also stores a CRC32 checksum over the rest of the page bytes.
 
 ## Put and Get
 
