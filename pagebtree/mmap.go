@@ -44,12 +44,14 @@ type MmapOptions struct {
 }
 
 type mmapArena struct {
-	file         *os.File
-	data         []byte
-	maxPages     int
-	locked       bool
-	readOnly     bool
-	syncObserver func(string)
+	file             *os.File
+	data             []byte
+	maxPages         int
+	locked           bool
+	readOnly         bool
+	dirtyPages       map[PageID]bool
+	syncObserver     func(string)
+	dataSyncObserver func(start, end PageID)
 }
 
 type MmapAccessPattern int
@@ -108,10 +110,11 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	}
 
 	arena := &mmapArena{
-		file:     file,
-		data:     data,
-		maxPages: maxPages,
-		locked:   true,
+		file:       file,
+		data:       data,
+		maxPages:   maxPages,
+		locked:     true,
+		dirtyPages: map[PageID]bool{},
 	}
 	if err := arena.advise(options.AccessPattern); err != nil {
 		arena.close()
@@ -207,20 +210,67 @@ func (a *mmapArena) pageBytes(id PageID) ([]byte, error) {
 }
 
 func (a *mmapArena) syncDataPages(nextPage PageID) error {
-	if a == nil || a.readOnly || nextPage <= firstTreePageID {
+	if a == nil || a.readOnly || nextPage <= firstTreePageID || len(a.dirtyPages) == 0 {
 		return nil
 	}
-	end := int(nextPage) * PageSize
-	if end > len(a.data) {
-		return fmt.Errorf("next page %d exceeds mmap size %d", nextPage, len(a.data))
+	ids := make([]PageID, 0, len(a.dirtyPages))
+	for id := range a.dirtyPages {
+		if id >= firstTreePageID && id < nextPage {
+			ids = append(ids, id)
+		}
 	}
+	if len(ids) == 0 {
+		clear(a.dirtyPages)
+		return nil
+	}
+	slices.Sort(ids)
+
 	if a.syncObserver != nil {
 		a.syncObserver("data")
 	}
-	if err := a.msyncRange(int(firstTreePageID)*PageSize, end); err != nil {
+
+	for startIndex := 0; startIndex < len(ids); {
+		start := ids[startIndex]
+		end := start + 1
+		nextIndex := startIndex + 1
+		for nextIndex < len(ids) && ids[nextIndex] == end {
+			end++
+			nextIndex++
+		}
+		if err := a.syncDataPageRange(start, end); err != nil {
+			return err
+		}
+		startIndex = nextIndex
+	}
+	if err := a.file.Sync(); err != nil {
 		return err
 	}
-	return a.file.Sync()
+	clear(a.dirtyPages)
+	return nil
+}
+
+func (a *mmapArena) syncDataPageRange(startPage, endPage PageID) error {
+	if startPage < firstTreePageID || endPage < startPage {
+		return fmt.Errorf("invalid data page sync range [%d,%d)", startPage, endPage)
+	}
+	endByte := int(endPage) * PageSize
+	if endByte > len(a.data) {
+		return fmt.Errorf("data page sync range [%d,%d) exceeds mmap size %d", startPage, endPage, len(a.data))
+	}
+	if a.dataSyncObserver != nil {
+		a.dataSyncObserver(startPage, endPage)
+	}
+	return a.msyncRange(int(startPage)*PageSize, endByte)
+}
+
+func (a *mmapArena) markDirtyPage(id PageID) {
+	if a == nil || a.readOnly {
+		return
+	}
+	if a.dirtyPages == nil {
+		a.dirtyPages = map[PageID]bool{}
+	}
+	a.dirtyPages[id] = true
 }
 
 func (a *mmapArena) syncMetaPage(index int) error {

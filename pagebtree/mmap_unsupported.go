@@ -35,6 +35,8 @@ func (a *mmapArena) pageBytes(id PageID) ([]byte, error) {
 	return nil, errors.New("mmap page storage is only available on Unix-like platforms")
 }
 
+func (a *mmapArena) markDirtyPage(id PageID) {}
+
 func (t *Tree) syncMmap() error {
 	return nil
 }

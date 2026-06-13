@@ -58,7 +58,7 @@ Start with [`docs/index.md`](docs/index.md), then read in order:
 
 ## Deliberate Scope
 
-This is a teaching implementation, not a production storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, leaf key/value records, overflow pages, educational deletion, reader-pinned retired pages, a reusable freelist, and an optional mmap-backed page file with explicit `Sync`, `madvise` access-pattern hints, and `mincore` cache residency stats. Full deletion rebalancing, write-ahead logging, and durability hardening are left as guided exercises.
+This is a teaching implementation, not a production storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, leaf key/value records, overflow pages, educational deletion, reader-pinned retired pages, a reusable freelist, and an optional mmap-backed page file with dirty-page `Sync`, `madvise` access-pattern hints, and `mincore` cache residency stats. Full deletion rebalancing, write-ahead logging, and durability hardening are left as guided exercises.
 
 ## License
 

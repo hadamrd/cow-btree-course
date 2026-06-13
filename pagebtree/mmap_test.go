@@ -150,6 +150,38 @@ func TestMmapSyncFlushesDataPagesBeforePublishingMeta(t *testing.T) {
 	}
 }
 
+func TestMmapSyncFlushesOnlyDirtyDataPages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	tree.Put("alpha", []byte("one"))
+	var flushed []PageID
+	tree.arena.dataSyncObserver = func(start, end PageID) {
+		for id := start; id < end; id++ {
+			flushed = append(flushed, id)
+		}
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync first write: %v", err)
+	}
+	if !slices.Equal(flushed, []PageID{tree.root}) {
+		t.Fatalf("flushed data pages after first write = %v, want only root page %d", flushed, tree.root)
+	}
+
+	flushed = nil
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync without writes: %v", err)
+	}
+	if len(flushed) != 0 {
+		t.Fatalf("flushed data pages without writes = %v, want none", flushed)
+	}
+}
+
 func TestMmapAccessAdviceKeepsReadsWorking(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

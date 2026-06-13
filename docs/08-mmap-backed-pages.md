@@ -37,7 +37,7 @@ Pages `0` and `1` are alternating metadata pages:
 - reusable page IDs
 - CRC32 checksum
 
-`Sync` is the explicit durability boundary. It flushes tree and overflow page bytes first, then writes the metadata page selected by `revision % 2`, then flushes that metadata page. `Close` calls `Sync` for writable trees. On reopen, the tree validates both metadata checksums, then tries candidate records from newest to oldest. A candidate is usable only if the root and every reachable tree or overflow page also pass validation. If the newest metadata page is torn, corrupted, or points at a torn root page, the older valid page can still point to a previous root.
+`Sync` is the explicit durability boundary. Writable mmap pages are marked dirty when copy-on-write allocates or reuses their page IDs. `Sync` flushes those dirty tree and overflow page bytes first, then writes the metadata page selected by `revision % 2`, then flushes that metadata page. `Close` calls `Sync` for writable trees. On reopen, the tree validates both metadata checksums, then tries candidate records from newest to oldest. A candidate is usable only if the root and every reachable tree or overflow page also pass validation. If the newest metadata page is torn, corrupted, or points at a torn root page, the older valid page can still point to a previous root.
 
 The reusable page IDs are stored directly in the metadata page for now. That keeps the lesson compact and makes close/reopen freelist behavior visible. A larger database would usually store freelist records in normal pages and have metadata point to the freelist root.
 
@@ -50,7 +50,7 @@ size   = PageSize
 
 Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from each metadata candidate root, including overflow chains referenced by leaf values, and rejects corruption before serving reads. If an older metadata candidate is still reachable and valid, it can be used as the recovery point.
 
-The database page size is fixed at 4096 bytes for the lesson. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them.
+The database page size is fixed at 4096 bytes for the lesson. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them. Dirty logical pages are coalesced into contiguous ranges before `msync`, so a small write does not force the whole mapped file to flush.
 
 ## Why Mmap Helps
 
@@ -127,7 +127,7 @@ This keeps the teaching engine honest: the mmap implementation has one writer at
 This chapter makes the project more serious, but it is still not a production database:
 
 - freelist state is persisted in the metadata page, but only with a bounded educational encoding
-- `Sync` flushes data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
+- `Sync` flushes dirty data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed, but there is no page-level repair
 - read-only mmap handles use shared file locks, but there is no reader table that allows a concurrent writer to recycle pages around external readers
 - overflow pages are linear chains, not a compact extent/tree structure

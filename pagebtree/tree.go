@@ -136,6 +136,7 @@ func (t *Tree) newPage(id PageID, flags uint16) *page {
 	}
 	p := &page{id: id, data: data}
 	p.reset(flags)
+	t.arena.markDirtyPage(id)
 	return p
 }
 
