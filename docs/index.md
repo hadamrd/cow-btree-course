@@ -29,6 +29,7 @@ flowchart TD
     F --> G["07. Freelist and readers"]
     G --> H["08. Mmap-backed pages"]
     H --> I["09. OpenLDAP/OpenDJ research"]
+    I --> J["10. Respectability gap audit"]
 ```
 
 ## Repository Layout
@@ -58,6 +59,7 @@ pagebtree/
   integrity.go  Public open-tree invariant checks
   mmap_readers.go Reader-table stats shape
   mmap_warm.go  Exact reachable-page mmap warm-up advice
+  cursor.go     Snapshot-backed seek/next cursor
   kernel_profile.go OpenLDAP-style mmap kernel research profile
   reader_table_unix.go LMDB-style mmap reader table and writer mutex sidecars
   mmap.go       Mmap-backed page arena, metadata recovery, dirty sync, compact, tunable advice, cache stats, and locks
@@ -81,4 +83,5 @@ docs/           Research chapters
 8. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
 9. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, reader-table recycling, kernel page-cache behavior, Linux file-advice coordination, derived branch-routing cache behavior, exact reachable-page warm-up, tunable exact-page prefetch advice, and residency stats.
 10. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
-11. Change the degree in the demos and observe how `Stats` changes.
+11. Read [`10-respectability-gap-audit.md`](10-respectability-gap-audit.md) for the blunt gap list and next research slices.
+12. Change the degree in the demos and observe how `Stats` changes.

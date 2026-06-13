@@ -62,3 +62,21 @@ func ExampleTree_RangeBetween() {
 	// bravo bravo-value
 	// charlie charlie-value
 }
+
+func ExampleTree_Cursor() {
+	tree := pagebtree.New(2)
+	for _, key := range []string{"alpha", "bravo", "charlie", "delta"} {
+		tree.Put(key, []byte(key+"-value"))
+	}
+
+	cursor := tree.Cursor()
+	defer cursor.Close()
+
+	for ok := cursor.Seek("bravo"); ok; ok = cursor.Next() {
+		fmt.Println(cursor.Key(), string(cursor.Value()))
+	}
+	// Output:
+	// bravo bravo-value
+	// charlie charlie-value
+	// delta delta-value
+}

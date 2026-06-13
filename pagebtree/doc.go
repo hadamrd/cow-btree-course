@@ -13,11 +13,14 @@
 // The profile also reports that derived cache's capacity and live counters, so
 // experiments can distinguish kernel page-cache behavior from Go-side routing
 // reuse.
-// Put and Delete publish new roots through copy-on-write, while snapshots keep
-// reading their older roots. Leaf sibling-link repair is deferred while a
-// snapshot is active, because rewriting those headers in place would mutate
-// bytes visible to the old root. Current-tree Range, RangeFrom, and
-// RangeBetween use those leaf links when no active reader can make them stale,
+// Put and Delete publish new roots through copy-on-write, while snapshots and
+// cursors keep reading their older roots. A cursor opened from Tree owns a
+// snapshot and must be closed to release the reader pin; a cursor opened from
+// Snapshot borrows that snapshot and does not register another reader. Leaf
+// sibling-link repair is deferred while a snapshot or cursor is active, because
+// rewriting those headers in place would mutate bytes visible to the old root.
+// Current-tree Range, RangeFrom, and RangeBetween use those leaf links when no
+// active reader can make them stale,
 // and range scans compare slot keys before reading child ids or values so
 // bounded scans do not decode cells outside the requested key range. Check
 // validates the currently open tree's reachable pages, checksums, layout,

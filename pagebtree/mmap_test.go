@@ -50,6 +50,46 @@ func TestMmapTreePersistsKeysAcrossCloseAndReopen(t *testing.T) {
 	}
 }
 
+func TestMmapCursorPinsRetiredPages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	tree.Put("alpha", []byte("one"))
+	cursor := tree.Cursor()
+	if !cursor.Seek("alpha") {
+		t.Fatalf("cursor Seek(alpha) = false, want true")
+	}
+
+	tree.Put("alpha", []byte("two"))
+	stats := tree.Stats()
+	if stats.ActiveReaders != 1 {
+		t.Fatalf("ActiveReaders with cursor = %d, want 1", stats.ActiveReaders)
+	}
+	if stats.RetiredPages == 0 {
+		t.Fatalf("RetiredPages with cursor after rewrite = 0, want cursor-pinned retired pages")
+	}
+	if stats.FreePages != 0 {
+		t.Fatalf("FreePages with cursor after rewrite = %d, want no recycling while cursor is open", stats.FreePages)
+	}
+	if got := string(cursor.Value()); got != "one" {
+		t.Fatalf("cursor value after rewrite = %q, want snapshot value one", got)
+	}
+
+	cursor.Close()
+	tree.Put("beta", []byte("two"))
+	if got := tree.Stats().ActiveReaders; got != 0 {
+		t.Fatalf("ActiveReaders after cursor close = %d, want 0", got)
+	}
+	if got := tree.Stats().FreePages; got == 0 {
+		t.Fatalf("FreePages after cursor close and next write = 0, want reclaimed pages available")
+	}
+}
+
 func TestMDBKernelProfileDescribesOpenLDAPStyleMmapCore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
