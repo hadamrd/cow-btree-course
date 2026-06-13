@@ -84,6 +84,56 @@ func TestDeleteRemovesKeyAndKeepsSnapshotVersion(t *testing.T) {
 	snapshot.Close()
 }
 
+func TestDeleteMergesUnderfullLeafAndKeepsSnapshotVersion(t *testing.T) {
+	tree := New(3)
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	snapshot := tree.Snapshot()
+
+	beforeLeaves := make([]PageID, 0)
+	collectLeavesInOrder(tree.pages, tree.root, &beforeLeaves)
+	if len(beforeLeaves) < 3 {
+		t.Fatalf("leaf count before delete = %d, want at least 3 leaves", len(beforeLeaves))
+	}
+
+	if old, deleted := tree.Delete("key-03"); !deleted || string(old) != "value-03" {
+		t.Fatalf("Delete(key-03) = %q, %v; want value-03, true", old, deleted)
+	}
+	if old, deleted := tree.Delete("key-04"); !deleted || string(old) != "value-04" {
+		t.Fatalf("Delete(key-04) = %q, %v; want value-04, true", old, deleted)
+	}
+
+	afterLeaves := make([]PageID, 0)
+	collectLeavesInOrder(tree.pages, tree.root, &afterLeaves)
+	if len(afterLeaves) != len(beforeLeaves)-1 {
+		t.Fatalf("leaf count after merge = %d, want %d; leaves before %v after %v", len(afterLeaves), len(beforeLeaves)-1, beforeLeaves, afterLeaves)
+	}
+	if _, ok := tree.Get("key-03"); ok {
+		t.Fatalf("current tree still contains deleted key-03")
+	}
+	if got, ok := snapshot.Get("key-03"); !ok || string(got) != "value-03" {
+		t.Fatalf("snapshot Get(key-03) = %q, %v; want value-03, true", got, ok)
+	}
+	if got, ok := snapshot.Get("key-04"); !ok || string(got) != "value-04" {
+		t.Fatalf("snapshot Get(key-04) = %q, %v; want value-04, true", got, ok)
+	}
+	wantKeys := append(sequentialKeys(3), sequentialKeys(12)[5:]...)
+	var gotKeys []string
+	tree.Range(func(key string, value []byte) bool {
+		gotKeys = append(gotKeys, key)
+		return true
+	})
+	if !reflect.DeepEqual(gotKeys, wantKeys) {
+		t.Fatalf("Range after leaf merge = %v, want %v", gotKeys, wantKeys)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after leaf merge: %v", err)
+	}
+
+	snapshot.Close()
+}
+
 func TestDeleteMissingKeyDoesNotPublishNewRevision(t *testing.T) {
 	tree := New(2)
 	tree.Put("alpha", []byte("one"))

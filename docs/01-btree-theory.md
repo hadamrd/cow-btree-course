@@ -59,4 +59,4 @@ The median moves into the parent. Keys smaller than the median stay in the left 
 
 ## What This Project Leaves Out
 
-The first logical `btree` package focuses on insertion and snapshots. The page-backed package later adds an educational copy-on-write delete path, but full production deletion still has more cases: borrow, merge, and byte-balanced redistribution are separate topics once the core mechanics are clear.
+The first logical `btree` package focuses on insertion and snapshots. The page-backed package later adds an educational copy-on-write delete path, including simple leaf merge when a sibling can absorb the underfull leaf. Full production deletion still has more cases: branch-level borrow, merge, and byte-balanced redistribution are separate topics once the core mechanics are clear.

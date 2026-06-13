@@ -177,6 +177,64 @@ func TestMmapTreePersistsDeleteAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMmapTreePersistsLeafMergeAfterDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 3, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	beforeLeaves := make([]PageID, 0)
+	collectLeavesInOrder(tree.pages, tree.root, &beforeLeaves)
+	if len(beforeLeaves) < 3 {
+		t.Fatalf("leaf count before delete = %d, want at least 3 leaves", len(beforeLeaves))
+	}
+
+	for _, key := range []string{"key-03", "key-04"} {
+		if old, deleted := tree.Delete(key); !deleted || string(old) != "value-"+key[4:] {
+			t.Fatalf("Delete(%s) = %q, %v; want matching old value, true", key, old, deleted)
+		}
+	}
+	afterLeaves := make([]PageID, 0)
+	collectLeavesInOrder(tree.pages, tree.root, &afterLeaves)
+	if len(afterLeaves) != len(beforeLeaves)-1 {
+		t.Fatalf("leaf count after merge = %d, want %d; leaves before %v after %v", len(afterLeaves), len(beforeLeaves)-1, beforeLeaves, afterLeaves)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after leaf merge: %v", err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("Check after reopen: %v", err)
+	}
+	for _, key := range []string{"key-03", "key-04"} {
+		if _, ok := reopened.Get(key); ok {
+			t.Fatalf("reopened tree found deleted %s", key)
+		}
+	}
+	wantKeys := append(sequentialKeys(3), sequentialKeys(12)[5:]...)
+	var gotKeys []string
+	reopened.Range(func(key string, value []byte) bool {
+		gotKeys = append(gotKeys, key)
+		return true
+	})
+	if !slices.Equal(gotKeys, wantKeys) {
+		t.Fatalf("reopened Range after leaf merge = %v, want %v", gotKeys, wantKeys)
+	}
+}
+
 func TestMmapCloseWaitsForActiveSnapshots(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

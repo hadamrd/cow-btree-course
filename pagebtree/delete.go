@@ -5,9 +5,10 @@ import "slices"
 // Delete removes key from the current root version.
 //
 // Like Put, Delete is copy-on-write: it copies the root and every page on the
-// search path before changing page bytes. It deliberately does not implement
-// full B+tree sibling redistribution yet, but it does remove empty children,
-// rebuild branch separators, and collapse a one-child root.
+// search path before changing page bytes. It merges underfull leaf siblings
+// when one sibling can absorb the other, then rebuilds branch separators and
+// collapses a one-child root. It deliberately stops short of full branch-level
+// sibling redistribution.
 func (t *Tree) Delete(key string) ([]byte, bool) {
 	if t.closed || t.readOnly || t.root == 0 {
 		return nil, false
@@ -65,9 +66,56 @@ func (t *Tree) deleteFromBranch(p *page, key string) bool {
 	if t.subtreeEmpty(copiedChildID) {
 		t.retirePage(copiedChildID)
 		children = append(children[:index], children[index+1:]...)
+	} else {
+		children = t.mergeUnderfullLeaf(children, index)
 	}
 	t.writeBranchChildren(p, children)
 	return true
+}
+
+func (t *Tree) mergeUnderfullLeaf(children []PageID, index int) []PageID {
+	if len(children) <= 1 || index < 0 || index >= len(children) {
+		return children
+	}
+	child := t.pages[children[index]]
+	if child == nil || !child.isLeaf() || int(child.slotCount()) >= minKeys(t.degree) {
+		return children
+	}
+
+	if index > 0 {
+		left := t.pages[children[index-1]]
+		if left != nil && left.isLeaf() {
+			merged := append(left.leafEntries(), child.leafEntries()...)
+			if len(merged) <= maxKeys(t.degree) {
+				leftID := t.copyPage(children[index-1])
+				left = t.pages[leftID]
+				children[index-1] = leftID
+				t.writeLeafEntries(left, merged)
+				left.setNextLeaf(child.nextLeaf())
+				t.retirePage(children[index])
+				children = append(children[:index], children[index+1:]...)
+				return children
+			}
+		}
+	}
+
+	if index+1 < len(children) {
+		right := t.pages[children[index+1]]
+		if right != nil && right.isLeaf() {
+			merged := append(child.leafEntries(), right.leafEntries()...)
+			if len(merged) <= maxKeys(t.degree) {
+				rightID := t.copyPage(children[index+1])
+				right = t.pages[rightID]
+				children[index+1] = rightID
+				t.writeLeafEntries(child, merged)
+				child.setNextLeaf(right.nextLeaf())
+				t.retirePage(rightID)
+				children = append(children[:index+1], children[index+2:]...)
+				return children
+			}
+		}
+	}
+	return children
 }
 
 func (t *Tree) writeBranchChildren(p *page, children []PageID) {
@@ -146,4 +194,8 @@ func (t *Tree) firstKey(id PageID) (string, bool) {
 		id = p.leftmostChild()
 	}
 	return "", false
+}
+
+func minKeys(degree int) int {
+	return degree - 1
 }

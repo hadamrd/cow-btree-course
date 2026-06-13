@@ -195,9 +195,9 @@ This chapter makes the project more serious, but it is still not a production da
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed and validated for format, page size, degree, bounds, layout, routing, freelist safety, and key-count consistency, but there is no page-level repair
 - read-only mmap handles use shared file locks, but there is no reader table that allows a concurrent writer to recycle pages around external readers
 - overflow pages are linear chains, not a compact extent/tree structure
-- byte-full leaf rewrites can spill cells to overflow pages, but sibling redistribution is still key-count based
+- byte-full leaf rewrites can spill cells to overflow pages, and key-underfull leaves can merge when a sibling can absorb them, but sibling redistribution is still key-count based
 - `Get`, branch range traversal, and bounded leaf scans search slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries
-- `Delete` removes records and collapses simple roots, but does not yet implement full sibling borrow/merge rebalancing
+- `Delete` removes records, merges absorbable underfull leaves, and collapses simple roots, but does not yet implement full branch-level sibling borrow/merge rebalancing
 - `Compact` can truncate unused capacity and trailing free pages, but there is no full vacuum that moves live pages, rewrites page IDs, or punches sparse holes for interior free pages
 
 The goal is to make mmap concrete without burying the learner under every database-engine concern at once.

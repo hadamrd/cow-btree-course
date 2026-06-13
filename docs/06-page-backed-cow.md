@@ -101,11 +101,12 @@ sequenceDiagram
     Delete->>Pages: copy root before removing key
     Delete->>Pages: copy child on search path
     Delete->>Pages: remove leaf cell and retire overflow chain
+    Delete->>Pages: merge absorbable underfull leaves
     Delete->>Pages: remove empty child and rebuild separators
     Delete->>Meta: publish new root page id
 ```
 
-The implementation is intentionally conservative. It removes empty children and collapses a one-child root, but it does not yet borrow from siblings or merge underfull non-root pages to maintain a strict minimum fill factor.
+The implementation is intentionally conservative. It now merges an underfull leaf with a leaf sibling when the combined records fit in one page. That demonstrates the important deletion shape change while keeping the code readable. It still does not implement branch-level borrow/merge or byte-balanced sibling redistribution.
 
 ## Walking Branch Pages
 
@@ -195,8 +196,8 @@ The page package models page identity, root publication, and slotted cell storag
 - The implementation rewrites a copied page from decoded entries during insertion and deletion; it does not do in-place cell compaction.
 - `Get`, branch range traversal, and bounded leaf scans search slots directly, but insertion still decodes page contents before rewriting the copied page.
 - Current-tree `Range`, `RangeFrom`, and `RangeBetween` use next-leaf links only when no active reader can make them stale; snapshot ranges still use a recursive tree walk.
-- Byte-full leaf rewrites spill inline cells to overflow pages, but the tree still does not do byte-balanced redistribution between sibling leaves.
-- `Delete` removes records, retires overflow pages, removes empty children, and collapses a one-child root; it does not yet implement full sibling borrow/merge rebalancing.
+- Byte-full leaf rewrites spill inline cells to overflow pages, and leaf delete can merge key-underfull siblings, but the tree still does not do byte-balanced redistribution between sibling leaves.
+- `Delete` removes records, retires overflow pages, merges absorbable underfull leaves, removes empty children, and collapses a one-child root; it does not yet implement full branch-level sibling borrow/merge rebalancing.
 - Branch pages contain separator keys and child page ids; values live in leaves.
 - Disk persistence is introduced in the mmap chapter.
 
