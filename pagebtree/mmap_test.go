@@ -394,6 +394,45 @@ func TestMmapTreePersistsBranchRedistributionAfterDelete(t *testing.T) {
 	}
 }
 
+func TestMmapTreePersistsBranchBorrowBeforeDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 3, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	seedBranchRedistributionAfterDeleteTree(tree)
+	if got := branchChildCountsBelowRoot(tree); !slices.Equal(got, []int{5, 3}) {
+		t.Fatalf("seeded mmap branch child counts = %v, want [5 3]", got)
+	}
+
+	if old, deleted := tree.Delete("key-10"); !deleted || string(old) != "value-10" {
+		t.Fatalf("Delete(key-10) = %q, %v; want value-10, true", old, deleted)
+	}
+	if got := branchChildCountsBelowRoot(tree); !slices.Equal(got, []int{4, 3}) {
+		t.Fatalf("mmap branch child counts after borrow = %v, want [4 3]", got)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after branch borrow: %v", err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	if got := branchChildCountsBelowRoot(reopened); !slices.Equal(got, []int{4, 3}) {
+		t.Fatalf("reopened branch child counts after borrow = %v, want [4 3]", got)
+	}
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("Check after reopen: %v", err)
+	}
+}
+
 func TestMmapTreeRejectsUnderfullNonRootLeaf(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

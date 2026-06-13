@@ -29,7 +29,7 @@ The reverse of in-order traversal is:
 
 ## Exercise 3: Implement Full Delete Rebalancing
 
-The page-backed package includes an educational delete path: it copies the descent path, removes the leaf record, retires overflow pages, merges an underfull leaf when a sibling can absorb it, redistributes leaf records when a sibling can lend, merges or redistributes underfull branches, removes empty children, rebuilds separators, and collapses a one-child root. A full B-tree delete still has more cases than insertion. A robust production implementation should keep every node on the descent path above the minimum key count before recursing.
+The page-backed package includes an educational delete path: it copies the descent path, removes the leaf record, retires overflow pages, merges an underfull leaf when a sibling can absorb it, redistributes leaf records when a sibling can lend, borrows before descending into minimum-fill branches when a sibling can lend, merges or redistributes underfull branches, removes empty children, rebuilds separators, and collapses a one-child root. A full B-tree delete still has more cases than insertion. A robust production implementation should keep every node on the descent path above the minimum key count before recursing.
 
 ```mermaid
 flowchart TD
@@ -43,7 +43,7 @@ flowchart TD
     G -- no --> I["merge siblings"]
 ```
 
-Keep the copy-on-write rule: clone any node before changing it. Then extend the page-backed implementation with branch-level sibling borrow and byte-balanced redistribution.
+Keep the copy-on-write rule: clone any node before changing it. Then extend the page-backed implementation with byte-balanced redistribution.
 
 ## Exercise 4: Convert `btree` to a B+tree
 

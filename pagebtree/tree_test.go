@@ -294,6 +294,25 @@ func TestDeleteRedistributesUnderfullBranchWhenMergeCannotFit(t *testing.T) {
 	snapshot.Close()
 }
 
+func TestDeleteBorrowsBranchChildBeforeDescent(t *testing.T) {
+	tree := New(3)
+	seedBranchRedistributionAfterDeleteTree(tree)
+
+	if got := branchChildCountsBelowRoot(tree); !reflect.DeepEqual(got, []int{5, 3}) {
+		t.Fatalf("seeded branch child counts = %v, want [5 3]", got)
+	}
+	if old, deleted := tree.Delete("key-10"); !deleted || string(old) != "value-10" {
+		t.Fatalf("Delete(key-10) = %q, %v; want value-10, true", old, deleted)
+	}
+
+	if got := branchChildCountsBelowRoot(tree); !reflect.DeepEqual(got, []int{4, 3}) {
+		t.Fatalf("branch child counts after pre-descent borrow = %v, want [4 3]", got)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after pre-descent branch borrow: %v", err)
+	}
+}
+
 func seedLeafRedistributionTree(tree *Tree) {
 	leftID := tree.allocPage()
 	rightID := tree.allocPage()
@@ -388,6 +407,15 @@ func seedBranchRedistributionAfterDeleteTree(tree *Tree) {
 	tree.root = rootID
 	tree.length = 16
 	tree.revision = 1
+}
+
+func branchChildCountsBelowRoot(tree *Tree) []int {
+	root := tree.pages[tree.root]
+	counts := make([]int, 0, len(root.childIDs()))
+	for _, id := range root.childIDs() {
+		counts = append(counts, len(tree.pages[id].childIDs()))
+	}
+	return counts
 }
 
 func seedUnderfullBranchTree(tree *Tree) {

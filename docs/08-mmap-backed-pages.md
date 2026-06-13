@@ -197,7 +197,7 @@ This chapter makes the project more serious, but it is still not a production da
 - overflow pages are linear chains, not a compact extent/tree structure
 - byte-full leaf rewrites can spill cells to overflow pages, and key-underfull leaves and branches can merge or redistribute with siblings, but sibling redistribution is still key-count based rather than byte-balanced
 - `Get`, branch range traversal, and bounded leaf scans search slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries
-- `Delete` removes records, merges or redistributes underfull leaves and branches, and collapses simple roots, but does not yet implement branch sibling borrow
+- `Delete` removes records, borrows before descending into minimum-fill branches, merges or redistributes underfull leaves and branches, and collapses simple roots
 - `Compact` can truncate unused capacity and trailing free pages, but there is no full vacuum that moves live pages, rewrites page IDs, or punches sparse holes for interior free pages
 
 The goal is to make mmap concrete without burying the learner under every database-engine concern at once.

@@ -6,9 +6,10 @@ import "slices"
 //
 // Like Put, Delete is copy-on-write: it copies the root and every page on the
 // search path before changing page bytes. It merges or redistributes underfull
-// leaf siblings, merges or redistributes underfull branch siblings, then
+// leaf siblings, borrows before descending into minimum-fill branches when a
+// sibling can lend, merges or redistributes underfull branch siblings, then
 // rebuilds branch separators and collapses a one-child root. It deliberately
-// stops short of branch sibling borrow and byte-balanced redistribution.
+// stops short of byte-balanced redistribution.
 func (t *Tree) Delete(key string) ([]byte, bool) {
 	if t.closed || t.readOnly || t.root == 0 {
 		return nil, false
@@ -57,8 +58,11 @@ func (t *Tree) deleteFromLeaf(p *page, key string) bool {
 func (t *Tree) deleteFromBranch(p *page, key string) bool {
 	keys, children := p.branchParts()
 	index := childIndex(keys, key)
-	copiedChildID := t.copyPage(children[index])
-	children[index] = copiedChildID
+	children, copiedChildID := t.borrowBranchChildBeforeDescent(children, index)
+	if copiedChildID == 0 {
+		copiedChildID = t.copyPage(children[index])
+		children[index] = copiedChildID
+	}
 
 	if !t.deleteFrom(copiedChildID, key) {
 		return false
@@ -72,6 +76,56 @@ func (t *Tree) deleteFromBranch(p *page, key string) bool {
 	}
 	t.writeBranchChildren(p, children)
 	return true
+}
+
+func (t *Tree) borrowBranchChildBeforeDescent(children []PageID, index int) ([]PageID, PageID) {
+	if index < 0 || index >= len(children) {
+		return children, 0
+	}
+	child := t.pages[children[index]]
+	if child == nil || !child.isBranch() || int(child.slotCount()) > minKeys(t.degree) {
+		return children, 0
+	}
+
+	if index > 0 {
+		left := t.pages[children[index-1]]
+		if left != nil && left.isBranch() && int(left.slotCount()) > minKeys(t.degree) {
+			leftID := t.copyPage(children[index-1])
+			childID := t.copyPage(children[index])
+			left = t.pages[leftID]
+			child = t.pages[childID]
+			children[index-1] = leftID
+			children[index] = childID
+
+			leftChildren := left.childIDs()
+			childChildren := child.childIDs()
+			borrowed := leftChildren[len(leftChildren)-1]
+			t.writeBranchChildren(left, leftChildren[:len(leftChildren)-1])
+			t.writeBranchChildren(child, append([]PageID{borrowed}, childChildren...))
+			return children, childID
+		}
+	}
+
+	if index+1 < len(children) {
+		right := t.pages[children[index+1]]
+		if right != nil && right.isBranch() && int(right.slotCount()) > minKeys(t.degree) {
+			childID := t.copyPage(children[index])
+			rightID := t.copyPage(children[index+1])
+			child = t.pages[childID]
+			right = t.pages[rightID]
+			children[index] = childID
+			children[index+1] = rightID
+
+			childChildren := child.childIDs()
+			rightChildren := right.childIDs()
+			borrowed := rightChildren[0]
+			t.writeBranchChildren(child, append(childChildren, borrowed))
+			t.writeBranchChildren(right, rightChildren[1:])
+			return children, childID
+		}
+	}
+
+	return children, 0
 }
 
 func (t *Tree) mergeUnderfullLeaf(children []PageID, index int) []PageID {
