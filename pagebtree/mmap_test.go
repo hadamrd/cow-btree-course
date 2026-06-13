@@ -3281,6 +3281,69 @@ func TestMmapTreePrefersNewestCheckedMetadataError(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsReclaimPageWithCorruptFreeUpper(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	for i := 0; i < 24; i++ {
+		writer.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close initial writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	writer, err = OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		reader.Close()
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+	for i := 0; i < 12; i++ {
+		if _, ok := writer.Delete(fmt.Sprintf("key-%02d", i)); !ok {
+			writer.Close()
+			reader.Close()
+			t.Fatalf("Delete key-%02d = false, want true", i)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		reader.Close()
+		t.Fatalf("Close writer with external reader: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close reader: %v", err)
+	}
+
+	record := keepOnlyNewestMetaPage(t, path)
+	if record.freeRoot == 0 {
+		t.Fatalf("newest metadata has no reclaim root")
+	}
+	mutatePage(t, path, record.freeRoot, func(p *page) {
+		if p.flags() != flagReclaim {
+			t.Fatalf("page %d flags = %x, want reclaim", record.freeRoot, p.flags())
+		}
+		p.setFreeUpper(PageSize - 1)
+		p.updateChecksum()
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with corrupt reclaim page freeUpper")
+	}
+	if !errors.Is(err, ErrPageLayout) {
+		t.Fatalf("OpenMmap reclaim freeUpper error = %v, want ErrPageLayout", err)
+	}
+	if !strings.Contains(err.Error(), "freeUpper") {
+		t.Fatalf("OpenMmap reclaim freeUpper error = %v, want freeUpper detail", err)
+	}
+}
+
 func TestMmapReadOnlyPinsReaderTableBeforeLoadingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

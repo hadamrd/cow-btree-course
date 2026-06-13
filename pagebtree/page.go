@@ -225,6 +225,9 @@ func (p *page) validateSlottedLayout() error {
 }
 
 func (p *page) validateOverflowLayout() error {
+	if err := p.validateFixedPayloadLayout("overflow"); err != nil {
+		return err
+	}
 	if p.overflowPayloadLen() > overflowPayloadSize {
 		return fmt.Errorf("%w: overflow page %d payload length %d exceeds capacity", ErrPageLayout, p.id, p.overflowPayloadLen())
 	}
@@ -232,6 +235,9 @@ func (p *page) validateOverflowLayout() error {
 }
 
 func (p *page) validateFreelistLayout() error {
+	if err := p.validateFixedPayloadLayout("freelist"); err != nil {
+		return err
+	}
 	if p.freelistCount() > freelistPageCapacity {
 		return fmt.Errorf("%w: freelist page %d count %d exceeds capacity", ErrPageLayout, p.id, p.freelistCount())
 	}
@@ -239,8 +245,18 @@ func (p *page) validateFreelistLayout() error {
 }
 
 func (p *page) validateReclaimLayout() error {
+	if err := p.validateFixedPayloadLayout("reclaim"); err != nil {
+		return err
+	}
 	if p.reclaimCount() > reclaimPageCapacity {
 		return fmt.Errorf("%w: reclaim page %d count %d exceeds capacity", ErrPageLayout, p.id, p.reclaimCount())
+	}
+	return nil
+}
+
+func (p *page) validateFixedPayloadLayout(kind string) error {
+	if p.freeUpper() != PageSize {
+		return fmt.Errorf("%w: %s page %d freeUpper %d does not match %d", ErrPageLayout, kind, p.id, p.freeUpper(), PageSize)
 	}
 	return nil
 }
