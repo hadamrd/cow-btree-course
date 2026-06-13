@@ -2369,6 +2369,60 @@ func TestMmapTreeRejectsBranchSeparatorThatDoesNotMatchRightChild(t *testing.T) 
 	}
 }
 
+func TestMmapTreeRejectsLeafKeyOutsideBranchBounds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var leafID PageID
+	var slotIndex int
+	var replacement string
+	for _, p := range tree.pages {
+		if !p.isBranch() || p.slotCount() == 0 {
+			continue
+		}
+		child := p.leftmostChild()
+		leaf := tree.pages[child]
+		if leaf == nil || !leaf.isLeaf() || leaf.slotCount() == 0 {
+			continue
+		}
+		slotIndex = int(leaf.slotCount()) - 1
+		current := leaf.readCellKey(slotIndex)
+		replacement = p.readCellKey(0)
+		if len(current) == len(replacement) && current < replacement {
+			leafID = child
+			break
+		}
+	}
+	if leafID == 0 {
+		t.Fatalf("did not find a leaf child with a parent upper bound")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	corruptLeafSlotKey(t, path, leafID, slotIndex, replacement)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with leaf key outside branch bounds")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("OpenMmap leaf bound error = %v, want ErrTreeInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "outside branch bounds") {
+		t.Fatalf("OpenMmap leaf bound error = %v, want bounds detail", err)
+	}
+}
+
 func corruptMetaPage(t *testing.T, path string, metaIndex int) {
 	t.Helper()
 
@@ -2569,6 +2623,19 @@ func corruptBranchLeftmostChild(t *testing.T, path string, id, child PageID) {
 }
 
 func corruptBranchSlotKey(t *testing.T, path string, id PageID, slotIndex int, key string) {
+	t.Helper()
+
+	mutatePage(t, path, id, func(p *page) {
+		slot := p.readSlot(slotIndex)
+		if len(key) != int(slot.keyLen) {
+			t.Fatalf("replacement key length = %d, want %d", len(key), slot.keyLen)
+		}
+		copy(p.data[int(slot.offset):int(slot.offset)+int(slot.keyLen)], key)
+		p.updateChecksum()
+	})
+}
+
+func corruptLeafSlotKey(t *testing.T, path string, id PageID, slotIndex int, key string) {
 	t.Helper()
 
 	mutatePage(t, path, id, func(p *page) {

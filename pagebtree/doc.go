@@ -30,7 +30,8 @@
 // page checksums, and slotted-page structure before decoding reachable cells,
 // and it rejects root/branch reachability that points at non-tree pages,
 // missing children, duplicate children, or separators that no longer match
-// right-child first keys.
+// right-child first keys. Reachable child subtrees must also keep every key
+// inside the half-open key interval assigned by their parent branch.
 // Persisted leaf next pointers must match the branch-order leaf sequence.
 // Overflow references must name a first page. Overflow chains must exist, must
 // not loop, must contain only overflow pages, and must contain exactly the

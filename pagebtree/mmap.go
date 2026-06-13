@@ -1058,6 +1058,10 @@ func (t *Tree) countReachableKeys(id PageID, seen map[PageID]bool) int {
 }
 
 func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
+	return t.validatePageBounds(id, seen, "", false, "", false)
+}
+
+func (t *Tree) validatePageBounds(id PageID, seen map[PageID]bool, lower string, hasLower bool, upper string, hasUpper bool) error {
 	if id == 0 {
 		return nil
 	}
@@ -1077,8 +1081,17 @@ func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
 		return err
 	}
 	if p.isLeaf() {
-		for _, entry := range p.leafEntries() {
-			if err := t.validateOverflowValue(entry.value, entry.slotFlags, seen); err != nil {
+		for i := 0; i < int(p.slotCount()); i++ {
+			key := p.readCellKey(i)
+			if hasLower && compareStrings(key, lower) < 0 {
+				return fmt.Errorf("%w: leaf page %d key %q outside branch bounds", ErrTreeInvariant, id, key)
+			}
+			if hasUpper && compareStrings(key, upper) >= 0 {
+				return fmt.Errorf("%w: leaf page %d key %q outside branch bounds", ErrTreeInvariant, id, key)
+			}
+			slot := p.readSlot(i)
+			value := p.readCellValue(i)
+			if err := t.validateOverflowValue(value, slot.flags, seen); err != nil {
 				return err
 			}
 		}
@@ -1092,7 +1105,18 @@ func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
 		if child == 0 {
 			return fmt.Errorf("%w: branch page %d child %d is zero", ErrTreeInvariant, id, index)
 		}
-		if err := t.validatePage(child, seen); err != nil {
+		childLower, childHasLower := lower, hasLower
+		childUpper, childHasUpper := upper, hasUpper
+		if index > 0 {
+			childLower, childHasLower = p.readCellKey(index-1), true
+		}
+		if index < len(children)-1 {
+			childUpper, childHasUpper = p.readCellKey(index), true
+		}
+		if childHasLower && childHasUpper && compareStrings(childLower, childUpper) >= 0 {
+			return fmt.Errorf("%w: branch page %d child %d has empty key bounds", ErrTreeInvariant, id, index)
+		}
+		if err := t.validatePageBounds(child, seen, childLower, childHasLower, childUpper, childHasUpper); err != nil {
 			return err
 		}
 		if index == 0 {
