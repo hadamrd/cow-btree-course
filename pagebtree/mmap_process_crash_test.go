@@ -3,6 +3,7 @@
 package pagebtree
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,6 +87,39 @@ func TestMmapGrowthProcessCrashMatrixClassifiesOldRoot(t *testing.T) {
 	}
 }
 
+func TestMmapCompactShrinkProcessCrashMatrixClassifiesCompactedRoot(t *testing.T) {
+	if os.Getenv(mmapCrashChildEnv) == "1" {
+		runMmapCompactShrinkProcessCrashChild(t)
+		return
+	}
+
+	tests := []struct {
+		name  string
+		fault mmapFaultPoint
+	}{
+		{
+			name:  "before file size sync",
+			fault: mmapFaultBeforeFileSizeSync,
+		},
+		{
+			name:  "before directory sync",
+			fault: mmapFaultBeforeDirectorySync,
+		},
+		{
+			name:  "before replacement remap",
+			fault: mmapFaultBeforeRemap,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "course.db")
+			runMmapCompactShrinkProcessCrash(t, path, tt.fault)
+			assertMmapCompactShrinkProcessCrashRecovered(t, path, tt.fault)
+		})
+	}
+}
+
 func runMmapSyncProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
 	t.Helper()
 
@@ -96,6 +130,12 @@ func runMmapGrowthProcessCrash(t *testing.T, path string, fault mmapFaultPoint) 
 	t.Helper()
 
 	runMmapProcessCrashChild(t, path, fault, "^TestMmapGrowthProcessCrashMatrixClassifiesOldRoot$", "growth")
+}
+
+func runMmapCompactShrinkProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
+	t.Helper()
+
+	runMmapProcessCrashChild(t, path, fault, "^TestMmapCompactShrinkProcessCrashMatrixClassifiesCompactedRoot$", "compact-shrink")
 }
 
 func runMmapProcessCrashChild(t *testing.T, path string, fault mmapFaultPoint, testPattern string, label string) {
@@ -179,6 +219,33 @@ func runMmapGrowthProcessCrashChild(t *testing.T) {
 	t.Fatalf("growth child remap completed without hitting fault %s", fault)
 }
 
+func runMmapCompactShrinkProcessCrashChild(t *testing.T) {
+	t.Helper()
+
+	path := os.Getenv(mmapCrashPathEnv)
+	fault := mmapFaultPoint(os.Getenv(mmapCrashFaultEnv))
+	if path == "" || fault == "" {
+		t.Fatalf("missing compact-shrink crash child env path=%q fault=%q", path, fault)
+	}
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap compact-shrink child create: %v", err)
+	}
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			os.Exit(mmapCrashChildExitCode)
+		}
+		return nil
+	}
+	if err := tree.Compact(); err != nil {
+		t.Fatalf("compact-shrink child Compact before process crash: %v", err)
+	}
+	t.Fatalf("compact-shrink child Compact completed without hitting fault %s", fault)
+}
+
 func assertMmapProcessCrashRecoveryRoot(t *testing.T, path string, fault mmapFaultPoint, wantNewRoot bool) {
 	t.Helper()
 
@@ -203,5 +270,28 @@ func assertMmapProcessCrashRecoveryRoot(t *testing.T, path string, fault mmapFau
 	}
 	if ok {
 		t.Fatalf("Get(bravo) after process crash at %s = %q, true; want old root without bravo", fault, got)
+	}
+}
+
+func assertMmapCompactShrinkProcessCrashRecovered(t *testing.T, path string, fault mmapFaultPoint) {
+	t.Helper()
+
+	recovered, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after compact-shrink process crash at %s: %v", fault, err)
+	}
+	defer recovered.Close()
+
+	if err := recovered.Check(); err != nil {
+		t.Fatalf("Check after compact-shrink process crash at %s: %v", fault, err)
+	}
+	for i := 0; i < 12; i++ {
+		key := fmt.Sprintf("key-%02d", i)
+		if got, ok := recovered.Get(key); !ok || string(got) != fmt.Sprintf("value-%02d", i) {
+			t.Fatalf("Get(%s) after compact-shrink process crash at %s = %q, %v", key, fault, got, ok)
+		}
+	}
+	if got, want := fileSize(t, path), int64(recovered.nextPage)*PageSize; got != want {
+		t.Fatalf("file size after compact-shrink process crash at %s = %d, want compacted %d", fault, got, want)
 	}
 }
