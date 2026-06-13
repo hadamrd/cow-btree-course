@@ -31,7 +31,7 @@ var readOnlyBeforeLoadMeta func(*Tree)
 
 const (
 	metaMagic        = "COWBTREE"
-	metaVersion      = uint64(2)
+	metaVersion      = uint64(3)
 	minMetaVersion   = uint64(1)
 	metaMagicOffset  = 0
 	metaVersionOff   = 8
@@ -841,6 +841,7 @@ func unlockFile(file *os.File) error {
 }
 
 type metaRecord struct {
+	version       uint64
 	root          PageID
 	nextPage      PageID
 	length        int
@@ -848,6 +849,7 @@ type metaRecord struct {
 	degree        int
 	maxPages      int
 	free          []PageID
+	retired       []retiredPage
 	freeCount     int
 	freeRoot      PageID
 	freelistPages []PageID
@@ -923,7 +925,12 @@ func (t *Tree) loadMeta() error {
 			lastErr = overlapErr
 			continue
 		}
-		if err := t.validateFreelist(record.free, record.maxPages, owned); err != nil {
+		reclaimable := clonePageSet(owned)
+		if err := t.validateFreelist(record.free, record.maxPages, reclaimable); err != nil {
+			lastErr = err
+			continue
+		}
+		if err := t.validateRetiredPages(record.retired, record.maxPages, reclaimable); err != nil {
 			lastErr = err
 			continue
 		}
@@ -936,6 +943,7 @@ func (t *Tree) loadMeta() error {
 			continue
 		}
 		t.free = append([]PageID(nil), record.free...)
+		t.retired = append([]retiredPage(nil), record.retired...)
 		t.metaFreelistRoot = record.freeRoot
 		t.metaFreelistPages = append([]PageID(nil), freelistPages...)
 		return nil
@@ -953,6 +961,7 @@ func (t *Tree) applyMetaRecord(record metaRecord) {
 	t.revision = record.revision
 	t.degree = normalizeDegree(record.degree)
 	t.free = nil
+	t.retired = nil
 	t.metaFreelistRoot = 0
 	t.metaFreelistPages = nil
 	if t.nextPage < firstTreePageID {
@@ -971,8 +980,12 @@ func clonePageSet(values map[PageID]bool) map[PageID]bool {
 func (t *Tree) resolveMetaFreelist(record *metaRecord) ([]PageID, error) {
 	if record.freeRoot == 0 {
 		record.free = append([]PageID(nil), record.free...)
+		record.retired = append([]retiredPage(nil), record.retired...)
 		record.freelistPages = nil
 		return nil, nil
+	}
+	if record.version >= 3 {
+		return t.resolveMetaReclaim(record)
 	}
 	maxOwnedPage := firstTreePageID + PageID(record.maxPages)
 	free := make([]PageID, 0, record.freeCount)
@@ -1016,6 +1029,57 @@ func (t *Tree) resolveMetaFreelist(record *metaRecord) ([]PageID, error) {
 	return freelistPages, nil
 }
 
+func (t *Tree) resolveMetaReclaim(record *metaRecord) ([]PageID, error) {
+	maxOwnedPage := firstTreePageID + PageID(record.maxPages)
+	free := make([]PageID, 0, record.freeCount)
+	retired := make([]retiredPage, 0)
+	reclaimPages := make([]PageID, 0)
+	seen := map[PageID]bool{}
+	total := 0
+	for id := record.freeRoot; id != 0; {
+		if id < firstTreePageID || id >= record.nextPage || id >= maxOwnedPage {
+			return nil, fmt.Errorf("%w: reclaim metadata page %d outside allocated range", ErrFreelist, id)
+		}
+		if seen[id] {
+			return nil, fmt.Errorf("%w: reclaim metadata chain loops through page %d", ErrFreelist, id)
+		}
+		seen[id] = true
+		p := t.pages[id]
+		if p == nil {
+			return nil, fmt.Errorf("%w: reclaim metadata page %d is missing", ErrFreelist, id)
+		}
+		if !p.validChecksum() {
+			return nil, fmt.Errorf("%w: page %d", ErrPageChecksum, id)
+		}
+		if err := p.validateLayout(); err != nil {
+			return nil, err
+		}
+		if p.flags() != flagReclaim {
+			return nil, fmt.Errorf("%w: page %d in reclaim metadata chain is not a reclaim page", ErrFreelist, id)
+		}
+		reclaimPages = append(reclaimPages, id)
+		for _, entry := range p.reclaimRecords() {
+			if total >= record.freeCount {
+				return nil, fmt.Errorf("%w: reclaim metadata chain has more than %d entries", ErrFreelist, record.freeCount)
+			}
+			total++
+			if entry.revision == 0 {
+				free = append(free, entry.id)
+				continue
+			}
+			retired = append(retired, retiredPage{id: entry.id, revision: entry.revision})
+		}
+		id = p.reclaimNext()
+	}
+	if total != record.freeCount {
+		return nil, fmt.Errorf("%w: reclaim metadata chain has %d entries, want %d", ErrFreelist, total, record.freeCount)
+	}
+	record.free = free
+	record.retired = retired
+	record.freelistPages = reclaimPages
+	return reclaimPages, nil
+}
+
 func compareUint64Desc(left, right uint64) int {
 	switch {
 	case left > right:
@@ -1033,7 +1097,12 @@ func (t *Tree) persistMeta() error {
 	}
 
 	index := int(t.revision % metaPageCount)
+	version := uint64(2)
+	if len(t.retired) > 0 {
+		version = metaVersion
+	}
 	return writeMetaPage(t.arena.data[index*PageSize:(index+1)*PageSize], metaRecord{
+		version:  version,
 		root:     t.root,
 		nextPage: t.nextPage,
 		length:   t.length,
@@ -1041,6 +1110,7 @@ func (t *Tree) persistMeta() error {
 		degree:   t.degree,
 		maxPages: t.arena.maxPages,
 		free:     t.free,
+		retired:  t.retired,
 		freeRoot: t.metaFreelistRoot,
 	})
 }
@@ -1081,6 +1151,44 @@ func (t *Tree) prepareMetaFreelistPages() (func(), error) {
 		}
 	}
 
+	if len(t.retired) == 0 {
+		return t.prepareMetaFreePages(addedPages, restore)
+	}
+
+	records := reclaimRecordsFor(t.free, t.retired)
+	pageCount := divideRoundUp(len(records), reclaimPageCapacity)
+	ids := make([]PageID, pageCount)
+	for i := range ids {
+		id := t.nextPage
+		if err := t.growMmapForPage(id); err != nil {
+			restore()
+			return func() {}, err
+		}
+		t.nextPage++
+		p := t.newPage(id, flagReclaim)
+		t.pages[id] = p
+		addedPages[id] = p
+		ids[i] = id
+	}
+	for i, id := range ids {
+		next := PageID(0)
+		if i+1 < len(ids) {
+			next = ids[i+1]
+		}
+		start := i * reclaimPageCapacity
+		end := start + reclaimPageCapacity
+		if end > len(records) {
+			end = len(records)
+		}
+		writeReclaimPage(t.pages[id], next, records[start:end])
+		t.arena.markDirtyPage(id)
+	}
+	t.metaFreelistRoot = ids[0]
+	t.metaFreelistPages = ids
+	return restore, nil
+}
+
+func (t *Tree) prepareMetaFreePages(addedPages map[PageID]*page, restore func()) (func(), error) {
 	if len(t.free) <= maxMetaFreePages {
 		t.metaFreelistRoot = 0
 		t.metaFreelistPages = nil
@@ -1119,6 +1227,17 @@ func (t *Tree) prepareMetaFreelistPages() (func(), error) {
 	return restore, nil
 }
 
+func reclaimRecordsFor(free []PageID, retired []retiredPage) []reclaimRecord {
+	records := make([]reclaimRecord, 0, len(free)+len(retired))
+	for _, id := range free {
+		records = append(records, reclaimRecord{id: id})
+	}
+	for _, retired := range retired {
+		records = append(records, reclaimRecord{id: retired.id, revision: retired.revision})
+	}
+	return records
+}
+
 func (t *Tree) reclaimObsoleteMetaFreelistPages() {
 	if t.arena == nil {
 		return
@@ -1140,11 +1259,20 @@ func (t *Tree) reclaimObsoleteMetaFreelistPages() {
 		freeSet[id] = true
 	}
 	for id, p := range t.pages {
-		if id < firstTreePageID || p == nil || p.flags() != flagFreelist || referenced[id] || freeSet[id] {
+		if id < firstTreePageID || p == nil || !isMetadataReclaimPage(p) || referenced[id] || freeSet[id] {
 			continue
 		}
 		t.free = append(t.free, id)
 		freeSet[id] = true
+	}
+}
+
+func isMetadataReclaimPage(p *page) bool {
+	switch p.flags() {
+	case flagFreelist, flagReclaim:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1157,10 +1285,17 @@ func (t *Tree) collectFreelistChainLenient(root PageID, out map[PageID]bool) {
 		seen[id] = true
 		out[id] = true
 		p := t.pages[id]
-		if p == nil || p.flags() != flagFreelist || !p.validChecksum() || p.validateLayout() != nil {
+		if p == nil || !p.validChecksum() || p.validateLayout() != nil {
 			return
 		}
-		id = p.freelistNext()
+		switch p.flags() {
+		case flagFreelist:
+			id = p.freelistNext()
+		case flagReclaim:
+			id = p.reclaimNext()
+		default:
+			return
+		}
 	}
 }
 
@@ -1253,19 +1388,26 @@ func readMetaPageChecked(data []byte) (metaRecord, bool, error) {
 	}
 	free := []PageID(nil)
 	freeRoot := PageID(0)
-	if freeCount <= maxMetaFreePages {
+	rootField := PageID(binary.LittleEndian.Uint64(data[metaFreeListOff:]))
+	if version >= 3 {
+		if freeCount > 0 && rootField == 0 {
+			return metaRecord{}, false, fmt.Errorf("%w: metadata reclaim list has zero root", ErrMetaInvariant)
+		}
+		freeRoot = rootField
+	} else if freeCount <= maxMetaFreePages {
 		free = make([]PageID, 0, freeCount)
 		for i := 0; i < freeCount; i++ {
 			offset := metaFreeListOff + i*8
 			free = append(free, PageID(binary.LittleEndian.Uint64(data[offset:])))
 		}
 	} else {
-		freeRoot = PageID(binary.LittleEndian.Uint64(data[metaFreeListOff:]))
+		freeRoot = rootField
 		if freeRoot == 0 {
-			return metaRecord{}, false, fmt.Errorf("%w: metadata large freelist has zero root", ErrMetaInvariant)
+			return metaRecord{}, false, fmt.Errorf("%w: metadata reclaim list has zero root", ErrMetaInvariant)
 		}
 	}
 	return metaRecord{
+		version:   version,
 		root:      PageID(binary.LittleEndian.Uint64(data[metaRootOff:])),
 		nextPage:  PageID(binary.LittleEndian.Uint64(data[metaNextPageOff:])),
 		length:    int(binary.LittleEndian.Uint64(data[metaLengthOff:])),
@@ -1288,13 +1430,30 @@ func isZeroPage(data []byte) bool {
 }
 
 func writeMetaPage(data []byte, record metaRecord) error {
-	if len(record.free) > maxMetaFreePages && record.freeRoot == 0 {
-		return fmt.Errorf("%w: metadata free count %d exceeds %d", ErrMetaInvariant, len(record.free), maxMetaFreePages)
+	version := record.version
+	if version == 0 {
+		version = metaVersion
+	}
+	if version < 3 && len(record.retired) > 0 {
+		return fmt.Errorf("%w: metadata version %d cannot encode retired pages", ErrMetaInvariant, version)
+	}
+	reclaimCount := len(record.free) + len(record.retired)
+	if version < 3 && record.freeRoot == 0 && len(record.retired) == 0 {
+		reclaimCount = len(record.free)
+	}
+	if version >= 3 && record.freeRoot == 0 && reclaimCount > 0 {
+		return fmt.Errorf("%w: metadata reclaim count %d needs reclaim root", ErrMetaInvariant, reclaimCount)
+	}
+	if record.freeRoot == 0 && reclaimCount > maxMetaFreePages {
+		return fmt.Errorf("%w: metadata reclaim count %d exceeds inline capacity %d", ErrMetaInvariant, reclaimCount, maxMetaFreePages)
+	}
+	if record.freeRoot != 0 && reclaimCount == 0 {
+		return fmt.Errorf("%w: metadata reclaim root without records", ErrMetaInvariant)
 	}
 
 	clear(data)
 	copy(data[metaMagicOffset:], metaMagic)
-	binary.LittleEndian.PutUint64(data[metaVersionOff:], metaVersion)
+	binary.LittleEndian.PutUint64(data[metaVersionOff:], version)
 	binary.LittleEndian.PutUint64(data[metaPageSizeOff:], PageSize)
 	binary.LittleEndian.PutUint64(data[metaRootOff:], uint64(record.root))
 	binary.LittleEndian.PutUint64(data[metaNextPageOff:], uint64(record.nextPage))
@@ -1302,8 +1461,8 @@ func writeMetaPage(data []byte, record metaRecord) error {
 	binary.LittleEndian.PutUint64(data[metaRevisionOff:], record.revision)
 	binary.LittleEndian.PutUint64(data[metaDegreeOff:], uint64(record.degree))
 	binary.LittleEndian.PutUint64(data[metaMaxPagesOff:], uint64(record.maxPages))
-	binary.LittleEndian.PutUint64(data[metaFreeCountOff:], uint64(len(record.free)))
-	if len(record.free) > maxMetaFreePages {
+	binary.LittleEndian.PutUint64(data[metaFreeCountOff:], uint64(reclaimCount))
+	if record.freeRoot != 0 {
 		binary.LittleEndian.PutUint64(data[metaFreeListOff:], uint64(record.freeRoot))
 	} else {
 		for i, id := range record.free {
@@ -1339,6 +1498,33 @@ func (t *Tree) validateFreelist(free []PageID, maxPages int, reachable map[PageI
 			return fmt.Errorf("%w: page %d appears more than once", ErrFreelist, id)
 		}
 		seenFree[id] = true
+		reachable[id] = true
+	}
+	return nil
+}
+
+func (t *Tree) validateRetiredPages(retired []retiredPage, maxPages int, claimed map[PageID]bool) error {
+	seenRetired := map[PageID]bool{}
+	maxReusablePage := firstTreePageID + PageID(maxPages)
+	for _, retired := range retired {
+		id := retired.id
+		if retired.revision == 0 {
+			return fmt.Errorf("%w: retired page %d has zero revision", ErrFreelist, id)
+		}
+		if id >= maxReusablePage {
+			return fmt.Errorf("%w: retired page %d beyond metadata capacity %d", ErrFreelist, id, maxPages)
+		}
+		if id < firstTreePageID || id >= t.nextPage {
+			return fmt.Errorf("%w: retired page %d outside reusable range [%d,%d)", ErrFreelist, id, firstTreePageID, t.nextPage)
+		}
+		if claimed[id] {
+			return fmt.Errorf("%w: retired page %d overlaps reachable or reusable page", ErrFreelist, id)
+		}
+		if seenRetired[id] {
+			return fmt.Errorf("%w: retired page %d appears more than once", ErrFreelist, id)
+		}
+		seenRetired[id] = true
+		claimed[id] = true
 	}
 	return nil
 }

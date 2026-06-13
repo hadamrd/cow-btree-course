@@ -284,11 +284,6 @@ func (t *Tree) Close() error {
 	}
 	if t.arena != nil && !t.readOnly {
 		t.reclaimRetiredPages()
-		if len(t.retired) > 0 {
-			if _, hasReader := t.oldestReaderRevision(); hasReader {
-				return ErrActiveReaders
-			}
-		}
 	}
 	if !t.readOnly {
 		if err := t.Sync(); err != nil {

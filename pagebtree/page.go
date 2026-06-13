@@ -36,6 +36,7 @@ const (
 	flagBranch   = uint16(0x02)
 	flagOverflow = uint16(0x04)
 	flagFreelist = uint16(0x08)
+	flagReclaim  = uint16(0x10)
 )
 
 type slot struct {
@@ -164,6 +165,8 @@ func (p *page) validateLayout() error {
 		return p.validateOverflowLayout()
 	case flagFreelist:
 		return p.validateFreelistLayout()
+	case flagReclaim:
+		return p.validateReclaimLayout()
 	default:
 		return fmt.Errorf("%w: page %d has invalid flags %x", ErrPageLayout, p.id, p.flags())
 	}
@@ -231,6 +234,13 @@ func (p *page) validateOverflowLayout() error {
 func (p *page) validateFreelistLayout() error {
 	if p.freelistCount() > freelistPageCapacity {
 		return fmt.Errorf("%w: freelist page %d count %d exceeds capacity", ErrPageLayout, p.id, p.freelistCount())
+	}
+	return nil
+}
+
+func (p *page) validateReclaimLayout() error {
+	if p.reclaimCount() > reclaimPageCapacity {
+		return fmt.Errorf("%w: reclaim page %d count %d exceeds capacity", ErrPageLayout, p.id, p.reclaimCount())
 	}
 	return nil
 }

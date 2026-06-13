@@ -54,8 +54,11 @@
 // leaf-key count, plus persisted freelist IDs that exceed metadata capacity,
 // are out of range, duplicated, or still reachable. Small freelists are stored
 // inline in metadata; larger freelists spill to checked freelist pages that are
-// synced before metadata points at them. Old freelist-page generations become
-// reusable only after neither checked metadata page still names their chain.
+// synced before metadata points at them. When external readers pin retired pages,
+// version-3 metadata stores free and pending-retired reclaim records in checked
+// reclaim pages, preserving the retirement revision across writer close/reopen.
+// Old freelist/reclaim-page generations become reusable only after neither
+// checked metadata page still names their chain.
 // OpenMmap uses a sidecar writer mutex so only one writer can publish at a time.
 // OpenMmapReadOnly opens mmap files with a shared read lock, claims a
 // provisional revision-0 reader-table slot before metadata recovery, updates the
@@ -66,15 +69,15 @@
 // stale reader-table slots, and CleanStaleMmapReaders clears slots owned by dead
 // processes. Existing malformed reader-table sidecars return ErrReaderTable
 // instead of being reset, because resetting them could forget active reader
-// watermarks. Writable mmap handles refuse Close with ErrActiveReaders while
-// external reader-table slots still pin retired pages, because the lab does not
-// yet persist pending-retired page IDs by retirement revision. Mmap-backed trees
-// default to random-access kernel advice, and expose Advise so callers can pass
-// random, sequential, will-need, or normal-policy access-pattern hints to the
-// mmap mapping and, on Linux, the backing file's readahead policy without adding
-// a second Go heap page cache. WarmMmapTree follows the current root and
-// overflow references, then asks the kernel to prefetch only those reachable
-// page ranges.
+// watermarks. Writable mmap handles can close while external reader-table slots
+// still pin retired pages because those pending retired records are published in
+// metadata; Close still returns ErrActiveReaders while in-process snapshots are
+// active because they hold slices into the mapping. Mmap-backed trees default to
+// random-access kernel advice, and expose Advise so callers can pass random,
+// sequential, will-need, or normal-policy access-pattern hints to the mmap
+// mapping and, on Linux, the backing file's readahead policy without adding a
+// second Go heap page cache. WarmMmapTree follows the current root and overflow
+// references, then asks the kernel to prefetch only those reachable page ranges.
 // DropMmapCache syncs writable mmap trees before asking the kernel to evict
 // clean mapped tree pages with MADV_DONTNEED and Linux file-level DONTNEED
 // advice. MmapCacheStats uses mincore on Unix to show how many mapped OS pages

@@ -49,6 +49,26 @@ func (t *Tree) validateReusablePages(reachable map[PageID]bool) error {
 		}
 		seenFree[id] = true
 	}
+	seenRetired := map[PageID]bool{}
+	for _, retired := range t.retired {
+		id := retired.id
+		if retired.revision == 0 {
+			return fmt.Errorf("%w: retired page %d has zero revision", ErrFreelist, id)
+		}
+		if id == 0 || id >= t.nextPage {
+			return fmt.Errorf("%w: retired page %d outside reusable range [1,%d)", ErrFreelist, id, t.nextPage)
+		}
+		if reachable[id] {
+			return fmt.Errorf("%w: retired page %d is still reachable", ErrFreelist, id)
+		}
+		if seenFree[id] {
+			return fmt.Errorf("%w: retired page %d also appears free", ErrFreelist, id)
+		}
+		if seenRetired[id] {
+			return fmt.Errorf("%w: retired page %d appears more than once", ErrFreelist, id)
+		}
+		seenRetired[id] = true
+	}
 	return nil
 }
 
