@@ -49,6 +49,7 @@ pagebtree/
   snapshot.go   Read-only historical root page ids
   freelist.go   Reader-pinned retired pages and reusable page IDs
   freelist_pages.go Checked freelist pages for large persisted reusable lists
+  integrity.go  Public open-tree invariant checks
   mmap_warm.go  Exact reachable-page mmap warm-up advice
   mmap.go       Mmap-backed page arena, metadata recovery, dirty sync, compact, tunable advice, cache stats, and file locks
 

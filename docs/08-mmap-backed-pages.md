@@ -127,6 +127,14 @@ The package also exposes `MmapCacheStats`, backed by `mincore` on Unix. This is 
 
 That lets learners see the distinction between the project's 4096-byte database pages and the kernel's VM pages. On some systems those sizes match; on others one OS page covers several database pages.
 
+## Live Integrity Checks
+
+`Tree.Check()` runs the reachable-page validator against the currently open tree. It verifies page checksums, slotted-page layout, branch child reachability, separator keys, subtree key bounds, overflow references and chains, length-vs-key-count consistency, and reusable-page safety. When no in-process reader is active, it also validates persisted leaf sibling links.
+
+The active-reader exception is intentional. Current leaf-link repair is deferred while snapshots are open, because rewriting a copied page's sibling pointer in place could mutate bytes still visible to an older root. During that window, `Check()` validates the durable tree shape but skips the leaf-link invariant until the last reader closes and repair can run.
+
+The same reachable-page checks are used during mmap metadata recovery. That means `Check()` is the live, explicit version of the safety gate that `OpenMmap` applies before accepting a recovered root.
+
 ```mermaid
 flowchart TD
     G["Get(key)"] --> A["Advise random access"]
@@ -146,6 +154,9 @@ flowchart TD
 
     W["WarmMmapTree"] --> E["walk current root reachability"]
     E --> N["MADV_WILLNEED exact tree + overflow pages"]
+
+    I["Check"] --> V["reachable-page validation"]
+    V --> O["checksums + layout + routing + overflow"]
 
     X["DropMmapCache"] --> Y["Sync dirty pages + metadata"]
     Y --> Z["MADV_DONTNEED clean tree-page range"]

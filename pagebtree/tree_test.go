@@ -2,6 +2,7 @@ package pagebtree
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -448,6 +449,57 @@ func TestStatsExposePageBackedStructure(t *testing.T) {
 	}
 	if stats.Revision != 40 {
 		t.Fatalf("Revision = %d, want 40", stats.Revision)
+	}
+}
+
+func TestCheckAcceptsValidTree(t *testing.T) {
+	tree := New(2)
+	large := bytes.Repeat([]byte("x"), PageSize*2+41)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	tree.Put("large", large)
+	if _, deleted := tree.Delete("key-03"); !deleted {
+		t.Fatalf("Delete(key-03) = false, want true")
+	}
+
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check valid tree: %v", err)
+	}
+}
+
+func TestCheckRejectsOpenTreeWithMismatchedBranchSeparator(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	root := tree.pages[tree.root]
+	if !root.isBranch() || root.slotCount() == 0 {
+		t.Fatalf("root does not have a separator after many inserts")
+	}
+	corruptInMemoryBranchSlotKey(root, 0, "key-00")
+
+	err := tree.Check()
+	if err == nil {
+		t.Fatalf("Check succeeded with mismatched branch separator")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("Check mismatched separator error = %v, want ErrTreeInvariant", err)
+	}
+}
+
+func TestCheckAllowsDeferredLeafRelinkWhileReaderIsActive(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	snapshot := tree.Snapshot()
+	defer snapshot.Close()
+	tree.Put("key-40", []byte("value-40"))
+
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check with active reader and deferred leaf relink: %v", err)
 	}
 }
 
@@ -929,5 +981,11 @@ func corruptSlotValueLen(p *page, index int, valueLen int) {
 	slot := p.readSlot(index)
 	slot.valueLen = uint16(valueLen)
 	p.writeSlot(index, slot)
+	p.updateChecksum()
+}
+
+func corruptInMemoryBranchSlotKey(p *page, index int, key string) {
+	slot := p.readSlot(index)
+	copy(p.data[slot.offset:slot.offset+slot.keyLen], key)
 	p.updateChecksum()
 }

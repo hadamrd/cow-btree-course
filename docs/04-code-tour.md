@@ -12,6 +12,7 @@ The package is intentionally split by concept.
 - `Range(visitor)`
 - `Snapshot()`
 - `Stats()`
+- `Check()`
 
 The public type is small:
 
@@ -94,4 +95,5 @@ Read this package after the pointer-based `btree` package. The important files a
 - `pagebtree/insert.go` for copy-before-descend insertion and leaf/branch splits.
 - `pagebtree/delete.go` for copy-before-descend deletion, empty-child cleanup, and root collapse.
 - `pagebtree/freelist_pages.go` for checked freelist pages used when reusable page IDs no longer fit inline in metadata.
+- `pagebtree/integrity.go` for the public `Check` walk over reachable pages, checksums, branch routing, overflow chains, leaf links, length, and reusable-page safety.
 - `pagebtree/mmap.go` for `OpenMmap`, `OpenMmapReadOnly`, metadata recovery, dirty data-before-metadata sync, file-size/directory sync after remaps, tail compaction, access-pattern advice, tunable exact-page prefetch, kernel cache stats, and file locking.

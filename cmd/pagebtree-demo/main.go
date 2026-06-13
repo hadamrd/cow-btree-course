@@ -36,8 +36,14 @@ func main() {
 	fmt.Printf("with reader open: %+v\n", tree.Stats())
 
 	snapshot.Close()
+	if err := tree.Check(); err != nil {
+		panic(err)
+	}
 	fmt.Printf("after reader close: %+v\n", tree.Stats())
 
 	tree.Put("k21", []byte("value-k21"))
+	if err := tree.Check(); err != nil {
+		panic(err)
+	}
 	fmt.Printf("after reuse write: %+v\n", tree.Stats())
 }

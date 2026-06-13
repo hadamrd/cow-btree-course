@@ -42,6 +42,9 @@ func main() {
 	if err := reopened.WarmMmapTree(); err != nil {
 		log.Fatal(err)
 	}
+	if err := reopened.Check(); err != nil {
+		log.Fatal(err)
+	}
 
 	value, ok := reopened.Get("key-17")
 	if !ok {
@@ -55,6 +58,9 @@ func main() {
 		log.Fatal(err)
 	}
 	if err := reopened.Compact(); err != nil {
+		log.Fatal(err)
+	}
+	if err := reopened.Check(); err != nil {
 		log.Fatal(err)
 	}
 	afterCompact, err := os.Stat(path)
