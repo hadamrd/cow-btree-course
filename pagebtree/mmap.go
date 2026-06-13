@@ -93,11 +93,12 @@ const (
 type mmapFaultPoint string
 
 const (
-	mmapFaultBeforeDataSync     mmapFaultPoint = "before-data-sync"
-	mmapFaultAfterMetaWrite     mmapFaultPoint = "after-meta-write"
-	mmapFaultBeforeMetaSync     mmapFaultPoint = "before-meta-sync"
-	mmapFaultBeforeFileSizeSync mmapFaultPoint = "before-file-size-sync"
-	mmapFaultBeforeRemap        mmapFaultPoint = "before-remap"
+	mmapFaultBeforeDataSync      mmapFaultPoint = "before-data-sync"
+	mmapFaultAfterMetaWrite      mmapFaultPoint = "after-meta-write"
+	mmapFaultBeforeMetaSync      mmapFaultPoint = "before-meta-sync"
+	mmapFaultBeforeFileSizeSync  mmapFaultPoint = "before-file-size-sync"
+	mmapFaultBeforeDirectorySync mmapFaultPoint = "before-directory-sync"
+	mmapFaultBeforeRemap         mmapFaultPoint = "before-remap"
 )
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
@@ -618,7 +619,13 @@ func (a *mmapArena) syncFileSize() error {
 	if err := a.injectFault(mmapFaultBeforeFileSizeSync); err != nil {
 		return err
 	}
-	return a.syncFileSizeDurable()
+	if err := a.file.Sync(); err != nil {
+		return err
+	}
+	if err := a.injectFault(mmapFaultBeforeDirectorySync); err != nil {
+		return err
+	}
+	return a.syncDirectory()
 }
 
 func (a *mmapArena) syncFileSizeDurable() error {

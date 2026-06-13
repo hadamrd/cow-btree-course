@@ -931,7 +931,16 @@ func TestMmapGrowthFaultMatrixPreservesOldMapping(t *testing.T) {
 			fault: mmapFaultBeforeRemap,
 			wantPoints: []mmapFaultPoint{
 				mmapFaultBeforeFileSizeSync,
+				mmapFaultBeforeDirectorySync,
 				mmapFaultBeforeRemap,
+			},
+		},
+		{
+			name:  "before directory sync",
+			fault: mmapFaultBeforeDirectorySync,
+			wantPoints: []mmapFaultPoint{
+				mmapFaultBeforeFileSizeSync,
+				mmapFaultBeforeDirectorySync,
 			},
 		},
 	}
