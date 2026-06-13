@@ -32,11 +32,11 @@
 // hint, and the window can be disabled when the caller wants to avoid even
 // exact linked-leaf hints.
 // Mmap-backed trees track dirty copied pages so Sync can flush changed data
-// pages before publishing metadata. Internal fault-injection tests cover the
-// after-metadata-write boundary; if that boundary or the final metadata flush
-// fails, Sync restores the previous mapped metadata bytes before returning the
-// error. Mmap trees can grow the mapped file when allocation reaches the
-// current capacity.
+// pages before publishing metadata. Internal fault-injection tests cover
+// before-data-sync, after-metadata-write, and before-metadata-sync boundaries;
+// if a metadata publication fault or the final metadata flush fails, Sync
+// restores the previous mapped metadata bytes before returning the error. Mmap
+// trees can grow the mapped file when allocation reaches the current capacity.
 // New database creation and file-size changes from growth and compaction sync
 // the data file and parent directory. Compact can trim unused mapped capacity
 // and a suffix of already-free page ids when no snapshot is active; if

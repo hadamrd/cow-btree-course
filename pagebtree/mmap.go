@@ -92,7 +92,11 @@ const (
 
 type mmapFaultPoint string
 
-const mmapFaultAfterMetaWrite mmapFaultPoint = "after-meta-write"
+const (
+	mmapFaultBeforeDataSync mmapFaultPoint = "before-data-sync"
+	mmapFaultAfterMetaWrite mmapFaultPoint = "after-meta-write"
+	mmapFaultBeforeMetaSync mmapFaultPoint = "before-meta-sync"
+)
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	writerLock, err := openWriterLock(path)
@@ -518,6 +522,9 @@ func (a *mmapArena) syncDataPages(nextPage PageID) error {
 		return nil
 	}
 	slices.Sort(ids)
+	if err := a.injectFault(mmapFaultBeforeDataSync); err != nil {
+		return err
+	}
 
 	if a.syncObserver != nil {
 		a.syncObserver("data")
@@ -584,6 +591,9 @@ func (a *mmapArena) syncMetaPage(index int) error {
 	}
 	if index < 0 || index >= metaPageCount {
 		return fmt.Errorf("metadata page index %d outside range", index)
+	}
+	if err := a.injectFault(mmapFaultBeforeMetaSync); err != nil {
+		return err
 	}
 	start := index * PageSize
 	if a.syncObserver != nil {

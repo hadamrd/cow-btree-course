@@ -1745,9 +1745,47 @@ func TestMmapSyncRestoresMetaPageWhenMetaFlushFails(t *testing.T) {
 	}
 }
 
-func TestMmapSyncFaultAfterMetaWriteRollsBackAndReopensOldRoot(t *testing.T) {
+func TestMmapSyncFaultMatrixReopensOldRoot(t *testing.T) {
+	tests := []struct {
+		name       string
+		fault      mmapFaultPoint
+		wantPoints []mmapFaultPoint
+	}{
+		{
+			name:       "before data sync",
+			fault:      mmapFaultBeforeDataSync,
+			wantPoints: []mmapFaultPoint{mmapFaultBeforeDataSync},
+		},
+		{
+			name:  "after metadata write",
+			fault: mmapFaultAfterMetaWrite,
+			wantPoints: []mmapFaultPoint{
+				mmapFaultBeforeDataSync,
+				mmapFaultAfterMetaWrite,
+			},
+		},
+		{
+			name:  "before metadata sync",
+			fault: mmapFaultBeforeMetaSync,
+			wantPoints: []mmapFaultPoint{
+				mmapFaultBeforeDataSync,
+				mmapFaultAfterMetaWrite,
+				mmapFaultBeforeMetaSync,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertMmapSyncFaultReopensOldRoot(t, tt.fault, tt.wantPoints)
+		})
+	}
+}
+
+func assertMmapSyncFaultReopensOldRoot(t *testing.T, fault mmapFaultPoint, wantPoints []mmapFaultPoint) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "course.db")
-	forced := errors.New("forced after meta write fault")
+	forced := fmt.Errorf("forced %s fault", fault)
 
 	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
 	if err != nil {
@@ -1765,7 +1803,7 @@ func TestMmapSyncFaultAfterMetaWriteRollsBackAndReopensOldRoot(t *testing.T) {
 	var points []mmapFaultPoint
 	tree.arena.faultInjector = func(point mmapFaultPoint) error {
 		points = append(points, point)
-		if point == mmapFaultAfterMetaWrite {
+		if point == fault {
 			return forced
 		}
 		return nil
@@ -1775,14 +1813,14 @@ func TestMmapSyncFaultAfterMetaWriteRollsBackAndReopensOldRoot(t *testing.T) {
 	if !errors.Is(err, forced) {
 		t.Fatalf("Sync fault error = %v, want forced fault", err)
 	}
-	if !slices.Equal(points, []mmapFaultPoint{mmapFaultAfterMetaWrite}) {
-		t.Fatalf("fault points = %v, want after-meta-write", points)
+	if !slices.Equal(points, wantPoints) {
+		t.Fatalf("fault points = %v, want %v", points, wantPoints)
 	}
 	if !bytes.Equal(metaPage, before) {
-		t.Fatalf("metadata page changed after after-meta-write fault")
+		t.Fatalf("metadata page changed after %s fault", fault)
 	}
 	if record, ok := readMetaPage(metaPage); ok && record.revision == tree.Revision() {
-		t.Fatalf("after-meta-write fault left revision %d readable in mapped metadata page", record.revision)
+		t.Fatalf("%s fault left revision %d readable in mapped metadata page", fault, record.revision)
 	}
 	if err := tree.arena.close(); err != nil {
 		t.Fatalf("forced crash close arena: %v", err)
