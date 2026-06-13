@@ -588,6 +588,8 @@ Serious pieces in this repository:
 - Explicit point write batches that publish one revision.
 - A sorted-map model/fuzz target for put, delete, batch, range, cursor, and
   integrity-check operation streams.
+- An mmap sorted-map model/fuzz target that injects sync/close/reopen cycles
+  and overflow-heavy values.
 
 Still research or incomplete compared with a production engine:
 
@@ -598,7 +600,7 @@ Still research or incomplete compared with a production engine:
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with power-fail fault injection.
 - No byte-balanced deletion across variable-size records.
-- No mmap reopen/sync fuzz model or malformed-page fuzz generator yet.
+- No malformed-page fuzz generator yet.
 - No multi-database catalog, duplicate keys, cursors, or comparator plugins.
 - No portability story beyond the Unix mmap path and non-Unix stubs.
 
