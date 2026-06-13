@@ -5,10 +5,9 @@ import "slices"
 // Delete removes key from the current root version.
 //
 // Like Put, Delete is copy-on-write: it copies the root and every page on the
-// search path before changing page bytes. It merges underfull leaf siblings
-// when one sibling can absorb the other, then rebuilds branch separators and
-// collapses a one-child root. It deliberately stops short of full branch-level
-// sibling redistribution.
+// search path before changing page bytes. It merges or redistributes underfull
+// leaf siblings, then rebuilds branch separators and collapses a one-child
+// root. It deliberately stops short of full branch-level sibling redistribution.
 func (t *Tree) Delete(key string) ([]byte, bool) {
 	if t.closed || t.readOnly || t.root == 0 {
 		return nil, false
@@ -96,6 +95,14 @@ func (t *Tree) mergeUnderfullLeaf(children []PageID, index int) []PageID {
 				children = append(children[:index], children[index+1:]...)
 				return children
 			}
+			leftID := t.copyPage(children[index-1])
+			left = t.pages[leftID]
+			children[index-1] = leftID
+			split := len(merged) / 2
+			t.writeLeafEntries(left, merged[:split])
+			left.setNextLeaf(children[index])
+			t.writeLeafEntries(child, merged[split:])
+			return children
 		}
 	}
 
@@ -113,6 +120,14 @@ func (t *Tree) mergeUnderfullLeaf(children []PageID, index int) []PageID {
 				children = append(children[:index+1], children[index+2:]...)
 				return children
 			}
+			rightID := t.copyPage(children[index+1])
+			right = t.pages[rightID]
+			children[index+1] = rightID
+			split := len(merged) / 2
+			t.writeLeafEntries(child, merged[:split])
+			child.setNextLeaf(rightID)
+			t.writeLeafEntries(right, merged[split:])
+			return children
 		}
 	}
 	return children

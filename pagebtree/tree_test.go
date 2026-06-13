@@ -134,6 +134,72 @@ func TestDeleteMergesUnderfullLeafAndKeepsSnapshotVersion(t *testing.T) {
 	snapshot.Close()
 }
 
+func TestDeleteRedistributesUnderfullLeafWhenMergeCannotFit(t *testing.T) {
+	tree := New(3)
+	seedLeafRedistributionTree(tree)
+	snapshot := tree.Snapshot()
+
+	old, deleted := tree.Delete("key-05")
+	if !deleted || string(old) != "value-05" {
+		t.Fatalf("Delete(key-05) = %q, %v; want value-05, true", old, deleted)
+	}
+
+	leaves := make([]PageID, 0)
+	collectLeavesInOrder(tree.pages, tree.root, &leaves)
+	if len(leaves) != 2 {
+		t.Fatalf("leaf count after redistribute = %d, want 2 leaves: %v", len(leaves), leaves)
+	}
+	for _, id := range leaves {
+		if got := int(tree.pages[id].slotCount()); got < minKeys(tree.degree) {
+			t.Fatalf("leaf %d has %d keys after redistribute, want at least %d", id, got, minKeys(tree.degree))
+		}
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after redistribute: %v", err)
+	}
+	if got, ok := snapshot.Get("key-05"); !ok || string(got) != "value-05" {
+		t.Fatalf("snapshot Get(key-05) = %q, %v; want value-05, true", got, ok)
+	}
+	wantKeys := append(sequentialKeys(5), "key-06")
+	var gotKeys []string
+	tree.Range(func(key string, value []byte) bool {
+		gotKeys = append(gotKeys, key)
+		return true
+	})
+	if !reflect.DeepEqual(gotKeys, wantKeys) {
+		t.Fatalf("Range after redistribute = %v, want %v", gotKeys, wantKeys)
+	}
+	snapshot.Close()
+}
+
+func seedLeafRedistributionTree(tree *Tree) {
+	leftID := tree.allocPage()
+	rightID := tree.allocPage()
+	rootID := tree.allocPage()
+	left := tree.newPage(leftID, flagLeaf)
+	right := tree.newPage(rightID, flagLeaf)
+	root := tree.newPage(rootID, flagBranch)
+	tree.pages[leftID] = left
+	tree.pages[rightID] = right
+	tree.pages[rootID] = root
+	tree.writeLeafEntries(left, []leafEntry{
+		{key: "key-00", value: []byte("value-00")},
+		{key: "key-01", value: []byte("value-01")},
+		{key: "key-02", value: []byte("value-02")},
+		{key: "key-03", value: []byte("value-03")},
+		{key: "key-04", value: []byte("value-04")},
+	})
+	tree.writeLeafEntries(right, []leafEntry{
+		{key: "key-05", value: []byte("value-05")},
+		{key: "key-06", value: []byte("value-06")},
+	})
+	left.setNextLeaf(rightID)
+	mustWriteBranchParts(root, []string{"key-05"}, []PageID{leftID, rightID})
+	tree.root = rootID
+	tree.length = 7
+	tree.revision = 1
+}
+
 func TestDeleteMissingKeyDoesNotPublishNewRevision(t *testing.T) {
 	tree := New(2)
 	tree.Put("alpha", []byte("one"))

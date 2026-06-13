@@ -29,7 +29,7 @@ The reverse of in-order traversal is:
 
 ## Exercise 3: Implement Full Delete Rebalancing
 
-The page-backed package includes an educational delete path: it copies the descent path, removes the leaf record, retires overflow pages, merges an underfull leaf when a sibling can absorb it, removes empty children, rebuilds separators, and collapses a one-child root. A full B-tree delete still has more cases than insertion. A robust production implementation should keep every node on the descent path above the minimum key count before recursing.
+The page-backed package includes an educational delete path: it copies the descent path, removes the leaf record, retires overflow pages, merges an underfull leaf when a sibling can absorb it, redistributes leaf records when a sibling can lend, removes empty children, rebuilds separators, and collapses a one-child root. A full B-tree delete still has more cases than insertion. A robust production implementation should keep every node on the descent path above the minimum key count before recursing.
 
 ```mermaid
 flowchart TD

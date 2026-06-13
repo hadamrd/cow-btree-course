@@ -235,6 +235,53 @@ func TestMmapTreePersistsLeafMergeAfterDelete(t *testing.T) {
 	}
 }
 
+func TestMmapTreePersistsLeafRedistributionAfterDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 3, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	seedLeafRedistributionTree(tree)
+
+	if old, deleted := tree.Delete("key-05"); !deleted || string(old) != "value-05" {
+		t.Fatalf("Delete(key-05) = %q, %v; want value-05, true", old, deleted)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after redistribute: %v", err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("Check after reopen: %v", err)
+	}
+	if _, ok := reopened.Get("key-05"); ok {
+		t.Fatalf("reopened tree found deleted key-05")
+	}
+	for _, id := range reopened.pages[reopened.root].childIDs() {
+		if got := int(reopened.pages[id].slotCount()); got < minKeys(reopened.degree) {
+			t.Fatalf("reopened leaf %d has %d keys, want at least %d", id, got, minKeys(reopened.degree))
+		}
+	}
+	wantKeys := append(sequentialKeys(5), "key-06")
+	var gotKeys []string
+	reopened.Range(func(key string, value []byte) bool {
+		gotKeys = append(gotKeys, key)
+		return true
+	})
+	if !slices.Equal(gotKeys, wantKeys) {
+		t.Fatalf("reopened Range after redistribute = %v, want %v", gotKeys, wantKeys)
+	}
+}
+
 func TestMmapCloseWaitsForActiveSnapshots(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
