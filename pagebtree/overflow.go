@@ -1,6 +1,9 @@
 package pagebtree
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"errors"
+)
 
 const (
 	overflowRefMagic      = "OVF1"
@@ -14,6 +17,8 @@ type overflowRef struct {
 	first  PageID
 	length int
 }
+
+var ErrOverflowInvariant = errors.New("overflow invariant invalid")
 
 func encodeOverflowRef(ref overflowRef) []byte {
 	out := make([]byte, overflowRefSize)

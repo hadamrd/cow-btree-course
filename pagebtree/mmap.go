@@ -847,8 +847,8 @@ func (t *Tree) validateOverflowValue(raw []byte, flags uint16, seen map[PageID]b
 		length += p.overflowPayloadLen()
 		id = p.overflowNext()
 	}
-	if length < ref.length {
-		return fmt.Errorf("overflow chain length %d is shorter than referenced length %d", length, ref.length)
+	if length != ref.length {
+		return fmt.Errorf("%w: chain length %d does not match referenced length %d", ErrOverflowInvariant, length, ref.length)
 	}
 	return nil
 }

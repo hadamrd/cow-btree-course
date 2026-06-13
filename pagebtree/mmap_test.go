@@ -1131,6 +1131,37 @@ func TestMmapTreeRejectsCorruptReachableOverflowPage(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsOverflowChainLongerThanReference(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	value := bytes.Repeat([]byte("o"), PageSize*2+17)
+	tree.Put("large", value)
+	root := tree.pages[tree.root]
+	ref, ok := root.overflowRef("large")
+	if !ok {
+		t.Fatalf("large value was not stored as an overflow reference")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	corruptLeafOverflowRefLength(t, path, root.id, "large", ref.length-1)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with overflow chain longer than reference")
+	}
+	if !errors.Is(err, ErrOverflowInvariant) {
+		t.Fatalf("OpenMmap overflow length error = %v, want ErrOverflowInvariant", err)
+	}
+}
+
 func TestMmapTreeRejectsValidChecksumLeafWithInvalidSlotLayout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -1416,6 +1447,27 @@ func corruptBranchSlotKey(t *testing.T, path string, id PageID, slotIndex int, k
 			t.Fatalf("replacement key length = %d, want %d", len(key), slot.keyLen)
 		}
 		copy(p.data[int(slot.offset):int(slot.offset)+int(slot.keyLen)], key)
+		p.updateChecksum()
+	})
+}
+
+func corruptLeafOverflowRefLength(t *testing.T, path string, id PageID, key string, length int) {
+	t.Helper()
+
+	mutatePage(t, path, id, func(p *page) {
+		index, found := p.searchSlot(key)
+		if !found {
+			t.Fatalf("key %q not found in page %d", key, id)
+		}
+		slot := p.readSlot(index)
+		raw := p.readCellValue(index)
+		ref, ok := decodeOverflowRef(raw, slot.flags)
+		if !ok {
+			t.Fatalf("key %q is not an overflow reference", key)
+		}
+		ref.length = length
+		valueStart := int(slot.offset) + int(slot.keyLen)
+		copy(p.data[valueStart:valueStart+overflowRefSize], encodeOverflowRef(ref))
 		p.updateChecksum()
 	})
 }
