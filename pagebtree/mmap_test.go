@@ -2424,6 +2424,157 @@ func TestMmapLargeFreelistCrashImageMatrixClassifiesRecoveryRoot(t *testing.T) {
 	}
 }
 
+func TestMmapLargeReclaimCrashImageMatrixClassifiesReaderPinnedRetiredPages(t *testing.T) {
+	tests := []struct {
+		name          string
+		fault         mmapFaultPoint
+		wantReclaim   bool
+		wantPointSeen []mmapFaultPoint
+	}{
+		{
+			name:          "before data sync",
+			fault:         mmapFaultBeforeDataSync,
+			wantReclaim:   false,
+			wantPointSeen: []mmapFaultPoint{mmapFaultBeforeDataSync},
+		},
+		{
+			name:        "after metadata write",
+			fault:       mmapFaultAfterMetaWrite,
+			wantReclaim: true,
+			wantPointSeen: []mmapFaultPoint{
+				mmapFaultBeforeDataSync,
+				mmapFaultAfterMetaWrite,
+			},
+		},
+		{
+			name:        "before metadata sync",
+			fault:       mmapFaultBeforeMetaSync,
+			wantReclaim: true,
+			wantPointSeen: []mmapFaultPoint{
+				mmapFaultBeforeDataSync,
+				mmapFaultAfterMetaWrite,
+				mmapFaultBeforeMetaSync,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertMmapLargeReclaimCrashImageClassifiesReaderPinnedRetiredPages(t, tt.fault, tt.wantReclaim, tt.wantPointSeen)
+		})
+	}
+}
+
+func assertMmapLargeReclaimCrashImageClassifiesReaderPinnedRetiredPages(t *testing.T, fault mmapFaultPoint, wantReclaim bool, wantPointSeen []mmapFaultPoint) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "course.db")
+	forced := fmt.Errorf("forced %s fault", fault)
+	retiredCount := reclaimPageCapacity + 17
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 2048})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		tree.Close()
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	if stats, err := tree.MmapReaderStats(); err != nil || stats.ActiveSlots == 0 {
+		reader.Close()
+		tree.Close()
+		t.Fatalf("writer reader stats = %+v, %v; want active read-only slot", stats, err)
+	}
+	clear(tree.arena.dirtyPages)
+
+	tree.revision++
+	tree.retired = make([]retiredPage, retiredCount)
+	for i := range tree.retired {
+		tree.retired[i] = retiredPage{
+			id:       firstTreePageID + 1 + PageID(i),
+			revision: tree.revision,
+		}
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(retiredCount)
+
+	var crashImage string
+	var points []mmapFaultPoint
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		points = append(points, point)
+		if point == fault {
+			crashImage = copyMmapCrashImageWithReaderTable(t, path, string(point))
+			return forced
+		}
+		return nil
+	}
+
+	err = tree.Sync()
+	if !errors.Is(err, forced) {
+		reader.Close()
+		t.Fatalf("Sync fault error = %v, want forced fault", err)
+	}
+	if !slices.Equal(points, wantPointSeen) {
+		reader.Close()
+		t.Fatalf("large-reclaim fault points = %v, want %v", points, wantPointSeen)
+	}
+	if crashImage == "" {
+		reader.Close()
+		t.Fatalf("fault %s did not capture a crash image", fault)
+	}
+	if err := tree.arena.close(); err != nil {
+		reader.Close()
+		t.Fatalf("forced crash close arena: %v", err)
+	}
+	tree.closed = true
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close original reader: %v", err)
+	}
+
+	recovered, err := OpenMmap(crashImage, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap large-reclaim crash image for %s: %v", fault, err)
+	}
+	defer recovered.Close()
+	if got, ok := recovered.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("large-reclaim crash image Get(alpha) after %s = %q, %v; want one, true", fault, got, ok)
+	}
+	if !wantReclaim {
+		stats := recovered.Stats()
+		if stats.RetiredPages != 0 || stats.FreePages != 0 {
+			t.Fatalf("large-reclaim crash image stats after %s = retired:%d free:%d; want old metadata with none", fault, stats.RetiredPages, stats.FreePages)
+		}
+		return
+	}
+
+	_, record := newestMetaPage(t, crashImage)
+	if record.freeRoot == 0 {
+		t.Fatalf("large-reclaim crash image after %s has no reclaim root", fault)
+	}
+	if got := reclaimChainRecordCount(t, crashImage, record.freeRoot); got != retiredCount {
+		t.Fatalf("large-reclaim crash image reclaim records after %s = %d, want %d", fault, got, retiredCount)
+	}
+	stats := recovered.Stats()
+	if stats.RetiredPages != retiredCount {
+		t.Fatalf("large-reclaim crash image RetiredPages after %s = %d, want %d", fault, stats.RetiredPages, retiredCount)
+	}
+	if stats.FreePages != 0 {
+		t.Fatalf("large-reclaim crash image FreePages after %s = %d, want reader-pinned retired pages", fault, stats.FreePages)
+	}
+	recovered.Put("bravo", []byte("two"))
+	afterWrite := recovered.Stats()
+	if afterWrite.FreePages != 0 {
+		t.Fatalf("large-reclaim crash image FreePages after write with copied reader slot after %s = %d, want pinned pages", fault, afterWrite.FreePages)
+	}
+	if afterWrite.RetiredPages < retiredCount {
+		t.Fatalf("large-reclaim crash image RetiredPages after write with copied reader slot after %s = %d, want at least %d", fault, afterWrite.RetiredPages, retiredCount)
+	}
+}
+
 func assertMmapLargeFreelistCrashImageClassifiesRecoveryRoot(t *testing.T, fault mmapFaultPoint, wantFreelist bool, wantPointSeen []mmapFaultPoint) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "course.db")
@@ -5453,6 +5604,20 @@ func copyMmapCrashImage(t *testing.T, path string, label string) string {
 	image := filepath.Join(t.TempDir(), "crash-"+sanitizeCrashImageLabel(label)+".db")
 	if err := os.WriteFile(image, data, 0o644); err != nil {
 		t.Fatalf("Write crash image %s: %v", image, err)
+	}
+	return image
+}
+
+func copyMmapCrashImageWithReaderTable(t *testing.T, path string, label string) string {
+	t.Helper()
+
+	image := copyMmapCrashImage(t, path, label)
+	readers, err := os.ReadFile(path + ".readers")
+	if err != nil {
+		t.Fatalf("Read crash image reader table %s: %v", path+".readers", err)
+	}
+	if err := os.WriteFile(image+".readers", readers, 0o644); err != nil {
+		t.Fatalf("Write crash image reader table %s: %v", image+".readers", err)
 	}
 	return image
 }
