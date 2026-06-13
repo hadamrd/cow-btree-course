@@ -277,6 +277,7 @@ func (t *Tree) remapMmap(newMaxPages int) error {
 	}
 
 	newSize := int64((newMaxPages + metaPageCount) * PageSize)
+	oldSize := int64(len(t.arena.data))
 	if err := t.arena.file.Truncate(newSize); err != nil {
 		return err
 	}
@@ -291,6 +292,12 @@ func (t *Tree) remapMmap(newMaxPages int) error {
 	oldData := t.arena.data
 	if err := munmapBytes(oldData); err != nil {
 		_ = munmapBytes(data)
+		if restoreErr := t.arena.file.Truncate(oldSize); restoreErr != nil {
+			return errors.Join(err, restoreErr)
+		}
+		if syncErr := t.arena.syncFileSize(); syncErr != nil {
+			return errors.Join(err, syncErr)
+		}
 		return err
 	}
 	t.arena.data = data
