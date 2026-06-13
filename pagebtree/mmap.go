@@ -1021,6 +1021,7 @@ func (t *Tree) loadMeta() error {
 		t.retired = append([]retiredPage(nil), record.retired...)
 		t.metaFreelistRoot = record.freeRoot
 		t.metaFreelistPages = append([]PageID(nil), freelistPages...)
+		t.reclaimObsoleteMetaFreelistPages()
 		return nil
 	}
 	if newestCandidateErr != nil {
@@ -1369,7 +1370,6 @@ func (t *Tree) reclaimObsoleteMetaFreelistPages() {
 	for _, id := range t.metaFreelistPages {
 		referenced[id] = true
 	}
-
 	freeSet := map[PageID]bool{}
 	for _, id := range t.free {
 		freeSet[id] = true
@@ -1384,6 +1384,9 @@ func (t *Tree) reclaimObsoleteMetaFreelistPages() {
 }
 
 func isMetadataReclaimPage(p *page) bool {
+	if p == nil || !p.validChecksum() || p.validateLayout() != nil {
+		return false
+	}
 	switch p.flags() {
 	case flagFreelist, flagReclaim:
 		return true

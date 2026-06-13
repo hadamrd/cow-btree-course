@@ -2369,8 +2369,13 @@ func TestMmapSyncPersistsFreelistLargerThanMetadataPage(t *testing.T) {
 	}
 	defer reopened.Close()
 
-	if got := reopened.Stats().FreePages; got != freeCount {
-		t.Fatalf("FreePages after reopen = %d, want %d", got, freeCount)
+	if got := reopened.Stats().FreePages; got < freeCount {
+		t.Fatalf("FreePages after reopen = %d, want at least %d", got, freeCount)
+	}
+	for _, id := range reopened.metaFreelistPages {
+		if slices.Contains(reopened.free, id) {
+			t.Fatalf("current freelist metadata page %d became reusable after reopen", id)
+		}
 	}
 	allocatedBeforeReuse := reopened.Stats().AllocatedPages
 	reopened.Put("bravo", []byte("two"))
@@ -2700,6 +2705,78 @@ func TestMmapSyncReclaimsObsoleteFreelistPagesAfterBothMetaPagesAdvance(t *testi
 	for _, id := range firstGeneration {
 		if !slices.Contains(tree.free, id) {
 			t.Fatalf("obsolete freelist page %d was not reclaimed after both metadata pages advanced", id)
+		}
+	}
+}
+
+func TestMmapObsoleteFreelistCrashImageMatrixClassifiesMetadataGenerationReclaim(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4096})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+
+	if _, replaced := tree.Put("alpha", []byte("one")); replaced {
+		t.Fatalf("first Put replaced existing key")
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	clear(tree.arena.dirtyPages)
+
+	freeCount := maxMetaFreePages + 17
+	tree.free = make([]PageID, freeCount)
+	for i := range tree.free {
+		tree.free[i] = firstTreePageID + 1 + PageID(i)
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(freeCount)
+
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("first large-freelist Sync: %v", err)
+	}
+	firstGeneration := append([]PageID(nil), tree.metaFreelistPages...)
+	if len(firstGeneration) == 0 {
+		t.Fatalf("first large-freelist Sync did not create freelist pages")
+	}
+
+	tree.Put("bravo", []byte("two"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("second large-freelist Sync: %v", err)
+	}
+	beforeBothSlotsAdvanceImage := copyMmapCrashImage(t, path, "obsolete-before-both-slots-advance")
+
+	tree.Put("charlie", []byte("three"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("third large-freelist Sync: %v", err)
+	}
+	afterBothSlotsAdvanceImage := copyMmapCrashImage(t, path, "obsolete-after-both-slots-advance")
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close source tree: %v", err)
+	}
+
+	before, err := OpenMmap(beforeBothSlotsAdvanceImage, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap before-both-slots image: %v", err)
+	}
+	for _, id := range firstGeneration {
+		if slices.Contains(before.free, id) {
+			before.Close()
+			t.Fatalf("before-both-slots image made still-referenced metadata page %d reusable", id)
+		}
+	}
+	if err := before.Close(); err != nil {
+		t.Fatalf("Close before-both-slots image: %v", err)
+	}
+
+	after, err := OpenMmap(afterBothSlotsAdvanceImage, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after-both-slots image: %v", err)
+	}
+	defer after.Close()
+	for _, id := range firstGeneration {
+		if !slices.Contains(after.free, id) {
+			t.Fatalf("after-both-slots image did not reclaim obsolete metadata page %d", id)
 		}
 	}
 }

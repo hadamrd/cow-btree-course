@@ -29,7 +29,7 @@ storage-engine artifact.
 
 | Gap | Why it matters | Current state | Next useful slice |
 | --- | --- | --- | --- |
-| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication, growth, compact-shrink, large-freelist spill, and large-reclaim spill images. A full power-fail matrix is still missing. | Extend copied-image classification to obsolete metadata-page generation reclaim. |
+| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication, growth, compact-shrink, large-freelist spill, large-reclaim spill, and obsolete metadata-generation reclaim images. A full process-level power-fail matrix is still missing. | Add process-level crash/reopen probes or move to transaction batching. |
 | Transaction batching | Real engines commit a unit of work, not one implicit root publish per call. | `Put` and `Delete` mutate the live in-process root immediately; `Sync` is the durability boundary only for mmap. | Add an explicit write batch that stages multiple operations and publishes one revision. |
 | Cursor API | Real B+tree users need `seek`/`next` control, not only callback scans. | Closed in this pass with snapshot-backed forward cursors. | Extend cursors with bounded end keys, reverse traversal, and delete-through-cursor experiments. |
 | Comparator and key model | Production B+trees cannot be hardwired to Go string ordering. | Page cells store strings and compare byte-by-byte through string order. | Introduce byte-key APIs and an explicit comparator boundary before adding prefix compression. |
@@ -113,6 +113,9 @@ images reopen the spilled freelist and can reuse those pages. The copied-image
 large-reclaim matrix preserves a copied reader-table sidecar, proving that a
 pre-data-sync image keeps the old metadata with no retired pages, while
 after-metadata-write and before-metadata-sync images reopen the checked reclaim
-chain and keep retired pages pinned behind the copied reader watermark. The next
-respectable step is to reuse that copied-image harness for obsolete
-metadata-page generation reclaim.
+chain and keep retired pages pinned behind the copied reader watermark. The
+obsolete-generation matrix proves that an image taken while an older metadata
+slot still references a metadata freelist chain does not recycle that chain, and
+an image taken after both metadata slots advance recomputes the obsolete chain
+as reusable during recovery. The remaining crash-work is less about local
+publish boundaries and more about process-level power-fail probes.
