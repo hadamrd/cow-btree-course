@@ -19,10 +19,11 @@
 // allocation reaches the current capacity. Reopen validation checks both page
 // checksums and slotted-page structure before decoding reachable cells, and it
 // rejects branch routing that duplicates children or has separators that no
-// longer match right-child first keys. Overflow chains must contain exactly the
+// longer match right-child first keys. Persisted leaf next pointers must match
+// the branch-order leaf sequence. Overflow chains must contain exactly the
 // referenced number of payload bytes. Reopen also rejects metadata whose stored
-// length does not match the reachable leaf-key count, plus persisted freelist IDs
-// that are out of range, duplicated, or still reachable.
+// length does not match the reachable leaf-key count, plus persisted freelist
+// IDs that are out of range, duplicated, or still reachable.
 // OpenMmapReadOnly opens mmap files with a shared read lock and rejects
 // mutations through the returned tree handle. Mmap-backed trees expose Advise so
 // callers can pass random, sequential, or will-need access-pattern hints to the

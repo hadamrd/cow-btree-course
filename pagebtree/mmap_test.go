@@ -226,6 +226,38 @@ func TestMmapTreePersistsLeafNextLinksAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsLeafNextLinkThatSkipsReachableLeaf(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	leafIDs := make([]PageID, 0)
+	collectLeavesInOrder(tree.pages, tree.root, &leafIDs)
+	if len(leafIDs) < 2 {
+		t.Fatalf("leaf count = %d, want at least 2 leaves", len(leafIDs))
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	corruptLeafNext(t, path, leafIDs[0], 0)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with corrupt leaf next link")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("OpenMmap leaf link error = %v, want ErrTreeInvariant", err)
+	}
+}
+
 func TestMmapRangeAdvisesNextLeafPages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -1468,6 +1500,15 @@ func corruptLeafOverflowRefLength(t *testing.T, path string, id PageID, key stri
 		ref.length = length
 		valueStart := int(slot.offset) + int(slot.keyLen)
 		copy(p.data[valueStart:valueStart+overflowRefSize], encodeOverflowRef(ref))
+		p.updateChecksum()
+	})
+}
+
+func corruptLeafNext(t *testing.T, path string, id PageID, next PageID) {
+	t.Helper()
+
+	mutatePage(t, path, id, func(p *page) {
+		p.setLeftmostChild(next)
 		p.updateChecksum()
 	})
 }

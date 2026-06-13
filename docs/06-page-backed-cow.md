@@ -146,6 +146,8 @@ Copy-on-write makes leaf links more subtle than they first look. A copied leaf m
 
 The implementation therefore relinks leaves reachable from the current root only when no readers are active. If a `Put` or `Delete` happens while a snapshot is open, the current root is still published immediately, but leaf-link repair is deferred. When the last snapshot closes, `Snapshot.Close` releases the reader pin and repairs the current leaf chain, marking changed mmap pages dirty.
 
+Because leaf links are persisted in page headers, mmap recovery validates them too. The branch tree defines the authoritative sorted leaf order; each leaf's `nextLeaf` header must point to the next leaf in that order, and the final leaf must point to zero.
+
 Current-tree `Range` uses the leaf chain when no active reader can make those links stale. `RangeFrom(start)` first descends the tree to the leaf that can contain `start`, then scans forward through linked leaves and skips entries below the lower bound. `RangeBetween(start, end)` uses the same lower-bound leaf descent, stops before the exclusive `end` key, and avoids prefetching linked leaves whose first key is already outside the bound. Inside each leaf, these scans walk slot entries directly instead of materializing every key/value cell first. If a reader is active, these methods fall back to the recursive branch walk so they still return the current keys even while link repair is deferred; that fallback also reads branch child ids directly from slots only for children it actually visits. Snapshot ranges keep the recursive walk because they are teaching the old-root view directly.
 
 ## Overflow Values

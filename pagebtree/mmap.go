@@ -572,6 +572,10 @@ func (t *Tree) loadMeta() error {
 			lastErr = err
 			continue
 		}
+		if err := t.validateLeafLinks(); err != nil {
+			lastErr = err
+			continue
+		}
 		if err := t.validateMetaInvariants(record); err != nil {
 			lastErr = err
 			continue
@@ -746,6 +750,22 @@ func (t *Tree) validateMetaInvariants(record metaRecord) error {
 	keyCount := t.countReachableKeys(t.root, map[PageID]bool{})
 	if keyCount != record.length {
 		return fmt.Errorf("%w: length %d does not match reachable key count %d", ErrMetaInvariant, record.length, keyCount)
+	}
+	return nil
+}
+
+func (t *Tree) validateLeafLinks() error {
+	leaves := make([]PageID, 0)
+	collectLeavesInOrder(t.pages, t.root, &leaves)
+	for i, id := range leaves {
+		want := PageID(0)
+		if i+1 < len(leaves) {
+			want = leaves[i+1]
+		}
+		got := t.pages[id].nextLeaf()
+		if got != want {
+			return fmt.Errorf("%w: leaf page %d next leaf %d, want %d", ErrTreeInvariant, id, got, want)
+		}
 	}
 	return nil
 }

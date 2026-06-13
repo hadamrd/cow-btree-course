@@ -48,7 +48,7 @@ offset = pageID * PageSize
 size   = PageSize
 ```
 
-Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from each metadata candidate root, including overflow chains referenced by leaf values, and rejects corruption before serving reads. Validation is deliberately layered: first the page checksum must match, then the page bytes must still form a legal layout, then branch routing must still describe a proper tree. Leaf and branch pages validate their slotted-page structure before any key/value cells are decoded; overflow pages validate their payload length before the chain is followed, and referenced overflow chains must contain exactly the number of payload bytes recorded in the leaf's `OVF1` reference. Branch pages also reject duplicate child references and separators that do not match the first key of their right child. If an older metadata candidate is still reachable and valid, it can be used as the recovery point.
+Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from each metadata candidate root, including overflow chains referenced by leaf values, and rejects corruption before serving reads. Validation is deliberately layered: first the page checksum must match, then the page bytes must still form a legal layout, then branch routing must still describe a proper tree. Leaf and branch pages validate their slotted-page structure before any key/value cells are decoded; overflow pages validate their payload length before the chain is followed, and referenced overflow chains must contain exactly the number of payload bytes recorded in the leaf's `OVF1` reference. Branch pages also reject duplicate child references and separators that do not match the first key of their right child. Leaf pages reject next-leaf links that do not match the branch-order leaf sequence. If an older metadata candidate is still reachable and valid, it can be used as the recovery point.
 
 The database page size is fixed at 4096 bytes for the lesson. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them. Dirty logical pages are coalesced into contiguous ranges before `msync`, so a small write does not force the whole mapped file to flush.
 
@@ -73,6 +73,18 @@ The important caching point is that mmap already uses the kernel page cache. Add
 - `MmapAccessDefault` returns the mapping to the kernel's normal policy.
 
 These are hints, not contracts. The kernel can ignore them or combine them with its own readahead heuristics. Correctness comes from the page checksums, copy-on-write roots, and metadata validation, not from prefetch behavior.
+
+## Coordinating With Linux Readahead
+
+Linux already tries to detect sequential access on file-backed mappings. That is helpful for a table scan, but a B+tree point lookup is not a table scan: after the root, the next useful page is chosen by key comparison, not by physical page number. If we let the kernel assume too much sequential locality, it can pull unrelated pages into memory and evict pages we actually need.
+
+The implementation therefore uses three rules:
+
+- keep normal point lookups random-friendly with `MADV_RANDOM` or default advice
+- prefetch only exact page IDs when the tree knows the next page, such as linked leaves during a range scan
+- avoid prefetch when the tree cannot prove the hint is still correct, such as while active readers have deferred leaf-link repair
+
+This is why `RangeFrom` and `RangeBetween` first descend the tree to the correct lower-bound leaf, then issue small `MADV_WILLNEED` hints for a bounded window of linked next leaves. They do not switch the whole mapping to sequential mode for ordinary bounded scans. Broad `MADV_SEQUENTIAL` remains available through `Tree.Advise` for explicit bulk passes, such as a full verification walk, where physical readahead is likely to be useful.
 
 The project also has a small user-space page cache, but it deliberately does not cache raw page bytes. Raw bytes stay in the mmap region and the kernel page cache. The Go cache stores derived branch-routing metadata: decoded separator keys and child page IDs for branch pages reached by current-tree `Get`. Each entry is keyed by page ID plus the page checksum. If a page ID is later reused with different bytes, the checksum changes and the cache refreshes the decoded routing entry. `Stats` exposes `PageCacheEntries`, `PageCacheHits`, `PageCacheMisses`, and `PageCacheInvalidations` so this behavior is visible.
 
