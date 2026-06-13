@@ -172,6 +172,80 @@ func TestDeleteRedistributesUnderfullLeafWhenMergeCannotFit(t *testing.T) {
 	snapshot.Close()
 }
 
+func TestDeleteMergesUnderfullBranchAndCollapsesRoot(t *testing.T) {
+	tree := New(3)
+	seedBranchMergeAfterDeleteTree(tree)
+	snapshot := tree.Snapshot()
+
+	if got := tree.Stats().Height; got != 3 {
+		t.Fatalf("seeded tree height = %d, want 3", got)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check seeded tree before branch merge: %v", err)
+	}
+	old, deleted := tree.Delete("key-08")
+	if !deleted || string(old) != "value-08" {
+		t.Fatalf("Delete(key-08) = %q, %v; want value-08, true", old, deleted)
+	}
+
+	stats := tree.Stats()
+	if stats.Height != 2 {
+		t.Fatalf("height after branch merge = %d, want 2", stats.Height)
+	}
+	root := tree.pages[tree.root]
+	if !root.isBranch() {
+		t.Fatalf("root after branch merge is not a branch")
+	}
+	for _, child := range root.childIDs() {
+		if tree.pages[child].isBranch() {
+			t.Fatalf("root still points at branch child %d after absorbable branch merge", child)
+		}
+	}
+	if got, ok := snapshot.Get("key-08"); !ok || string(got) != "value-08" {
+		t.Fatalf("snapshot Get(key-08) = %q, %v; want value-08, true", got, ok)
+	}
+	if _, ok := tree.Get("key-08"); ok {
+		t.Fatalf("current tree still contains deleted key-08")
+	}
+	wantKeys := append(sequentialKeys(8), sequentialKeys(12)[9:]...)
+	var gotKeys []string
+	tree.Range(func(key string, value []byte) bool {
+		gotKeys = append(gotKeys, key)
+		return true
+	})
+	if !reflect.DeepEqual(gotKeys, wantKeys) {
+		t.Fatalf("Range after branch merge = %v, want %v", gotKeys, wantKeys)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after branch merge: %v", err)
+	}
+	snapshot.Close()
+}
+
+func TestDeleteMergesUnderfullBranchWithRightSibling(t *testing.T) {
+	tree := New(3)
+	seedBranchMergeAfterDeleteTree(tree)
+
+	if old, deleted := tree.Delete("key-04"); !deleted || string(old) != "value-04" {
+		t.Fatalf("Delete(key-04) = %q, %v; want value-04, true", old, deleted)
+	}
+	if got := tree.Stats().Height; got != 2 {
+		t.Fatalf("height after right-sibling branch merge = %d, want 2", got)
+	}
+	wantKeys := append(sequentialKeys(4), sequentialKeys(12)[5:]...)
+	var gotKeys []string
+	tree.Range(func(key string, value []byte) bool {
+		gotKeys = append(gotKeys, key)
+		return true
+	})
+	if !reflect.DeepEqual(gotKeys, wantKeys) {
+		t.Fatalf("Range after right-sibling branch merge = %v, want %v", gotKeys, wantKeys)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after right-sibling branch merge: %v", err)
+	}
+}
+
 func seedLeafRedistributionTree(tree *Tree) {
 	leftID := tree.allocPage()
 	rightID := tree.allocPage()
@@ -198,6 +272,51 @@ func seedLeafRedistributionTree(tree *Tree) {
 	tree.root = rootID
 	tree.length = 7
 	tree.revision = 1
+}
+
+func seedBranchMergeAfterDeleteTree(tree *Tree) {
+	leafIDs := make([]PageID, 0, 6)
+	for leafIndex := 0; leafIndex < 6; leafIndex++ {
+		id := tree.allocPage()
+		leaf := tree.newPage(id, flagLeaf)
+		tree.pages[id] = leaf
+		base := leafIndex * 2
+		tree.writeLeafEntries(leaf, []leafEntry{
+			{key: fmt.Sprintf("key-%02d", base), value: []byte(fmt.Sprintf("value-%02d", base))},
+			{key: fmt.Sprintf("key-%02d", base+1), value: []byte(fmt.Sprintf("value-%02d", base+1))},
+		})
+		if len(leafIDs) > 0 {
+			tree.pages[leafIDs[len(leafIDs)-1]].setNextLeaf(id)
+		}
+		leafIDs = append(leafIDs, id)
+	}
+
+	leftBranchID := tree.allocPage()
+	rightBranchID := tree.allocPage()
+	rootID := tree.allocPage()
+	leftBranch := tree.newPage(leftBranchID, flagBranch)
+	rightBranch := tree.newPage(rightBranchID, flagBranch)
+	root := tree.newPage(rootID, flagBranch)
+	tree.pages[leftBranchID] = leftBranch
+	tree.pages[rightBranchID] = rightBranch
+	tree.pages[rootID] = root
+	mustWriteBranchParts(leftBranch, []string{"key-02", "key-04"}, leafIDs[:3])
+	mustWriteBranchParts(rightBranch, []string{"key-08", "key-10"}, leafIDs[3:])
+	mustWriteBranchParts(root, []string{"key-06"}, []PageID{leftBranchID, rightBranchID})
+	tree.root = rootID
+	tree.length = 12
+	tree.revision = 1
+}
+
+func seedUnderfullBranchTree(tree *Tree) {
+	seedBranchMergeAfterDeleteTree(tree)
+	root := tree.pages[tree.root]
+	_, children := root.branchParts()
+	right := tree.pages[children[1]]
+	rightChildren := right.childIDs()
+	tree.pages[rightChildren[1]].setNextLeaf(0)
+	mustWriteBranchParts(right, []string{"key-08"}, rightChildren[:2])
+	tree.length = 10
 }
 
 func seedUnderfullLeafTree(tree *Tree) {
@@ -641,6 +760,19 @@ func TestCheckRejectsOpenTreeWithUnderfullNonRootLeaf(t *testing.T) {
 	}
 	if !errors.Is(err, ErrTreeInvariant) {
 		t.Fatalf("Check underfull leaf error = %v, want ErrTreeInvariant", err)
+	}
+}
+
+func TestCheckRejectsOpenTreeWithUnderfullNonRootBranch(t *testing.T) {
+	tree := New(3)
+	seedUnderfullBranchTree(tree)
+
+	err := tree.Check()
+	if err == nil {
+		t.Fatalf("Check accepted underfull non-root branch")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("Check underfull branch error = %v, want ErrTreeInvariant", err)
 	}
 }
 

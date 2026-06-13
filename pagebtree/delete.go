@@ -6,8 +6,9 @@ import "slices"
 //
 // Like Put, Delete is copy-on-write: it copies the root and every page on the
 // search path before changing page bytes. It merges or redistributes underfull
-// leaf siblings, then rebuilds branch separators and collapses a one-child
-// root. It deliberately stops short of full branch-level sibling redistribution.
+// leaf siblings, merges underfull branch siblings when their children fit in
+// one page, then rebuilds branch separators and collapses a one-child root. It
+// deliberately stops short of branch sibling borrow and redistribution.
 func (t *Tree) Delete(key string) ([]byte, bool) {
 	if t.closed || t.readOnly || t.root == 0 {
 		return nil, false
@@ -67,6 +68,7 @@ func (t *Tree) deleteFromBranch(p *page, key string) bool {
 		children = append(children[:index], children[index+1:]...)
 	} else {
 		children = t.mergeUnderfullLeaf(children, index)
+		children = t.mergeUnderfullBranch(children, index)
 	}
 	t.writeBranchChildren(p, children)
 	return true
@@ -128,6 +130,44 @@ func (t *Tree) mergeUnderfullLeaf(children []PageID, index int) []PageID {
 			child.setNextLeaf(rightID)
 			t.writeLeafEntries(right, merged[split:])
 			return children
+		}
+	}
+	return children
+}
+
+func (t *Tree) mergeUnderfullBranch(children []PageID, index int) []PageID {
+	if len(children) <= 1 || index < 0 || index >= len(children) {
+		return children
+	}
+	child := t.pages[children[index]]
+	if child == nil || !child.isBranch() || int(child.slotCount()) >= minKeys(t.degree) {
+		return children
+	}
+
+	if index > 0 {
+		left := t.pages[children[index-1]]
+		if left != nil && left.isBranch() {
+			mergedChildren := append(left.childIDs(), child.childIDs()...)
+			if len(mergedChildren) <= maxKeys(t.degree)+1 {
+				leftID := t.copyPage(children[index-1])
+				left = t.pages[leftID]
+				children[index-1] = leftID
+				t.writeBranchChildren(left, mergedChildren)
+				t.retirePage(children[index])
+				return append(children[:index], children[index+1:]...)
+			}
+		}
+	}
+
+	if index+1 < len(children) {
+		right := t.pages[children[index+1]]
+		if right != nil && right.isBranch() {
+			mergedChildren := append(child.childIDs(), right.childIDs()...)
+			if len(mergedChildren) <= maxKeys(t.degree)+1 {
+				t.writeBranchChildren(child, mergedChildren)
+				t.retirePage(children[index+1])
+				return append(children[:index+1], children[index+2:]...)
+			}
 		}
 	}
 	return children

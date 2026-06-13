@@ -282,6 +282,60 @@ func TestMmapTreePersistsLeafRedistributionAfterDelete(t *testing.T) {
 	}
 }
 
+func TestMmapTreePersistsBranchMergeAfterDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 3, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	seedBranchMergeAfterDeleteTree(tree)
+	if got := tree.Stats().Height; got != 3 {
+		t.Fatalf("seeded mmap tree height = %d, want 3", got)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check seeded mmap tree before branch merge: %v", err)
+	}
+
+	if old, deleted := tree.Delete("key-08"); !deleted || string(old) != "value-08" {
+		t.Fatalf("Delete(key-08) = %q, %v; want value-08, true", old, deleted)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after branch merge: %v", err)
+	}
+	if got := tree.Stats().Height; got != 2 {
+		t.Fatalf("height after branch merge = %d, want 2", got)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("Check after reopen: %v", err)
+	}
+	if got := reopened.Stats().Height; got != 2 {
+		t.Fatalf("reopened height after branch merge = %d, want 2", got)
+	}
+	if _, ok := reopened.Get("key-08"); ok {
+		t.Fatalf("reopened tree found deleted key-08")
+	}
+	wantKeys := append(sequentialKeys(8), sequentialKeys(12)[9:]...)
+	var gotKeys []string
+	reopened.Range(func(key string, value []byte) bool {
+		gotKeys = append(gotKeys, key)
+		return true
+	})
+	if !slices.Equal(gotKeys, wantKeys) {
+		t.Fatalf("reopened Range after branch merge = %v, want %v", gotKeys, wantKeys)
+	}
+}
+
 func TestMmapTreeRejectsUnderfullNonRootLeaf(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -302,6 +356,29 @@ func TestMmapTreeRejectsUnderfullNonRootLeaf(t *testing.T) {
 	}
 	if !errors.Is(err, ErrTreeInvariant) {
 		t.Fatalf("OpenMmap underfull leaf error = %v, want ErrTreeInvariant", err)
+	}
+}
+
+func TestMmapTreeRejectsUnderfullNonRootBranch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 3, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	seedUnderfullBranchTree(tree)
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+	keepOnlyNewestMetaPage(t, path)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with underfull non-root branch")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("OpenMmap underfull branch error = %v, want ErrTreeInvariant", err)
 	}
 }
 

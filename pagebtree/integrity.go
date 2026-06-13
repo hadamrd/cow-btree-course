@@ -142,6 +142,9 @@ func (t *Tree) validatePageBounds(id PageID, seen map[PageID]bool, lower string,
 	if !p.isBranch() {
 		return fmt.Errorf("%w: reachable page %d is not a tree page", ErrTreeInvariant, id)
 	}
+	if id != t.root && int(p.slotCount()) < minKeys(t.degree) {
+		return fmt.Errorf("%w: branch page %d has %d keys, want at least %d", ErrTreeInvariant, id, p.slotCount(), minKeys(t.degree))
+	}
 	children := p.childIDs()
 	for index, child := range children {
 		if child == 0 {
