@@ -40,10 +40,14 @@ func (t *Tree) leafCellValue(key string, value []byte) ([]byte, uint16) {
 	if !shouldStoreOverflow(key, value) {
 		return cloneBytes(value), 0
 	}
+	return t.overflowCellValue(value), slotFlagOverflow
+}
+
+func (t *Tree) overflowCellValue(value []byte) []byte {
 	return encodeOverflowRef(overflowRef{
 		first:  t.writeOverflowChain(value),
 		length: len(value),
-	}), slotFlagOverflow
+	})
 }
 
 func shouldStoreOverflow(key string, value []byte) bool {

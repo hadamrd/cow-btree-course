@@ -117,6 +117,8 @@ The leaf slot carries an overflow flag. When that flag is set, the cell value is
 
 Overflow pages are immutable once published. When a large value is replaced, the old overflow chain is retired with the same reader-pinned freelist rules as copied tree pages, so older snapshots can still read the old bytes until they close.
 
+There is also a second overflow path for byte-full leaf pages. A value can be small enough to stay inline on its own, but several such values may not fit in one leaf page together. During a copied leaf rewrite, the implementation first tries the natural inline layout. If the page runs out of bytes, it spills the largest inline cell to overflow pages and retries until the leaf fits.
+
 ## Snapshot Proof
 
 ```mermaid
@@ -142,7 +144,7 @@ The page package models page identity, root publication, and slotted cell storag
 - Pages are kept in an in-memory map rather than written to disk.
 - The implementation rewrites a copied page from decoded entries during insertion; it does not do in-place cell compaction.
 - `Get` searches slots directly, but insertion still decodes page contents before rewriting the copied page.
-- Large values use overflow pages, but leaf pages do not yet rebalance based on byte fullness.
+- Byte-full leaf rewrites spill inline cells to overflow pages, but the tree still does not do byte-balanced redistribution between sibling leaves.
 - Branch pages contain separator keys and child page ids; values live in leaves.
 - There is no deletion or disk persistence yet.
 

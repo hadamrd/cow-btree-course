@@ -107,18 +107,54 @@ func mustWriteLeafEntries(p *page, entries []leafEntry) {
 }
 
 func (t *Tree) writeLeafEntries(p *page, entries []leafEntry) {
+	encoded := make([]leafEntry, len(entries))
+	for i, entry := range entries {
+		encoded[i] = entry
+		if entry.encoded {
+			continue
+		}
+		encoded[i].value, encoded[i].slotFlags = t.leafCellValue(entry.key, entry.value)
+		encoded[i].encoded = true
+	}
+
+	for {
+		if writeEncodedLeafEntries(p, encoded) {
+			return
+		}
+		index := largestInlineLeafEntry(encoded)
+		if index < 0 {
+			panic("leaf page overflow")
+		}
+		encoded[index].value = t.overflowCellValue(encoded[index].value)
+		encoded[index].slotFlags = slotFlagOverflow
+	}
+}
+
+func writeEncodedLeafEntries(p *page, entries []leafEntry) bool {
 	p.reset(flagLeaf)
 	for _, entry := range entries {
-		value := entry.value
-		flags := entry.slotFlags
-		if !entry.encoded {
-			value, flags = t.leafCellValue(entry.key, entry.value)
-		}
-		if !p.appendCellWithFlags(entry.key, value, flags) {
-			panic("leaf page overflow")
+		if !p.appendCellWithFlags(entry.key, entry.value, entry.slotFlags) {
+			return false
 		}
 	}
 	p.updateChecksum()
+	return true
+}
+
+func largestInlineLeafEntry(entries []leafEntry) int {
+	index := -1
+	var size int
+	for i, entry := range entries {
+		if entry.slotFlags&slotFlagOverflow != 0 {
+			continue
+		}
+		entrySize := len(entry.key) + len(entry.value)
+		if index < 0 || entrySize > size {
+			index = i
+			size = entrySize
+		}
+	}
+	return index
 }
 
 func mustWriteBranchParts(p *page, keys []string, children []PageID) {

@@ -329,6 +329,32 @@ func TestInlineValueThatLooksLikeOverflowReferenceStaysInline(t *testing.T) {
 	}
 }
 
+func TestMediumValuesSpillToOverflowWhenLeafRunsOutOfBytes(t *testing.T) {
+	tree := New(4)
+	values := map[string][]byte{
+		"k1": bytes.Repeat([]byte("a"), 1800),
+		"k2": bytes.Repeat([]byte("b"), 1800),
+		"k3": bytes.Repeat([]byte("c"), 1800),
+	}
+
+	for key, value := range values {
+		tree.Put(key, value)
+	}
+
+	for key, want := range values {
+		got, ok := tree.Get(key)
+		if !ok {
+			t.Fatalf("Get missed %s", key)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("Get(%s) length/content mismatch: got len %d, want len %d", key, len(got), len(want))
+		}
+	}
+	if tree.Stats().Pages < 2 {
+		t.Fatalf("Pages = %d, want leaf plus spill overflow pages", tree.Stats().Pages)
+	}
+}
+
 func sharesAtLeastOnePage(leftRoot, rightRoot PageID, pages map[PageID]*page) bool {
 	seen := map[PageID]bool{}
 	collectPageIDs(leftRoot, pages, seen)

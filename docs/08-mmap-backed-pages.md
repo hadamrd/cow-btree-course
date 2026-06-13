@@ -88,6 +88,7 @@ This chapter makes the project more serious, but it is still not a production da
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed, but there is no page-level repair
 - file locking is exclusive-writer only; there is no shared-reader lock table
 - overflow pages are linear chains, not a compact extent/tree structure
+- byte-full leaf rewrites can spill cells to overflow pages, but sibling redistribution is still key-count based
 - `Get` searches slot directories directly, but insertion still rewrites copied pages from decoded entries
 - page capacity is fixed at open time
 
