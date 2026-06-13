@@ -283,7 +283,11 @@ func (t *Tree) Close() error {
 			if t.arena == nil {
 				return err
 			}
-			return errors.Join(err, t.arena.close())
+			closeErr := t.arena.close()
+			if closeErr == nil {
+				t.closed = true
+			}
+			return errors.Join(err, closeErr)
 		}
 	}
 	t.closed = true

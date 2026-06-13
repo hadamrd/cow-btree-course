@@ -216,6 +216,49 @@ func TestMmapCloseWaitsForActiveSnapshots(t *testing.T) {
 	}
 }
 
+func TestMmapCloseAfterSyncFailureMarksHandleClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 1024})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	if _, replaced := tree.Put("alpha", []byte("one")); replaced {
+		t.Fatalf("first Put replaced existing key")
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	clear(tree.arena.dirtyPages)
+	tree.free = make([]PageID, maxMetaFreePages+1)
+	for i := range tree.free {
+		tree.free[i] = firstTreePageID + PageID(i)
+	}
+
+	err = tree.Close()
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("Close oversized freelist error = %v, want ErrMetaInvariant", err)
+	}
+	if !tree.closed {
+		t.Fatalf("tree.closed after failed close-time Sync = false, want true because arena resources were released")
+	}
+	if tree.arena.data != nil {
+		t.Fatalf("arena data after failed close-time Sync is still retained, want nil")
+	}
+	if tree.arena.file != nil {
+		t.Fatalf("arena file after failed close-time Sync is still retained, want nil")
+	}
+	if tree.arena.locked {
+		t.Fatalf("arena locked after failed close-time Sync = true, want false")
+	}
+	if stats := tree.Stats(); stats != (Stats{}) {
+		t.Fatalf("Stats after failed close-time Sync = %+v, want zero value", stats)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("second Close after failed close-time Sync = %v, want nil", err)
+	}
+}
+
 func TestMmapSnapshotAfterCloseIsInert(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

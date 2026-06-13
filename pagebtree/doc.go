@@ -25,7 +25,9 @@
 // page ids when no snapshot is active; if compacted metadata publication fails,
 // the temporary in-memory compaction state is restored. Close returns
 // ErrActiveReaders for mmap-backed trees while snapshots are active, because
-// those snapshots still read slices backed by the mapping.
+// those snapshots still read slices backed by the mapping. If close-time Sync
+// fails but the mmap resources are still released, the handle is marked closed
+// while the sync error is returned.
 // A Snapshot requested after Close is inert and does not register a reader.
 // Post-close inspection and maintenance calls such as Stats, Sync, Advise,
 // DropMmapCache, and MmapCacheStats do not touch the released mapping.
