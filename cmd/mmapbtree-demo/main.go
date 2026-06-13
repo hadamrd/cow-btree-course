@@ -36,6 +36,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer reopened.Close()
+	if err := reopened.Advise(pagebtree.MmapAccessRandom); err != nil {
+		log.Fatal(err)
+	}
 
 	value, ok := reopened.Get("key-17")
 	if !ok {

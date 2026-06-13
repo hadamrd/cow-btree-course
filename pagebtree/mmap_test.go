@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -111,6 +112,96 @@ func TestMmapTreePersistsDeleteAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMmapSyncFlushesDataPagesBeforePublishingMeta(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	tree.Put("alpha", []byte("one"))
+	metaIndex := int(tree.Revision() % metaPageCount)
+	if record, ok := readMetaPage(tree.arena.data[metaIndex*PageSize : (metaIndex+1)*PageSize]); ok && record.revision == tree.Revision() {
+		t.Fatalf("metadata page for revision %d was published before Sync", tree.Revision())
+	}
+
+	var events []string
+	tree.arena.syncObserver = func(event string) {
+		events = append(events, event)
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	want := []string{"data", "meta"}
+	if !slices.Equal(events, want) {
+		t.Fatalf("sync events = %v, want %v", events, want)
+	}
+	record, ok := readMetaPage(tree.arena.data[metaIndex*PageSize : (metaIndex+1)*PageSize])
+	if !ok {
+		t.Fatalf("metadata page %d is not valid after Sync", metaIndex)
+	}
+	if record.revision != tree.Revision() {
+		t.Fatalf("metadata revision after Sync = %d, want %d", record.revision, tree.Revision())
+	}
+}
+
+func TestMmapAccessAdviceKeepsReadsWorking(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, AccessPattern: MmapAccessRandom})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	for _, pattern := range []MmapAccessPattern{MmapAccessRandom, MmapAccessSequential, MmapAccessWillNeed, MmapAccessDefault} {
+		if err := tree.Advise(pattern); err != nil {
+			t.Fatalf("Advise(%v): %v", pattern, err)
+		}
+		got, ok := tree.Get("alpha")
+		if !ok || string(got) != "one" {
+			t.Fatalf("Get(alpha) after Advise(%v) = %q, %v; want one, true", pattern, got, ok)
+		}
+	}
+
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestMmapReadOnlyAccessAdviceKeepsReadsWorking(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	defer reader.Close()
+
+	if err := reader.Advise(MmapAccessRandom); err != nil {
+		t.Fatalf("read-only Advise(random): %v", err)
+	}
+	got, ok := reader.Get("alpha")
+	if !ok || string(got) != "one" {
+		t.Fatalf("read-only Get(alpha) after advice = %q, %v; want one, true", got, ok)
+	}
+}
+
 func TestMmapTreeStoresSlottedPageBytesInFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -155,6 +246,9 @@ func TestMmapTreeFallsBackToOlderValidMetaPage(t *testing.T) {
 		t.Fatalf("OpenMmap create: %v", err)
 	}
 	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync older root: %v", err)
+	}
 	tree.Put("bravo", []byte("two"))
 	if err := tree.Close(); err != nil {
 		t.Fatalf("Close create: %v", err)
@@ -188,6 +282,9 @@ func TestMmapTreeFallsBackWhenNewestRootPageIsCorrupt(t *testing.T) {
 	}
 	tree.Put("alpha", []byte("one"))
 	olderRoot := tree.Stats().Root
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync older root: %v", err)
+	}
 	tree.Put("bravo", []byte("two"))
 	newestRoot := tree.Stats().Root
 	if newestRoot == olderRoot {
@@ -224,6 +321,9 @@ func TestMmapTreeUsesNewestValidMetaPage(t *testing.T) {
 		t.Fatalf("OpenMmap create: %v", err)
 	}
 	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync older root: %v", err)
+	}
 	tree.Put("bravo", []byte("two"))
 	if err := tree.Close(); err != nil {
 		t.Fatalf("Close create: %v", err)

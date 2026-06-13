@@ -7,9 +7,19 @@ import "errors"
 var ErrDatabaseLocked = errors.New("mmap tree database is already locked")
 
 type MmapOptions struct {
-	Degree   int
-	MaxPages int
+	Degree        int
+	MaxPages      int
+	AccessPattern MmapAccessPattern
 }
+
+type MmapAccessPattern int
+
+const (
+	MmapAccessDefault MmapAccessPattern = iota
+	MmapAccessRandom
+	MmapAccessSequential
+	MmapAccessWillNeed
+)
 
 type mmapArena struct{}
 
@@ -25,7 +35,11 @@ func (a *mmapArena) pageBytes(id PageID) ([]byte, error) {
 	return nil, errors.New("mmap page storage is only available on Unix-like platforms")
 }
 
-func (a *mmapArena) sync() error {
+func (t *Tree) syncMmap() error {
+	return nil
+}
+
+func (t *Tree) Advise(pattern MmapAccessPattern) error {
 	return nil
 }
 

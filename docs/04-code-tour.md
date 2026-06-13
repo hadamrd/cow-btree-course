@@ -90,4 +90,4 @@ Read this package after the pointer-based `btree` package. The important files a
 - `pagebtree/tree.go` for `Put`, `Get`, snapshots, and root page publication.
 - `pagebtree/insert.go` for copy-before-descend insertion and leaf/branch splits.
 - `pagebtree/delete.go` for copy-before-descend deletion, empty-child cleanup, and root collapse.
-- `pagebtree/mmap.go` for `OpenMmap`, `OpenMmapReadOnly`, metadata recovery, and file locking.
+- `pagebtree/mmap.go` for `OpenMmap`, `OpenMmapReadOnly`, metadata recovery, data-before-metadata sync, access-pattern advice, and file locking.

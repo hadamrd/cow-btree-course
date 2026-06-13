@@ -26,7 +26,6 @@ func (t *Tree) Delete(key string) ([]byte, bool) {
 	t.length--
 	t.revision++
 	t.reclaimRetiredPages()
-	t.persistMeta()
 	return old, true
 }
 

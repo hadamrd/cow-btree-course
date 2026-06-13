@@ -1,5 +1,7 @@
 package pagebtree
 
+import "errors"
+
 type Tree struct {
 	pages         map[PageID]*page
 	root          PageID
@@ -55,7 +57,6 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 		t.root = id
 		t.length = 1
 		t.revision++
-		t.persistMeta()
 		return nil, false
 	}
 
@@ -75,7 +76,6 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 	}
 	t.revision++
 	t.reclaimRetiredPages()
-	t.persistMeta()
 	return old, replaced
 }
 
@@ -143,11 +143,11 @@ func (t *Tree) Sync() error {
 	if t.readOnly {
 		return nil
 	}
-	t.persistMeta()
 	if t.arena == nil {
+		t.persistMeta()
 		return nil
 	}
-	return t.arena.sync()
+	return t.syncMmap()
 }
 
 func (t *Tree) Close() error {
@@ -156,7 +156,12 @@ func (t *Tree) Close() error {
 	}
 	t.closed = true
 	if !t.readOnly {
-		t.persistMeta()
+		if err := t.Sync(); err != nil {
+			if t.arena == nil {
+				return err
+			}
+			return errors.Join(err, t.arena.close())
+		}
 	}
 	if t.arena == nil {
 		return nil

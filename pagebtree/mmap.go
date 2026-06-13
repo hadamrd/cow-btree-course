@@ -37,17 +37,28 @@ const firstTreePageID = PageID(metaPageCount)
 const maxMetaFreePages = (PageSize - metaFreeListOff) / 8
 
 type MmapOptions struct {
-	Degree   int
-	MaxPages int
+	Degree        int
+	MaxPages      int
+	AccessPattern MmapAccessPattern
 }
 
 type mmapArena struct {
-	file     *os.File
-	data     []byte
-	maxPages int
-	locked   bool
-	readOnly bool
+	file         *os.File
+	data         []byte
+	maxPages     int
+	locked       bool
+	readOnly     bool
+	syncObserver func(string)
 }
+
+type MmapAccessPattern int
+
+const (
+	MmapAccessDefault MmapAccessPattern = iota
+	MmapAccessRandom
+	MmapAccessSequential
+	MmapAccessWillNeed
+)
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
@@ -101,6 +112,10 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		maxPages: maxPages,
 		locked:   true,
 	}
+	if err := arena.advise(options.AccessPattern); err != nil {
+		arena.close()
+		return nil, err
+	}
 
 	tree := &Tree{
 		pages:    map[PageID]*page{},
@@ -117,7 +132,6 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		return tree, nil
 	}
 
-	tree.persistMeta()
 	if err := tree.Sync(); err != nil {
 		arena.close()
 		return nil, err
@@ -191,14 +205,83 @@ func (a *mmapArena) pageBytes(id PageID) ([]byte, error) {
 	return a.data[start : start+PageSize], nil
 }
 
-func (a *mmapArena) sync() error {
-	if a == nil || a.readOnly {
+func (a *mmapArena) syncDataPages(nextPage PageID) error {
+	if a == nil || a.readOnly || nextPage <= firstTreePageID {
 		return nil
 	}
-	if err := unix.Msync(a.data, unix.MS_SYNC); err != nil {
+	end := int(nextPage) * PageSize
+	if end > len(a.data) {
+		return fmt.Errorf("next page %d exceeds mmap size %d", nextPage, len(a.data))
+	}
+	if a.syncObserver != nil {
+		a.syncObserver("data")
+	}
+	if err := a.msyncRange(int(firstTreePageID)*PageSize, end); err != nil {
 		return err
 	}
 	return a.file.Sync()
+}
+
+func (a *mmapArena) syncMetaPage(index int) error {
+	if a == nil || a.readOnly {
+		return nil
+	}
+	if index < 0 || index >= metaPageCount {
+		return fmt.Errorf("metadata page index %d outside range", index)
+	}
+	start := index * PageSize
+	if a.syncObserver != nil {
+		a.syncObserver("meta")
+	}
+	if err := a.msyncRange(start, start+PageSize); err != nil {
+		return err
+	}
+	return a.file.Sync()
+}
+
+func (a *mmapArena) msyncRange(start, end int) error {
+	if start < 0 || end < start || end > len(a.data) {
+		return fmt.Errorf("msync range [%d,%d) outside mmap size %d", start, end, len(a.data))
+	}
+	if start == end {
+		return nil
+	}
+	osPageSize := unix.Getpagesize()
+	alignedStart := start - start%osPageSize
+	alignedEnd := end
+	if remainder := alignedEnd % osPageSize; remainder != 0 {
+		alignedEnd += osPageSize - remainder
+	}
+	if alignedEnd > len(a.data) {
+		alignedEnd = len(a.data)
+	}
+	return unix.Msync(a.data[alignedStart:alignedEnd], unix.MS_SYNC)
+}
+
+func (a *mmapArena) advise(pattern MmapAccessPattern) error {
+	if a == nil || len(a.data) == 0 {
+		return nil
+	}
+	advice, err := mmapAdvice(pattern)
+	if err != nil {
+		return err
+	}
+	return unix.Madvise(a.data, advice)
+}
+
+func mmapAdvice(pattern MmapAccessPattern) (int, error) {
+	switch pattern {
+	case MmapAccessDefault:
+		return unix.MADV_NORMAL, nil
+	case MmapAccessRandom:
+		return unix.MADV_RANDOM, nil
+	case MmapAccessSequential:
+		return unix.MADV_SEQUENTIAL, nil
+	case MmapAccessWillNeed:
+		return unix.MADV_WILLNEED, nil
+	default:
+		return 0, fmt.Errorf("unknown mmap access pattern %d", pattern)
+	}
 }
 
 func (a *mmapArena) close() error {
@@ -207,11 +290,6 @@ func (a *mmapArena) close() error {
 	}
 
 	var errs []error
-	if !a.readOnly {
-		if err := a.sync(); err != nil {
-			errs = append(errs, err)
-		}
-	}
 	if err := unix.Munmap(a.data); err != nil {
 		errs = append(errs, err)
 	}
@@ -341,6 +419,24 @@ func (t *Tree) persistMeta() {
 		maxPages: t.arena.maxPages,
 		free:     t.free,
 	})
+}
+
+func (t *Tree) syncMmap() error {
+	if t.arena == nil || t.arena.readOnly {
+		return nil
+	}
+	if err := t.arena.syncDataPages(t.nextPage); err != nil {
+		return err
+	}
+	t.persistMeta()
+	return t.arena.syncMetaPage(int(t.revision % metaPageCount))
+}
+
+func (t *Tree) Advise(pattern MmapAccessPattern) error {
+	if t.arena == nil {
+		return nil
+	}
+	return t.arena.advise(pattern)
 }
 
 func readMetaPage(data []byte) (metaRecord, bool) {

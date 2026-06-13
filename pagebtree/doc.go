@@ -7,5 +7,8 @@
 // overflow pages hold large values that do not fit cleanly inside a leaf cell.
 // Put and Delete publish new roots through copy-on-write, while snapshots keep
 // reading their older roots. OpenMmapReadOnly opens mmap files with a shared
-// read lock and rejects mutations through the returned tree handle.
+// read lock and rejects mutations through the returned tree handle. Mmap-backed
+// trees expose Advise so callers can pass random, sequential, or will-need
+// access-pattern hints to the kernel page cache without adding a second Go heap
+// page cache.
 package pagebtree

@@ -37,7 +37,7 @@ Pages `0` and `1` are alternating metadata pages:
 - reusable page IDs
 - CRC32 checksum
 
-Each commit writes the metadata page selected by `revision % 2`. On reopen, the tree validates both metadata checksums, then tries candidate records from newest to oldest. A candidate is usable only if the root and every reachable tree or overflow page also pass validation. If the newest metadata page is torn, corrupted, or points at a torn root page, the older valid page can still point to a previous root.
+`Sync` is the explicit durability boundary. It flushes tree and overflow page bytes first, then writes the metadata page selected by `revision % 2`, then flushes that metadata page. `Close` calls `Sync` for writable trees. On reopen, the tree validates both metadata checksums, then tries candidate records from newest to oldest. A candidate is usable only if the root and every reachable tree or overflow page also pass validation. If the newest metadata page is torn, corrupted, or points at a torn root page, the older valid page can still point to a previous root.
 
 The reusable page IDs are stored directly in the metadata page for now. That keeps the lesson compact and makes close/reopen freelist behavior visible. A larger database would usually store freelist records in normal pages and have metadata point to the freelist root.
 
@@ -50,6 +50,8 @@ size   = PageSize
 
 Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from each metadata candidate root, including overflow chains referenced by leaf values, and rejects corruption before serving reads. If an older metadata candidate is still reachable and valid, it can be used as the recovery point.
 
+The database page size is fixed at 4096 bytes for the lesson. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them.
+
 ## Why Mmap Helps
 
 With mmap, the operating system maps file pages into the process address space. Code can read and write page bytes through memory loads and stores, while the OS page cache handles bringing file pages in and flushing dirty pages out.
@@ -60,6 +62,29 @@ That is one of the reasons B-trees pair well with page-oriented storage:
 - branch nodes reduce random I/O by keeping the tree shallow
 - hot pages stay in the OS page cache
 - range scans can walk mostly sequential page memory
+
+The important caching point is that mmap already uses the kernel page cache. Adding a second, broad Go heap page cache would often duplicate memory and fight the kernel. This project keeps page bytes in the mapping and adds access-pattern advice instead:
+
+- `MmapAccessRandom` uses `madvise(MADV_RANDOM)`. This is the best default for point lookups because B+tree descent jumps from root to branch to leaf, and the next physical page is often unrelated.
+- `MmapAccessSequential` uses `madvise(MADV_SEQUENTIAL)`. Use it before range scans or bulk verification passes where nearby pages are likely to be read soon.
+- `MmapAccessWillNeed` uses `madvise(MADV_WILLNEED)`. Use it as a prefetch hint before a known upcoming scan.
+- `MmapAccessDefault` returns the mapping to the kernel's normal policy.
+
+These are hints, not contracts. The kernel can ignore them or combine them with its own readahead heuristics. Correctness comes from the page checksums, copy-on-write roots, and metadata validation, not from prefetch behavior.
+
+```mermaid
+flowchart TD
+    G["Get(key)"] --> A["Advise random access"]
+    A --> R["root page"]
+    R --> B["branch page"]
+    B --> L["leaf page"]
+    L --> V["value or overflow chain"]
+
+    S["Range scan"] --> Q["Advise sequential / will-need"]
+    Q --> P1["leaf page N"]
+    P1 --> P2["leaf page N+1"]
+    P2 --> P3["leaf page N+2"]
+```
 
 ## File Lock
 
@@ -89,7 +114,7 @@ This keeps the teaching engine honest: the mmap implementation has one writer at
 This chapter makes the project more serious, but it is still not a production database:
 
 - freelist state is persisted in the metadata page, but only with a bounded educational encoding
-- writes call `msync`, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol
+- `Sync` flushes data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed, but there is no page-level repair
 - read-only mmap handles use shared file locks, but there is no reader table that allows a concurrent writer to recycle pages around external readers
 - overflow pages are linear chains, not a compact extent/tree structure
