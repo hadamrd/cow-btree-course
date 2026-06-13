@@ -52,6 +52,8 @@ Tree pages and overflow pages also carry CRC32 checksums in their page headers. 
 
 The database page size is fixed at 4096 bytes for the lesson. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them. Dirty logical pages are coalesced into contiguous ranges before `msync`, so a small write does not force the whole mapped file to flush.
 
+The mapped file can grow. `MmapOptions.MaxPages` sets the initial tree-page capacity, and `OpenMmap` also honors any larger existing file on reopen. When copy-on-write allocation reaches the mapped capacity, the tree flushes dirty data pages without publishing new metadata, extends the file, creates a larger mapping, and rebinds the in-memory page objects to their new byte ranges. The next `Sync` still controls when metadata publishes the new root and `nextPage`.
+
 ## Why Mmap Helps
 
 With mmap, the operating system maps file pages into the process address space. Code can read and write page bytes through memory loads and stores, while the OS page cache handles bringing file pages in and flushing dirty pages out.
@@ -134,6 +136,6 @@ This chapter makes the project more serious, but it is still not a production da
 - byte-full leaf rewrites can spill cells to overflow pages, but sibling redistribution is still key-count based
 - `Get` searches slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries
 - `Delete` removes records and collapses simple roots, but does not yet implement full sibling borrow/merge rebalancing
-- page capacity is fixed at open time
+- mmap files can grow by remapping, but there is no compaction or truncation of reusable pages at the end of the file
 
 The goal is to make mmap concrete without burying the learner under every database-engine concern at once.

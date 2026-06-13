@@ -49,6 +49,7 @@ type mmapArena struct {
 	maxPages         int
 	locked           bool
 	readOnly         bool
+	accessPattern    MmapAccessPattern
 	dirtyPages       map[PageID]bool
 	syncObserver     func(string)
 	dataSyncObserver func(start, end PageID)
@@ -209,6 +210,64 @@ func (a *mmapArena) pageBytes(id PageID) ([]byte, error) {
 	return a.data[start : start+PageSize], nil
 }
 
+func (t *Tree) growMmapForPage(id PageID) error {
+	if t.arena == nil || int(id) < t.arena.maxPages+metaPageCount {
+		return nil
+	}
+	if t.arena.readOnly {
+		return fmt.Errorf("cannot grow read-only mmap tree")
+	}
+
+	neededPages := int(id) - metaPageCount + 1
+	newMaxPages := t.arena.maxPages
+	if newMaxPages < minMmapPageCount {
+		newMaxPages = minMmapPageCount
+	}
+	for newMaxPages < neededPages {
+		newMaxPages *= 2
+	}
+	return t.remapMmap(newMaxPages)
+}
+
+func (t *Tree) remapMmap(newMaxPages int) error {
+	if newMaxPages <= t.arena.maxPages {
+		return nil
+	}
+	if err := t.arena.syncDataPages(t.nextPage); err != nil {
+		return err
+	}
+
+	newSize := int64((newMaxPages + metaPageCount) * PageSize)
+	if err := t.arena.file.Truncate(newSize); err != nil {
+		return err
+	}
+	if err := unix.Munmap(t.arena.data); err != nil {
+		return err
+	}
+
+	data, err := unix.Mmap(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return err
+	}
+	t.arena.data = data
+	t.arena.maxPages = newMaxPages
+	if err := t.arena.advise(t.arena.accessPattern); err != nil {
+		return err
+	}
+	return t.rebindMmapPages()
+}
+
+func (t *Tree) rebindMmapPages() error {
+	for id, p := range t.pages {
+		data, err := t.arena.pageBytes(id)
+		if err != nil {
+			return err
+		}
+		p.data = data
+	}
+	return nil
+}
+
 func (a *mmapArena) syncDataPages(nextPage PageID) error {
 	if a == nil || a.readOnly || nextPage <= firstTreePageID || len(a.dirtyPages) == 0 {
 		return nil
@@ -317,6 +376,7 @@ func (a *mmapArena) advise(pattern MmapAccessPattern) error {
 	if err != nil {
 		return err
 	}
+	a.accessPattern = pattern
 	return unix.Madvise(a.data, advice)
 }
 

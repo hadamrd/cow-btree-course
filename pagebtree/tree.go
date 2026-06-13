@@ -112,6 +112,11 @@ func (t *Tree) allocPage() PageID {
 	}
 
 	id := t.nextPage
+	if t.arena != nil {
+		if err := t.growMmapForPage(id); err != nil {
+			panic(err)
+		}
+	}
 	t.nextPage++
 	return id
 }

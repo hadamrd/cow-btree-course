@@ -37,6 +37,10 @@ func (a *mmapArena) pageBytes(id PageID) ([]byte, error) {
 
 func (a *mmapArena) markDirtyPage(id PageID) {}
 
+func (t *Tree) growMmapForPage(id PageID) error {
+	return nil
+}
+
 func (t *Tree) syncMmap() error {
 	return nil
 }

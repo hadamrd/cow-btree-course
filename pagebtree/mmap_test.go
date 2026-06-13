@@ -114,6 +114,91 @@ func TestMmapTreePersistsDeleteAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMmapTreeGrowsMappingWhenPageCapacityIsExceeded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	initialPages := tree.arena.maxPages
+	for i := 0; i < 80; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if tree.arena.maxPages <= initialPages {
+		t.Fatalf("mmap maxPages = %d, want growth beyond initial %d", tree.arena.maxPages, initialPages)
+	}
+	if got, ok := tree.Get("key-00"); !ok || string(got) != "value-00" {
+		t.Fatalf("Get(key-00) after grow = %q, %v; want value-00, true", got, ok)
+	}
+	if got, ok := tree.Get("key-79"); !ok || string(got) != "value-79" {
+		t.Fatalf("Get(key-79) after grow = %q, %v; want value-79, true", got, ok)
+	}
+	grownPages := tree.arena.maxPages
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close grown tree: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat grown file: %v", err)
+	}
+	if wantMin := int64((grownPages + metaPageCount) * PageSize); info.Size() < wantMin {
+		t.Fatalf("grown file size = %d, want at least %d", info.Size(), wantMin)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen grown file: %v", err)
+	}
+	defer reopened.Close()
+	if reopened.arena.maxPages < grownPages {
+		t.Fatalf("reopened maxPages = %d, want at least grown pages %d", reopened.arena.maxPages, grownPages)
+	}
+	for _, i := range []int{0, 37, 79} {
+		key := fmt.Sprintf("key-%02d", i)
+		want := fmt.Sprintf("value-%02d", i)
+		got, ok := reopened.Get(key)
+		if !ok || string(got) != want {
+			t.Fatalf("reopened Get(%s) = %q, %v; want %q, true", key, got, ok, want)
+		}
+	}
+}
+
+func TestMmapTreeGrowsMappingForOverflowPages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	large := bytes.Repeat([]byte("x"), PageSize*9+123)
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	initialPages := tree.arena.maxPages
+	tree.Put("small", []byte("before-grow"))
+	tree.Put("large", large)
+	if tree.arena.maxPages <= initialPages {
+		t.Fatalf("mmap maxPages = %d, want growth beyond initial %d", tree.arena.maxPages, initialPages)
+	}
+	if got, ok := tree.Get("small"); !ok || string(got) != "before-grow" {
+		t.Fatalf("Get(small) after overflow grow = %q, %v; want before-grow, true", got, ok)
+	}
+	if got, ok := tree.Get("large"); !ok || !bytes.Equal(got, large) {
+		t.Fatalf("Get(large) after overflow grow len = %d, %v; want len %d, true", len(got), ok, len(large))
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close grown overflow tree: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen grown overflow file: %v", err)
+	}
+	defer reopened.Close()
+	if got, ok := reopened.Get("large"); !ok || !bytes.Equal(got, large) {
+		t.Fatalf("reopened Get(large) len = %d, %v; want len %d, true", len(got), ok, len(large))
+	}
+}
+
 func TestMmapSyncFlushesDataPagesBeforePublishingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
