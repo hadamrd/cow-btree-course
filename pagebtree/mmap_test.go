@@ -1690,6 +1690,109 @@ func TestMmapCompactRestoresStateWhenMetaFlushFails(t *testing.T) {
 	}
 }
 
+func TestMmapCompactShrinkFaultMatrixPreservesReadableMapping(t *testing.T) {
+	tests := []struct {
+		name       string
+		fault      mmapFaultPoint
+		wantPoints []mmapFaultPoint
+	}{
+		{
+			name:       "before file size sync",
+			fault:      mmapFaultBeforeFileSizeSync,
+			wantPoints: []mmapFaultPoint{mmapFaultBeforeFileSizeSync},
+		},
+		{
+			name:  "before directory sync",
+			fault: mmapFaultBeforeDirectorySync,
+			wantPoints: []mmapFaultPoint{
+				mmapFaultBeforeFileSizeSync,
+				mmapFaultBeforeDirectorySync,
+			},
+		},
+		{
+			name:  "before replacement remap",
+			fault: mmapFaultBeforeRemap,
+			wantPoints: []mmapFaultPoint{
+				mmapFaultBeforeFileSizeSync,
+				mmapFaultBeforeDirectorySync,
+				mmapFaultBeforeRemap,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertMmapCompactShrinkFaultPreservesReadableMapping(t, tt.fault, tt.wantPoints)
+		})
+	}
+}
+
+func assertMmapCompactShrinkFaultPreservesReadableMapping(t *testing.T, fault mmapFaultPoint, wantPoints []mmapFaultPoint) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "course.db")
+	forced := fmt.Errorf("forced %s fault", fault)
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	oldData := tree.arena.data
+	oldSize := fileSize(t, path)
+	if oldSize <= int64((minMmapPageCount+metaPageCount)*PageSize) {
+		t.Fatalf("test setup file size = %d, want shrinkable capacity", oldSize)
+	}
+
+	var points []mmapFaultPoint
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == mmapFaultBeforeFileSizeSync || point == mmapFaultBeforeDirectorySync || point == mmapFaultBeforeRemap {
+			points = append(points, point)
+		}
+		if point == fault {
+			return forced
+		}
+		return nil
+	}
+
+	err = tree.Compact()
+	if !errors.Is(err, forced) {
+		t.Fatalf("Compact fault error = %v, want forced fault", err)
+	}
+	if !slices.Equal(points, wantPoints) {
+		t.Fatalf("compact shrink fault points = %v, want %v", points, wantPoints)
+	}
+	if len(tree.arena.data) != len(oldData) || &tree.arena.data[0] != &oldData[0] {
+		t.Fatalf("arena data changed after %s fault", fault)
+	}
+	if got := fileSize(t, path); got != oldSize {
+		t.Fatalf("file size after %s fault = %d, want restored size %d", fault, got, oldSize)
+	}
+	for i := 0; i < 12; i++ {
+		key := fmt.Sprintf("key-%02d", i)
+		if got, ok := tree.Get(key); !ok || string(got) != fmt.Sprintf("value-%02d", i) {
+			t.Fatalf("Get(%s) after %s fault = %q, %v", key, fault, got, ok)
+		}
+	}
+	if err := tree.arena.close(); err != nil {
+		t.Fatalf("forced crash close arena: %v", err)
+	}
+	tree.closed = true
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after compact shrink fault: %v", err)
+	}
+	defer reopened.Close()
+	for i := 0; i < 12; i++ {
+		key := fmt.Sprintf("key-%02d", i)
+		if got, ok := reopened.Get(key); !ok || string(got) != fmt.Sprintf("value-%02d", i) {
+			t.Fatalf("reopened Get(%s) after %s fault = %q, %v", key, fault, got, ok)
+		}
+	}
+}
+
 func TestMmapCompactTruncatesUnusedMappedCapacity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

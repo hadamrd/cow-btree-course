@@ -488,18 +488,16 @@ func (t *Tree) shrinkMmap(newMaxPages int) error {
 		return err
 	}
 	if err := t.arena.syncFileSize(); err != nil {
-		return err
+		return t.arena.restoreFileSize(oldSize, err)
+	}
+
+	if err := t.arena.injectFault(mmapFaultBeforeRemap); err != nil {
+		return t.arena.restoreFileSize(oldSize, err)
 	}
 
 	data, err := mmapBytes(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		if restoreErr := t.arena.file.Truncate(oldSize); restoreErr != nil {
-			return errors.Join(err, restoreErr)
-		}
-		if syncErr := t.arena.syncFileSize(); syncErr != nil {
-			return errors.Join(err, syncErr)
-		}
-		return err
+		return t.arena.restoreFileSize(oldSize, err)
 	}
 	oldData := t.arena.data
 	if err := munmapBytes(oldData); err != nil {

@@ -35,10 +35,11 @@
 // pages before publishing metadata. Internal fault-injection tests cover
 // before-data-sync, after-metadata-write, before-metadata-sync,
 // before-growth-file-size-sync, before-growth-directory-sync, and
-// before-growth-remap boundaries; if a metadata publication fault or the final
-// metadata flush fails, Sync restores the previous mapped metadata bytes before
-// returning the error. Mmap trees can grow the mapped file when allocation
-// reaches the current capacity.
+// before-growth-remap boundaries, plus the matching file-size/directory/remap
+// boundaries for compact-driven shrink; if a metadata publication fault or the
+// final metadata flush fails, Sync restores the previous mapped metadata bytes
+// before returning the error. Mmap trees can grow the mapped file when
+// allocation reaches the current capacity.
 // New database creation and file-size changes from growth and compaction sync
 // the data file and parent directory. Compact can trim unused mapped capacity
 // and a suffix of already-free page ids when no snapshot is active; if
