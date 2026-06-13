@@ -100,12 +100,8 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 			file.Close()
 			return nil, fmt.Errorf("mmap tree file size %d is not page aligned", existingSize)
 		}
-		existingPages := int(existingSize/PageSize) - metaPageCount
-		if maxPages < existingPages {
-			maxPages = existingPages
-		}
-	}
-	if maxPages < minMmapPageCount {
+		maxPages = int(existingSize/PageSize) - metaPageCount
+	} else if maxPages < minMmapPageCount {
 		maxPages = 1024
 	}
 

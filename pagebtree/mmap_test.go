@@ -50,6 +50,33 @@ func TestMmapTreePersistsKeysAcrossCloseAndReopen(t *testing.T) {
 	}
 }
 
+func TestMmapReopenDoesNotExpandExistingFileFromMaxPagesHint(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+	sizeBefore := fileSize(t, path)
+
+	reopened, err := OpenMmap(path, MmapOptions{MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen with larger hint: %v", err)
+	}
+	defer reopened.Close()
+
+	if got := fileSize(t, path); got != sizeBefore {
+		t.Fatalf("file size after reopen with larger MaxPages = %d, want unchanged %d", got, sizeBefore)
+	}
+	if got, ok := reopened.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("reopened Get(alpha) = %q, %v; want one, true", got, ok)
+	}
+}
+
 func TestMmapTreePersistsLargeOverflowValueAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 	large := bytes.Repeat([]byte("z"), PageSize*2+321)
