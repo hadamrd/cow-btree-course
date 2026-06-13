@@ -61,7 +61,7 @@ func TestMmapTreeStoresSlottedPageBytesInFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
-	if want := int64((16 + 1) * PageSize); info.Size() != want {
+	if want := int64((16 + metaPageCount) * PageSize); info.Size() != want {
 		t.Fatalf("file size = %d, want %d", info.Size(), want)
 	}
 	if err := tree.Close(); err != nil {
@@ -77,5 +77,87 @@ func TestMmapTreeStoresSlottedPageBytesInFile(t *testing.T) {
 	}
 	if !bytes.Contains(raw, []byte("bravotwo")) {
 		t.Fatalf("mmap file does not contain slotted leaf cell bytes for bravo/two")
+	}
+}
+
+func TestMmapTreeFallsBackToOlderValidMetaPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	tree.Put("bravo", []byte("two"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	corruptMetaPage(t, path, 0)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen after corrupt latest meta: %v", err)
+	}
+	defer reopened.Close()
+
+	if got, ok := reopened.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("alpha after fallback = %q, %v; want one, true", got, ok)
+	}
+	if got, ok := reopened.Get("bravo"); ok {
+		t.Fatalf("bravo should be absent after falling back to older meta, got %q", got)
+	}
+	if reopened.Revision() != 1 {
+		t.Fatalf("fallback revision = %d, want 1", reopened.Revision())
+	}
+}
+
+func TestMmapTreeUsesNewestValidMetaPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	tree.Put("bravo", []byte("two"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	corruptMetaPage(t, path, 1)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen after corrupt older meta: %v", err)
+	}
+	defer reopened.Close()
+
+	for key, want := range map[string]string{"alpha": "one", "bravo": "two"} {
+		got, ok := reopened.Get(key)
+		if !ok || string(got) != want {
+			t.Fatalf("%s after reopen = %q, %v; want %q, true", key, got, ok, want)
+		}
+	}
+	if reopened.Revision() != 2 {
+		t.Fatalf("latest revision = %d, want 2", reopened.Revision())
+	}
+}
+
+func corruptMetaPage(t *testing.T, path string, metaIndex int) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile corrupt: %v", err)
+	}
+	defer file.Close()
+
+	offset := int64(metaIndex * PageSize)
+	if _, err := file.WriteAt([]byte("BROKEN!!"), offset); err != nil {
+		t.Fatalf("WriteAt corrupt meta %d: %v", metaIndex, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("Sync corrupt meta %d: %v", metaIndex, err)
 	}
 }

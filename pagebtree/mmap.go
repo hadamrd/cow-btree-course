@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -22,8 +23,12 @@ const (
 	metaRevisionOff  = 40
 	metaDegreeOff    = 48
 	metaMaxPagesOff  = 56
+	metaChecksumOff  = 64
+	metaPageCount    = 2
 	minMmapPageCount = 2
 )
+
+const firstTreePageID = PageID(metaPageCount)
 
 type MmapOptions struct {
 	Degree   int
@@ -53,7 +58,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 			file.Close()
 			return nil, fmt.Errorf("mmap tree file size %d is not page aligned", info.Size())
 		}
-		existingPages := int(info.Size()/PageSize) - 1
+		existingPages := int(info.Size()/PageSize) - metaPageCount
 		if maxPages < existingPages {
 			maxPages = existingPages
 		}
@@ -62,7 +67,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		maxPages = 1024
 	}
 
-	size := int64((maxPages + 1) * PageSize)
+	size := int64((maxPages + metaPageCount) * PageSize)
 	if err := file.Truncate(size); err != nil {
 		file.Close()
 		return nil, err
@@ -82,7 +87,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 
 	tree := &Tree{
 		pages:    map[PageID]*page{},
-		nextPage: 1,
+		nextPage: firstTreePageID,
 		degree:   normalizeDegree(options.Degree),
 		arena:    arena,
 	}
@@ -104,11 +109,16 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 }
 
 func (a *mmapArena) initialized() bool {
-	return string(a.data[metaMagicOffset:metaMagicOffset+len(metaMagic)]) == metaMagic
+	for index := 0; index < metaPageCount; index++ {
+		if _, ok := readMetaPage(a.data[index*PageSize : (index+1)*PageSize]); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *mmapArena) pageBytes(id PageID) ([]byte, error) {
-	if id == 0 || int(id) > a.maxPages {
+	if id < firstTreePageID || int(id) >= a.maxPages+metaPageCount {
 		return nil, fmt.Errorf("page id %d outside mmap capacity %d", id, a.maxPages)
 	}
 	start := int(id) * PageSize
@@ -143,25 +153,42 @@ func (a *mmapArena) close() error {
 	return errors.Join(errs...)
 }
 
+type metaRecord struct {
+	root     PageID
+	nextPage PageID
+	length   int
+	revision uint64
+	degree   int
+	maxPages int
+}
+
 func (t *Tree) loadMeta() error {
-	if string(t.arena.data[metaMagicOffset:metaMagicOffset+len(metaMagic)]) != metaMagic {
-		return fmt.Errorf("invalid mmap tree magic")
+	var newest metaRecord
+	found := false
+	for index := 0; index < metaPageCount; index++ {
+		record, ok := readMetaPage(t.arena.data[index*PageSize : (index+1)*PageSize])
+		if !ok {
+			continue
+		}
+		if !found || record.revision > newest.revision {
+			newest = record
+			found = true
+		}
 	}
-	version := binary.LittleEndian.Uint64(t.arena.data[metaVersionOff:])
-	if version != metaVersion {
-		return fmt.Errorf("unsupported mmap tree version %d", version)
+	if !found {
+		return fmt.Errorf("no valid mmap tree metadata page")
 	}
 
-	t.root = PageID(binary.LittleEndian.Uint64(t.arena.data[metaRootOff:]))
-	t.nextPage = PageID(binary.LittleEndian.Uint64(t.arena.data[metaNextPageOff:]))
-	t.length = int(binary.LittleEndian.Uint64(t.arena.data[metaLengthOff:]))
-	t.revision = binary.LittleEndian.Uint64(t.arena.data[metaRevisionOff:])
-	t.degree = normalizeDegree(int(binary.LittleEndian.Uint64(t.arena.data[metaDegreeOff:])))
-	if t.nextPage == 0 {
-		t.nextPage = 1
+	t.root = newest.root
+	t.nextPage = newest.nextPage
+	t.length = newest.length
+	t.revision = newest.revision
+	t.degree = normalizeDegree(newest.degree)
+	if t.nextPage < firstTreePageID {
+		t.nextPage = firstTreePageID
 	}
 
-	for id := PageID(1); id < t.nextPage; id++ {
+	for id := firstTreePageID; id < t.nextPage; id++ {
 		data, err := t.arena.pageBytes(id)
 		if err != nil {
 			return err
@@ -176,12 +203,51 @@ func (t *Tree) persistMeta() {
 		return
 	}
 
-	copy(t.arena.data[metaMagicOffset:], metaMagic)
-	binary.LittleEndian.PutUint64(t.arena.data[metaVersionOff:], metaVersion)
-	binary.LittleEndian.PutUint64(t.arena.data[metaRootOff:], uint64(t.root))
-	binary.LittleEndian.PutUint64(t.arena.data[metaNextPageOff:], uint64(t.nextPage))
-	binary.LittleEndian.PutUint64(t.arena.data[metaLengthOff:], uint64(t.length))
-	binary.LittleEndian.PutUint64(t.arena.data[metaRevisionOff:], t.revision)
-	binary.LittleEndian.PutUint64(t.arena.data[metaDegreeOff:], uint64(t.degree))
-	binary.LittleEndian.PutUint64(t.arena.data[metaMaxPagesOff:], uint64(t.arena.maxPages))
+	index := int(t.revision % metaPageCount)
+	writeMetaPage(t.arena.data[index*PageSize:(index+1)*PageSize], metaRecord{
+		root:     t.root,
+		nextPage: t.nextPage,
+		length:   t.length,
+		revision: t.revision,
+		degree:   t.degree,
+		maxPages: t.arena.maxPages,
+	})
+}
+
+func readMetaPage(data []byte) (metaRecord, bool) {
+	if len(data) < PageSize {
+		return metaRecord{}, false
+	}
+	if string(data[metaMagicOffset:metaMagicOffset+len(metaMagic)]) != metaMagic {
+		return metaRecord{}, false
+	}
+	if binary.LittleEndian.Uint64(data[metaVersionOff:]) != metaVersion {
+		return metaRecord{}, false
+	}
+	want := binary.LittleEndian.Uint32(data[metaChecksumOff:])
+	got := crc32.ChecksumIEEE(data[:metaChecksumOff])
+	if got != want {
+		return metaRecord{}, false
+	}
+	return metaRecord{
+		root:     PageID(binary.LittleEndian.Uint64(data[metaRootOff:])),
+		nextPage: PageID(binary.LittleEndian.Uint64(data[metaNextPageOff:])),
+		length:   int(binary.LittleEndian.Uint64(data[metaLengthOff:])),
+		revision: binary.LittleEndian.Uint64(data[metaRevisionOff:]),
+		degree:   int(binary.LittleEndian.Uint64(data[metaDegreeOff:])),
+		maxPages: int(binary.LittleEndian.Uint64(data[metaMaxPagesOff:])),
+	}, true
+}
+
+func writeMetaPage(data []byte, record metaRecord) {
+	clear(data)
+	copy(data[metaMagicOffset:], metaMagic)
+	binary.LittleEndian.PutUint64(data[metaVersionOff:], metaVersion)
+	binary.LittleEndian.PutUint64(data[metaRootOff:], uint64(record.root))
+	binary.LittleEndian.PutUint64(data[metaNextPageOff:], uint64(record.nextPage))
+	binary.LittleEndian.PutUint64(data[metaLengthOff:], uint64(record.length))
+	binary.LittleEndian.PutUint64(data[metaRevisionOff:], record.revision)
+	binary.LittleEndian.PutUint64(data[metaDegreeOff:], uint64(record.degree))
+	binary.LittleEndian.PutUint64(data[metaMaxPagesOff:], uint64(record.maxPages))
+	binary.LittleEndian.PutUint32(data[metaChecksumOff:], crc32.ChecksumIEEE(data[:metaChecksumOff]))
 }
