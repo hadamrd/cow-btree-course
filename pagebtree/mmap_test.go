@@ -320,6 +320,44 @@ func TestMmapClosedTreeStatsIsZero(t *testing.T) {
 	}
 }
 
+func TestMmapCloseClearsReleasedArenaResources(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 32})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	if _, replaced := tree.Put("alpha", []byte("one")); replaced {
+		t.Fatalf("first Put replaced existing key")
+	}
+	if len(tree.arena.data) == 0 {
+		t.Fatalf("open tree has no mmap data")
+	}
+	if tree.arena.file == nil {
+		t.Fatalf("open tree has no mmap file")
+	}
+	if !tree.arena.locked {
+		t.Fatalf("open tree is not marked locked")
+	}
+
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if tree.arena.data != nil {
+		t.Fatalf("arena data after Close is still retained, want nil")
+	}
+	if tree.arena.file != nil {
+		t.Fatalf("arena file after Close is still retained, want nil")
+	}
+	if tree.arena.locked {
+		t.Fatalf("arena locked after Close = true, want false")
+	}
+	if tree.arena.dirtyPages != nil {
+		t.Fatalf("arena dirtyPages after Close = %v, want nil", tree.arena.dirtyPages)
+	}
+}
+
 func TestMmapTreeGrowsMappingWhenPageCapacityIsExceeded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

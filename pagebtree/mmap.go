@@ -645,17 +645,27 @@ func (a *mmapArena) close() error {
 	}
 
 	var errs []error
-	if err := unix.Munmap(a.data); err != nil {
-		errs = append(errs, err)
+	if len(a.data) > 0 {
+		if err := unix.Munmap(a.data); err != nil {
+			errs = append(errs, err)
+		} else {
+			a.data = nil
+			a.dirtyPages = nil
+		}
 	}
-	if a.locked {
+	if a.locked && a.file != nil {
 		if err := unlockFile(a.file); err != nil {
 			errs = append(errs, err)
+		} else {
+			a.locked = false
 		}
-		a.locked = false
 	}
-	if err := a.file.Close(); err != nil {
-		errs = append(errs, err)
+	if a.file != nil {
+		if err := a.file.Close(); err != nil {
+			errs = append(errs, err)
+		} else {
+			a.file = nil
+		}
 	}
 	return errors.Join(errs...)
 }
