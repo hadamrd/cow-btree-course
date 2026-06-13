@@ -12,6 +12,8 @@ type Tree struct {
 	activeReaders           map[uint64]int
 	retired                 []retiredPage
 	free                    []PageID
+	metaFreelistRoot        PageID
+	metaFreelistPages       []PageID
 	reusedPages             int
 	arena                   *mmapArena
 	closed                  bool

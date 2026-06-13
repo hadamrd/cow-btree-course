@@ -229,15 +229,13 @@ func TestMmapCloseAfterSyncFailureMarksHandleClosed(t *testing.T) {
 	if err := tree.Sync(); err != nil {
 		t.Fatalf("initial Sync: %v", err)
 	}
-	clear(tree.arena.dirtyPages)
-	tree.free = make([]PageID, maxMetaFreePages+1)
-	for i := range tree.free {
-		tree.free[i] = firstTreePageID + PageID(i)
-	}
+	badPage := PageID(len(tree.arena.data) / PageSize)
+	tree.nextPage = badPage + 1
+	tree.arena.markDirtyPage(badPage)
 
 	err = tree.Close()
-	if !errors.Is(err, ErrMetaInvariant) {
-		t.Fatalf("Close oversized freelist error = %v, want ErrMetaInvariant", err)
+	if err == nil {
+		t.Fatalf("Close with invalid dirty page sync succeeded, want error")
 	}
 	if !tree.closed {
 		t.Fatalf("tree.closed after failed close-time Sync = false, want true because arena resources were released")
@@ -1307,7 +1305,7 @@ func TestMmapSyncRestoresMetaPageWhenMetaFlushFails(t *testing.T) {
 	}
 }
 
-func TestMmapSyncRejectsFreelistTooLargeForMetadata(t *testing.T) {
+func TestMmapSyncSpillsFreelistTooLargeForMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
 	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 1024})
@@ -1327,11 +1325,11 @@ func TestMmapSyncRejectsFreelistTooLargeForMetadata(t *testing.T) {
 
 	metaIndex := int(tree.Revision() % metaPageCount)
 	metaPage := tree.arena.data[metaIndex*PageSize : (metaIndex+1)*PageSize]
-	before := cloneBytes(metaPage)
 	tree.free = make([]PageID, maxMetaFreePages+1)
 	for i := range tree.free {
-		tree.free[i] = firstTreePageID + PageID(i)
+		tree.free[i] = firstTreePageID + 1 + PageID(i)
 	}
+	tree.nextPage = firstTreePageID + 1 + PageID(len(tree.free))
 
 	var syncErr error
 	var panicValue any
@@ -1344,11 +1342,67 @@ func TestMmapSyncRejectsFreelistTooLargeForMetadata(t *testing.T) {
 	if panicValue != nil {
 		t.Fatalf("Sync panicked for oversized freelist: %v", panicValue)
 	}
-	if !errors.Is(syncErr, ErrMetaInvariant) {
-		t.Fatalf("Sync oversized freelist error = %v, want ErrMetaInvariant", syncErr)
+	if syncErr != nil {
+		t.Fatalf("Sync oversized freelist error = %v, want nil", syncErr)
 	}
-	if !bytes.Equal(metaPage, before) {
-		t.Fatalf("metadata page changed after oversized freelist Sync failure")
+	record, ok := readMetaPage(metaPage)
+	if !ok {
+		t.Fatalf("metadata page is not readable after oversized freelist Sync")
+	}
+	if record.freeCount != len(tree.free) {
+		t.Fatalf("metadata free count = %d, want %d", record.freeCount, len(tree.free))
+	}
+	if record.freeRoot == 0 {
+		t.Fatalf("metadata free root = 0, want freelist page root for oversized freelist")
+	}
+}
+
+func TestMmapSyncPersistsFreelistLargerThanMetadataPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 2048})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	if _, replaced := tree.Put("alpha", []byte("one")); replaced {
+		t.Fatalf("first Put replaced existing key")
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	clear(tree.arena.dirtyPages)
+
+	freeCount := maxMetaFreePages + 17
+	tree.free = make([]PageID, freeCount)
+	for i := range tree.free {
+		tree.free[i] = firstTreePageID + 1 + PageID(i)
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(freeCount)
+
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync with large freelist: %v", err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close after large freelist Sync: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	if got := reopened.Stats().FreePages; got != freeCount {
+		t.Fatalf("FreePages after reopen = %d, want %d", got, freeCount)
+	}
+	allocatedBeforeReuse := reopened.Stats().AllocatedPages
+	reopened.Put("bravo", []byte("two"))
+	afterReuse := reopened.Stats()
+	if afterReuse.ReusedPages == 0 {
+		t.Fatalf("ReusedPages after reopened write = 0, want persisted large freelist reuse")
+	}
+	if afterReuse.AllocatedPages > allocatedBeforeReuse+1 {
+		t.Fatalf("AllocatedPages grew from %d to %d despite persisted large freelist", allocatedBeforeReuse, afterReuse.AllocatedPages)
 	}
 }
 

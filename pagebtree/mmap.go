@@ -27,7 +27,8 @@ var (
 
 const (
 	metaMagic        = "COWBTREE"
-	metaVersion      = uint64(1)
+	metaVersion      = uint64(2)
+	minMetaVersion   = uint64(1)
 	metaMagicOffset  = 0
 	metaVersionOff   = 8
 	metaPageSizeOff  = 16
@@ -336,11 +337,15 @@ func (t *Tree) compactMmapTail() error {
 
 	oldNextPage := t.nextPage
 	oldFree := append([]PageID(nil), t.free...)
+	oldMetaFreelistRoot := t.metaFreelistRoot
+	oldMetaFreelistPages := append([]PageID(nil), t.metaFreelistPages...)
 	oldDirtyPages := cloneDirtyPages(t.arena.dirtyPages)
 	removedPages := map[PageID]*page{}
 	restoreState := func() {
 		t.nextPage = oldNextPage
 		t.free = oldFree
+		t.metaFreelistRoot = oldMetaFreelistRoot
+		t.metaFreelistPages = oldMetaFreelistPages
 		t.arena.maxPages = oldMaxPages
 		t.arena.dirtyPages = cloneDirtyPages(oldDirtyPages)
 		for id, p := range removedPages {
@@ -364,11 +369,18 @@ func (t *Tree) compactMmapTail() error {
 
 	t.arena.maxPages = newMaxPages
 
+	restoreFreelistPages, err := t.prepareMetaFreelistPages()
+	if err != nil {
+		restoreState()
+		return err
+	}
 	if err := t.arena.syncDataPages(t.nextPage); err != nil {
+		restoreFreelistPages()
 		restoreState()
 		return err
 	}
 	if err := t.publishMeta(); err != nil {
+		restoreFreelistPages()
 		restoreState()
 		return err
 	}
@@ -767,13 +779,16 @@ func unlockFile(file *os.File) error {
 }
 
 type metaRecord struct {
-	root     PageID
-	nextPage PageID
-	length   int
-	revision uint64
-	degree   int
-	maxPages int
-	free     []PageID
+	root          PageID
+	nextPage      PageID
+	length        int
+	revision      uint64
+	degree        int
+	maxPages      int
+	free          []PageID
+	freeCount     int
+	freeRoot      PageID
+	freelistPages []PageID
 }
 
 func (t *Tree) loadMeta() error {
@@ -823,12 +838,30 @@ func (t *Tree) loadMeta() error {
 	var lastErr error
 	for _, record := range records {
 		t.applyMetaRecord(record)
+		freelistPages, err := t.resolveMetaFreelist(&record)
+		if err != nil {
+			lastErr = err
+			continue
+		}
 		reachable, err := t.validateReachablePages()
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		if err := t.validateFreelist(record.free, record.maxPages, reachable); err != nil {
+		owned := clonePageSet(reachable)
+		var overlapErr error
+		for _, id := range freelistPages {
+			if owned[id] {
+				overlapErr = fmt.Errorf("%w: freelist metadata page %d overlaps reachable page", ErrFreelist, id)
+				break
+			}
+			owned[id] = true
+		}
+		if overlapErr != nil {
+			lastErr = overlapErr
+			continue
+		}
+		if err := t.validateFreelist(record.free, record.maxPages, owned); err != nil {
 			lastErr = err
 			continue
 		}
@@ -840,6 +873,9 @@ func (t *Tree) loadMeta() error {
 			lastErr = err
 			continue
 		}
+		t.free = append([]PageID(nil), record.free...)
+		t.metaFreelistRoot = record.freeRoot
+		t.metaFreelistPages = append([]PageID(nil), freelistPages...)
 		return nil
 	}
 	if lastErr != nil {
@@ -854,10 +890,68 @@ func (t *Tree) applyMetaRecord(record metaRecord) {
 	t.length = record.length
 	t.revision = record.revision
 	t.degree = normalizeDegree(record.degree)
-	t.free = append([]PageID(nil), record.free...)
+	t.free = nil
+	t.metaFreelistRoot = 0
+	t.metaFreelistPages = nil
 	if t.nextPage < firstTreePageID {
 		t.nextPage = firstTreePageID
 	}
+}
+
+func clonePageSet(values map[PageID]bool) map[PageID]bool {
+	out := make(map[PageID]bool, len(values))
+	for id, value := range values {
+		out[id] = value
+	}
+	return out
+}
+
+func (t *Tree) resolveMetaFreelist(record *metaRecord) ([]PageID, error) {
+	if record.freeRoot == 0 {
+		record.free = append([]PageID(nil), record.free...)
+		record.freelistPages = nil
+		return nil, nil
+	}
+	maxOwnedPage := firstTreePageID + PageID(record.maxPages)
+	free := make([]PageID, 0, record.freeCount)
+	freelistPages := make([]PageID, 0)
+	seen := map[PageID]bool{}
+	for id := record.freeRoot; id != 0; {
+		if id < firstTreePageID || id >= record.nextPage || id >= maxOwnedPage {
+			return nil, fmt.Errorf("%w: freelist metadata page %d outside allocated range", ErrFreelist, id)
+		}
+		if seen[id] {
+			return nil, fmt.Errorf("%w: freelist metadata chain loops through page %d", ErrFreelist, id)
+		}
+		seen[id] = true
+		p := t.pages[id]
+		if p == nil {
+			return nil, fmt.Errorf("%w: freelist metadata page %d is missing", ErrFreelist, id)
+		}
+		if !p.validChecksum() {
+			return nil, fmt.Errorf("%w: page %d", ErrPageChecksum, id)
+		}
+		if err := p.validateLayout(); err != nil {
+			return nil, err
+		}
+		if p.flags() != flagFreelist {
+			return nil, fmt.Errorf("%w: page %d in freelist metadata chain is not a freelist page", ErrFreelist, id)
+		}
+		freelistPages = append(freelistPages, id)
+		for _, freeID := range p.freelistIDs() {
+			if len(free) >= record.freeCount {
+				return nil, fmt.Errorf("%w: freelist metadata chain has more than %d entries", ErrFreelist, record.freeCount)
+			}
+			free = append(free, freeID)
+		}
+		id = p.freelistNext()
+	}
+	if len(free) != record.freeCount {
+		return nil, fmt.Errorf("%w: freelist metadata chain has %d entries, want %d", ErrFreelist, len(free), record.freeCount)
+	}
+	record.free = free
+	record.freelistPages = freelistPages
+	return freelistPages, nil
 }
 
 func compareUint64Desc(left, right uint64) int {
@@ -885,6 +979,7 @@ func (t *Tree) persistMeta() error {
 		degree:   t.degree,
 		maxPages: t.arena.maxPages,
 		free:     t.free,
+		freeRoot: t.metaFreelistRoot,
 	})
 }
 
@@ -892,10 +987,73 @@ func (t *Tree) syncMmap() error {
 	if t.arena == nil || t.arena.readOnly {
 		return nil
 	}
-	if err := t.arena.syncDataPages(t.nextPage); err != nil {
+	restoreFreelistPages, err := t.prepareMetaFreelistPages()
+	if err != nil {
 		return err
 	}
-	return t.publishMeta()
+	if err := t.arena.syncDataPages(t.nextPage); err != nil {
+		restoreFreelistPages()
+		return err
+	}
+	if err := t.publishMeta(); err != nil {
+		restoreFreelistPages()
+		return err
+	}
+	return nil
+}
+
+func (t *Tree) prepareMetaFreelistPages() (func(), error) {
+	oldNextPage := t.nextPage
+	oldMetaFreelistRoot := t.metaFreelistRoot
+	oldMetaFreelistPages := append([]PageID(nil), t.metaFreelistPages...)
+	oldDirtyPages := cloneDirtyPages(t.arena.dirtyPages)
+	addedPages := map[PageID]*page{}
+	restore := func() {
+		t.nextPage = oldNextPage
+		t.metaFreelistRoot = oldMetaFreelistRoot
+		t.metaFreelistPages = oldMetaFreelistPages
+		t.arena.dirtyPages = cloneDirtyPages(oldDirtyPages)
+		for id := range addedPages {
+			delete(t.pages, id)
+		}
+	}
+
+	if len(t.free) <= maxMetaFreePages {
+		t.metaFreelistRoot = 0
+		t.metaFreelistPages = nil
+		return restore, nil
+	}
+
+	pageCount := divideRoundUp(len(t.free), freelistPageCapacity)
+	ids := make([]PageID, pageCount)
+	for i := range ids {
+		id := t.nextPage
+		if err := t.growMmapForPage(id); err != nil {
+			restore()
+			return func() {}, err
+		}
+		t.nextPage++
+		p := t.newPage(id, flagFreelist)
+		t.pages[id] = p
+		addedPages[id] = p
+		ids[i] = id
+	}
+	for i, id := range ids {
+		next := PageID(0)
+		if i+1 < len(ids) {
+			next = ids[i+1]
+		}
+		start := i * freelistPageCapacity
+		end := start + freelistPageCapacity
+		if end > len(t.free) {
+			end = len(t.free)
+		}
+		writeFreelistPage(t.pages[id], next, t.free[start:end])
+		t.arena.markDirtyPage(id)
+	}
+	t.metaFreelistRoot = ids[0]
+	t.metaFreelistPages = ids
+	return restore, nil
 }
 
 func (t *Tree) publishMeta() error {
@@ -969,8 +1127,9 @@ func readMetaPageChecked(data []byte) (metaRecord, bool, error) {
 	if string(data[metaMagicOffset:metaMagicOffset+len(metaMagic)]) != metaMagic {
 		return metaRecord{}, false, fmt.Errorf("%w: metadata magic mismatch", ErrMetaInvariant)
 	}
-	if binary.LittleEndian.Uint64(data[metaVersionOff:]) != metaVersion {
-		return metaRecord{}, false, fmt.Errorf("%w: metadata version %d unsupported", ErrMetaInvariant, binary.LittleEndian.Uint64(data[metaVersionOff:]))
+	version := binary.LittleEndian.Uint64(data[metaVersionOff:])
+	if version < minMetaVersion || version > metaVersion {
+		return metaRecord{}, false, fmt.Errorf("%w: metadata version %d unsupported", ErrMetaInvariant, version)
 	}
 	if binary.LittleEndian.Uint64(data[metaPageSizeOff:]) != PageSize {
 		return metaRecord{}, false, fmt.Errorf("%w: metadata page size %d does not match %d", ErrMetaInvariant, binary.LittleEndian.Uint64(data[metaPageSizeOff:]), PageSize)
@@ -981,22 +1140,33 @@ func readMetaPageChecked(data []byte) (metaRecord, bool, error) {
 		return metaRecord{}, false, fmt.Errorf("%w: metadata checksum mismatch", ErrMetaInvariant)
 	}
 	freeCount := int(binary.LittleEndian.Uint64(data[metaFreeCountOff:]))
-	if freeCount > maxMetaFreePages {
+	if version == 1 && freeCount > maxMetaFreePages {
 		return metaRecord{}, false, fmt.Errorf("%w: metadata free count %d exceeds %d", ErrMetaInvariant, freeCount, maxMetaFreePages)
 	}
-	free := make([]PageID, 0, freeCount)
-	for i := 0; i < freeCount; i++ {
-		offset := metaFreeListOff + i*8
-		free = append(free, PageID(binary.LittleEndian.Uint64(data[offset:])))
+	free := []PageID(nil)
+	freeRoot := PageID(0)
+	if freeCount <= maxMetaFreePages {
+		free = make([]PageID, 0, freeCount)
+		for i := 0; i < freeCount; i++ {
+			offset := metaFreeListOff + i*8
+			free = append(free, PageID(binary.LittleEndian.Uint64(data[offset:])))
+		}
+	} else {
+		freeRoot = PageID(binary.LittleEndian.Uint64(data[metaFreeListOff:]))
+		if freeRoot == 0 {
+			return metaRecord{}, false, fmt.Errorf("%w: metadata large freelist has zero root", ErrMetaInvariant)
+		}
 	}
 	return metaRecord{
-		root:     PageID(binary.LittleEndian.Uint64(data[metaRootOff:])),
-		nextPage: PageID(binary.LittleEndian.Uint64(data[metaNextPageOff:])),
-		length:   int(binary.LittleEndian.Uint64(data[metaLengthOff:])),
-		revision: binary.LittleEndian.Uint64(data[metaRevisionOff:]),
-		degree:   int(binary.LittleEndian.Uint64(data[metaDegreeOff:])),
-		maxPages: int(binary.LittleEndian.Uint64(data[metaMaxPagesOff:])),
-		free:     free,
+		root:      PageID(binary.LittleEndian.Uint64(data[metaRootOff:])),
+		nextPage:  PageID(binary.LittleEndian.Uint64(data[metaNextPageOff:])),
+		length:    int(binary.LittleEndian.Uint64(data[metaLengthOff:])),
+		revision:  binary.LittleEndian.Uint64(data[metaRevisionOff:]),
+		degree:    int(binary.LittleEndian.Uint64(data[metaDegreeOff:])),
+		maxPages:  int(binary.LittleEndian.Uint64(data[metaMaxPagesOff:])),
+		free:      free,
+		freeCount: freeCount,
+		freeRoot:  freeRoot,
 	}, true, nil
 }
 
@@ -1010,7 +1180,7 @@ func isZeroPage(data []byte) bool {
 }
 
 func writeMetaPage(data []byte, record metaRecord) error {
-	if len(record.free) > maxMetaFreePages {
+	if len(record.free) > maxMetaFreePages && record.freeRoot == 0 {
 		return fmt.Errorf("%w: metadata free count %d exceeds %d", ErrMetaInvariant, len(record.free), maxMetaFreePages)
 	}
 
@@ -1025,9 +1195,13 @@ func writeMetaPage(data []byte, record metaRecord) error {
 	binary.LittleEndian.PutUint64(data[metaDegreeOff:], uint64(record.degree))
 	binary.LittleEndian.PutUint64(data[metaMaxPagesOff:], uint64(record.maxPages))
 	binary.LittleEndian.PutUint64(data[metaFreeCountOff:], uint64(len(record.free)))
-	for i, id := range record.free {
-		offset := metaFreeListOff + i*8
-		binary.LittleEndian.PutUint64(data[offset:], uint64(id))
+	if len(record.free) > maxMetaFreePages {
+		binary.LittleEndian.PutUint64(data[metaFreeListOff:], uint64(record.freeRoot))
+	} else {
+		for i, id := range record.free {
+			offset := metaFreeListOff + i*8
+			binary.LittleEndian.PutUint64(data[offset:], uint64(id))
+		}
 	}
 	binary.LittleEndian.PutUint32(data[metaChecksumOff:], metaChecksum(data))
 	return nil

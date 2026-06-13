@@ -48,6 +48,7 @@ pagebtree/
   delete.go     Page-copying deletion and root collapse
   snapshot.go   Read-only historical root page ids
   freelist.go   Reader-pinned retired pages and reusable page IDs
+  freelist_pages.go Checked freelist pages for large persisted reusable lists
   mmap.go       Mmap-backed page arena, metadata recovery, dirty sync, compact, tunable advice, cache stats, and file locks
 
 cmd/cowbtree/        Logical B-tree demonstration
