@@ -793,7 +793,7 @@ func TestMmapAccessAdviceKeepsReadsWorking(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	for _, pattern := range []MmapAccessPattern{MmapAccessRandom, MmapAccessSequential, MmapAccessWillNeed, MmapAccessDefault} {
+	for _, pattern := range []MmapAccessPattern{MmapAccessRandom, MmapAccessSequential, MmapAccessWillNeed, MmapAccessDefault, MmapAccessNormal} {
 		if err := tree.Advise(pattern); err != nil {
 			t.Fatalf("Advise(%v): %v", pattern, err)
 		}
@@ -805,6 +805,34 @@ func TestMmapAccessAdviceKeepsReadsWorking(t *testing.T) {
 
 	if err := tree.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestMmapDefaultsToRandomAccessAdvice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	if tree.arena.accessPattern != MmapAccessRandom {
+		t.Fatalf("default access pattern = %v, want MmapAccessRandom", tree.arena.accessPattern)
+	}
+}
+
+func TestMmapCanOptIntoNormalKernelAccessAdvice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, AccessPattern: MmapAccessNormal})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	if tree.arena.accessPattern != MmapAccessNormal {
+		t.Fatalf("explicit normal access pattern = %v, want MmapAccessNormal", tree.arena.accessPattern)
 	}
 }
 
@@ -832,6 +860,29 @@ func TestMmapReadOnlyAccessAdviceKeepsReadsWorking(t *testing.T) {
 	got, ok := reader.Get("alpha")
 	if !ok || string(got) != "one" {
 		t.Fatalf("read-only Get(alpha) after advice = %q, %v; want one, true", got, ok)
+	}
+}
+
+func TestMmapReadOnlyDefaultsToRandomAccessAdvice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	defer reader.Close()
+
+	if reader.arena.accessPattern != MmapAccessRandom {
+		t.Fatalf("read-only default access pattern = %v, want MmapAccessRandom", reader.arena.accessPattern)
 	}
 }
 

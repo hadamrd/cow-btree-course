@@ -72,6 +72,7 @@ const (
 	MmapAccessRandom
 	MmapAccessSequential
 	MmapAccessWillNeed
+	MmapAccessNormal
 	mmapAccessDontNeed
 )
 
@@ -207,6 +208,10 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 		readOnly:                true,
 		pageCache:               newPageCache(DefaultPageCacheCapacity),
 		rangePrefetchLeafWindow: DefaultRangePrefetchLeafWindow,
+	}
+	if err := arena.advise(MmapAccessDefault); err != nil {
+		arena.close()
+		return nil, err
 	}
 	if err := tree.loadMeta(); err != nil {
 		arena.close()
@@ -514,11 +519,12 @@ func (a *mmapArena) advise(pattern MmapAccessPattern) error {
 	if a == nil || len(a.data) == 0 {
 		return nil
 	}
-	advice, err := mmapAdvice(pattern)
+	normalized := normalizeMmapAccessPattern(pattern)
+	advice, err := mmapAdvice(normalized)
 	if err != nil {
 		return err
 	}
-	a.accessPattern = pattern
+	a.accessPattern = normalized
 	return unix.Madvise(a.data, advice)
 }
 
@@ -533,12 +539,13 @@ func (a *mmapArena) advisePageRange(startPage, endPage PageID, pattern MmapAcces
 	if endByte > len(a.data) {
 		return fmt.Errorf("mmap advice page range [%d,%d) exceeds mmap size %d", startPage, endPage, len(a.data))
 	}
-	advice, err := mmapAdvice(pattern)
+	normalized := normalizeMmapAccessPattern(pattern)
+	advice, err := mmapAdvice(normalized)
 	if err != nil {
 		return err
 	}
 	if a.adviceObserver != nil {
-		a.adviceObserver(pattern, startPage, endPage)
+		a.adviceObserver(normalized, startPage, endPage)
 	}
 	return a.madviseRange(int(startPage)*PageSize, endByte, advice)
 }
@@ -603,10 +610,10 @@ func divideRoundUp(value, by int) int {
 
 func mmapAdvice(pattern MmapAccessPattern) (int, error) {
 	switch pattern {
-	case MmapAccessDefault:
-		return unix.MADV_NORMAL, nil
-	case MmapAccessRandom:
+	case MmapAccessDefault, MmapAccessRandom:
 		return unix.MADV_RANDOM, nil
+	case MmapAccessNormal:
+		return unix.MADV_NORMAL, nil
 	case MmapAccessSequential:
 		return unix.MADV_SEQUENTIAL, nil
 	case MmapAccessWillNeed:
@@ -616,6 +623,13 @@ func mmapAdvice(pattern MmapAccessPattern) (int, error) {
 	default:
 		return 0, fmt.Errorf("unknown mmap access pattern %d", pattern)
 	}
+}
+
+func normalizeMmapAccessPattern(pattern MmapAccessPattern) MmapAccessPattern {
+	if pattern == MmapAccessDefault {
+		return MmapAccessRandom
+	}
+	return pattern
 }
 
 func (a *mmapArena) close() error {

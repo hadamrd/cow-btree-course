@@ -21,6 +21,7 @@ const (
 	MmapAccessRandom
 	MmapAccessSequential
 	MmapAccessWillNeed
+	MmapAccessNormal
 	mmapAccessDontNeed
 )
 

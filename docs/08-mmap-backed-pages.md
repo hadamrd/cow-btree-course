@@ -70,10 +70,11 @@ That is one of the reasons B-trees pair well with page-oriented storage:
 
 The important caching point is that mmap already uses the kernel page cache. Adding a second, broad Go heap page cache would often duplicate memory and fight the kernel. This project keeps page bytes in the mapping and adds access-pattern advice instead:
 
-- `MmapAccessRandom` uses `madvise(MADV_RANDOM)`. This is the best default for point lookups because B+tree descent jumps from root to branch to leaf, and the next physical page is often unrelated.
+- `MmapAccessDefault` uses the engine default, which is currently `madvise(MADV_RANDOM)`. The zero-value option is intentionally point-lookup friendly.
+- `MmapAccessRandom` also uses `madvise(MADV_RANDOM)`. This tells Linux not to spend much effort on broad sequential readahead for the mapping, which is a good fit for root-to-branch-to-leaf point lookups.
 - `MmapAccessSequential` uses `madvise(MADV_SEQUENTIAL)`. Use it before range scans or bulk verification passes where nearby pages are likely to be read soon.
 - `MmapAccessWillNeed` uses `madvise(MADV_WILLNEED)`. Use it as a prefetch hint before a known upcoming scan.
-- `MmapAccessDefault` returns the mapping to the kernel's normal policy.
+- `MmapAccessNormal` returns the mapping to the kernel's normal policy for experiments or workloads where Linux's own heuristics are a better fit.
 
 These are hints, not contracts. The kernel can ignore them or combine them with its own readahead heuristics. Correctness comes from the page checksums, copy-on-write roots, and metadata validation, not from prefetch behavior.
 
@@ -85,12 +86,12 @@ Linux already tries to detect sequential access on file-backed mappings. That is
 
 The implementation therefore uses three rules:
 
-- keep normal point lookups random-friendly with `MADV_RANDOM` or default advice
+- keep normal point lookups random-friendly with default `MADV_RANDOM` advice
 - prefetch only exact page IDs when the tree knows the next page, such as linked leaves during a range scan
 - avoid prefetch when the tree cannot prove the hint is still correct, such as while active readers have deferred leaf-link repair
 - drop clean mapped pages only through the explicit `DropMmapCache` path, after writable state has been synced
 
-This is why `RangeFrom` and `RangeBetween` first descend the tree to the correct lower-bound leaf, then issue small `MADV_WILLNEED` hints for a bounded window of linked next leaves. The default window is `DefaultRangePrefetchLeafWindow` pages. `MmapOptions.RangePrefetchLeafWindow` can set a smaller or larger exact-page window, and a negative value disables linked-leaf prefetch entirely. These scans do not switch the whole mapping to sequential mode for ordinary bounded scans. Broad `MADV_SEQUENTIAL` remains available through `Tree.Advise` for explicit bulk passes, such as a full verification walk, where physical readahead is likely to be useful.
+This is why `OpenMmap` and `OpenMmapReadOnly` both apply random-access advice by default. `RangeFrom` and `RangeBetween` then first descend the tree to the correct lower-bound leaf and issue small `MADV_WILLNEED` hints for a bounded window of linked next leaves. The default window is `DefaultRangePrefetchLeafWindow` pages. `MmapOptions.RangePrefetchLeafWindow` can set a smaller or larger exact-page window, and a negative value disables linked-leaf prefetch entirely. These scans do not switch the whole mapping to sequential mode for ordinary bounded scans. Broad `MADV_SEQUENTIAL` remains available through `Tree.Advise` for explicit bulk passes, such as a full verification walk, where physical readahead is likely to be useful. `MmapAccessNormal` is available when you want to compare this policy against Linux's default readahead heuristics.
 
 The project also has a small user-space page cache, but it deliberately does not cache raw page bytes. Raw bytes stay in the mmap region and the kernel page cache. The Go cache stores derived branch-routing metadata: decoded separator keys and child page IDs for branch pages reached by current-tree `Get`. Each entry is keyed by page ID plus the page checksum. If a page ID is later reused with different bytes, the checksum changes and the cache refreshes the decoded routing entry.
 
