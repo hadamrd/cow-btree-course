@@ -48,7 +48,7 @@ offset = pageID * PageSize
 size   = PageSize
 ```
 
-Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from each metadata candidate root, including overflow chains referenced by leaf values, and rejects corruption before serving reads. If an older metadata candidate is still reachable and valid, it can be used as the recovery point.
+Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from each metadata candidate root, including overflow chains referenced by leaf values, and rejects corruption before serving reads. Validation is deliberately two-layered: first the page checksum must match, then the page bytes must still form a legal layout. Leaf and branch pages validate their slotted-page structure before any key/value cells are decoded; overflow pages validate their payload length before the chain is followed. If an older metadata candidate is still reachable and valid, it can be used as the recovery point.
 
 The database page size is fixed at 4096 bytes for the lesson. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them. Dirty logical pages are coalesced into contiguous ranges before `msync`, so a small write does not force the whole mapped file to flush.
 
@@ -145,7 +145,7 @@ This chapter makes the project more serious, but it is still not a production da
 
 - freelist state is persisted in the metadata page, but only with a bounded educational encoding
 - `Sync` flushes dirty data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
-- metadata pages, reachable tree pages, and reachable overflow pages are checksummed, but there is no page-level repair
+- metadata pages, reachable tree pages, and reachable overflow pages are checksummed and structurally validated, but there is no page-level repair
 - read-only mmap handles use shared file locks, but there is no reader table that allows a concurrent writer to recycle pages around external readers
 - overflow pages are linear chains, not a compact extent/tree structure
 - byte-full leaf rewrites can spill cells to overflow pages, but sibling redistribution is still key-count based

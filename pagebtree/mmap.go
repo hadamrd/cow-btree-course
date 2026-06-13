@@ -720,6 +720,9 @@ func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
 	if !p.validChecksum() {
 		return fmt.Errorf("%w: page %d", ErrPageChecksum, id)
 	}
+	if err := p.validateLayout(); err != nil {
+		return err
+	}
 	if p.isLeaf() {
 		for _, entry := range p.leafEntries() {
 			if err := t.validateOverflowValue(entry.value, entry.slotFlags, seen); err != nil {
@@ -757,11 +760,8 @@ func (t *Tree) validateOverflowValue(raw []byte, flags uint16, seen map[PageID]b
 		if !p.validChecksum() {
 			return fmt.Errorf("%w: page %d", ErrPageChecksum, id)
 		}
-		if !p.isOverflow() {
-			return fmt.Errorf("overflow page %d has invalid flags %x", id, p.flags())
-		}
-		if p.overflowPayloadLen() > overflowPayloadSize {
-			return fmt.Errorf("overflow page %d payload length %d exceeds capacity", id, p.overflowPayloadLen())
+		if err := p.validateLayout(); err != nil {
+			return err
 		}
 		length += p.overflowPayloadLen()
 		id = p.overflowNext()

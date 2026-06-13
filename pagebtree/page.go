@@ -3,6 +3,7 @@ package pagebtree
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/crc32"
 )
 
@@ -13,7 +14,10 @@ const PageSize = 4096
 
 type PageID uint64
 
-var ErrPageChecksum = errors.New("page checksum mismatch")
+var (
+	ErrPageChecksum = errors.New("page checksum mismatch")
+	ErrPageLayout   = errors.New("page layout invalid")
+)
 
 const (
 	pageHeaderSize = 20
@@ -141,6 +145,90 @@ func (p *page) computeChecksum() uint32 {
 
 func slotBase(index int) int {
 	return pageHeaderSize + index*slotSize
+}
+
+func (p *page) validateLayout() error {
+	switch p.flags() {
+	case flagLeaf:
+		return p.validateSlottedLayout()
+	case flagBranch:
+		if p.leftmostChild() == 0 {
+			return fmt.Errorf("%w: branch page %d has zero leftmost child", ErrPageLayout, p.id)
+		}
+		return p.validateSlottedLayout()
+	case flagOverflow:
+		return p.validateOverflowLayout()
+	default:
+		return fmt.Errorf("%w: page %d has invalid flags %x", ErrPageLayout, p.id, p.flags())
+	}
+}
+
+func (p *page) validateSlottedLayout() error {
+	slotCount := int(p.slotCount())
+	slotEnd := pageHeaderSize + slotCount*slotSize
+	if slotEnd > PageSize {
+		return fmt.Errorf("%w: page %d slot directory ends at %d", ErrPageLayout, p.id, slotEnd)
+	}
+	freeUpper := int(p.freeUpper())
+	if freeUpper < slotEnd || freeUpper > PageSize {
+		return fmt.Errorf("%w: page %d freeUpper %d outside [%d,%d]", ErrPageLayout, p.id, freeUpper, slotEnd, PageSize)
+	}
+
+	ranges := make([]cellRange, 0, slotCount)
+	var previousKey string
+	for i := 0; i < slotCount; i++ {
+		slot := p.readSlot(i)
+		cellStart := int(slot.offset)
+		keyEnd := cellStart + int(slot.keyLen)
+		cellEnd := keyEnd + int(slot.valueLen)
+		if cellStart < freeUpper || cellStart > PageSize || keyEnd > PageSize || cellEnd > PageSize {
+			return fmt.Errorf("%w: page %d slot %d cell range [%d,%d) outside cell area [%d,%d)", ErrPageLayout, p.id, i, cellStart, cellEnd, freeUpper, PageSize)
+		}
+		if p.isBranch() {
+			if slot.valueLen != 8 {
+				return fmt.Errorf("%w: branch page %d slot %d child value length %d", ErrPageLayout, p.id, i, slot.valueLen)
+			}
+			if p.readCellPageID(i) == 0 {
+				return fmt.Errorf("%w: branch page %d slot %d has zero child", ErrPageLayout, p.id, i)
+			}
+			if slot.flags != 0 {
+				return fmt.Errorf("%w: branch page %d slot %d has flags %x", ErrPageLayout, p.id, i, slot.flags)
+			}
+		}
+		if p.isLeaf() && slot.flags&^slotFlagOverflow != 0 {
+			return fmt.Errorf("%w: leaf page %d slot %d has flags %x", ErrPageLayout, p.id, i, slot.flags)
+		}
+		key := p.readCellKey(i)
+		if i > 0 && previousKey >= key {
+			return fmt.Errorf("%w: page %d slot keys out of order at %d", ErrPageLayout, p.id, i)
+		}
+		previousKey = key
+		ranges = append(ranges, cellRange{start: cellStart, end: cellEnd})
+	}
+	for i := 0; i < len(ranges); i++ {
+		for j := i + 1; j < len(ranges); j++ {
+			if ranges[i].overlaps(ranges[j]) {
+				return fmt.Errorf("%w: page %d slots %d and %d overlap", ErrPageLayout, p.id, i, j)
+			}
+		}
+	}
+	return nil
+}
+
+func (p *page) validateOverflowLayout() error {
+	if p.overflowPayloadLen() > overflowPayloadSize {
+		return fmt.Errorf("%w: overflow page %d payload length %d exceeds capacity", ErrPageLayout, p.id, p.overflowPayloadLen())
+	}
+	return nil
+}
+
+type cellRange struct {
+	start int
+	end   int
+}
+
+func (r cellRange) overlaps(other cellRange) bool {
+	return r.start < other.end && other.start < r.end
 }
 
 func (p *page) readSlot(index int) slot {

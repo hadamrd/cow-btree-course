@@ -16,7 +16,8 @@
 // with MADV_WILLNEED.
 // Mmap-backed trees track dirty copied pages so Sync can flush changed data
 // pages before publishing metadata, and they can grow the mapped file when
-// allocation reaches the current capacity.
+// allocation reaches the current capacity. Reopen validation checks both page
+// checksums and slotted-page structure before decoding reachable cells.
 // OpenMmapReadOnly opens mmap files with a shared read lock and rejects
 // mutations through the returned tree handle. Mmap-backed trees expose Advise so
 // callers can pass random, sequential, or will-need access-pattern hints to the

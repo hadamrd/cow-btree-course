@@ -1019,6 +1019,61 @@ func TestMmapTreeRejectsCorruptReachableOverflowPage(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsValidChecksumLeafWithInvalidSlotLayout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	newest := keepOnlyNewestMetaPage(t, path)
+	corruptPageSlotValueLen(t, path, newest.root, 0, PageSize)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with invalid reachable leaf slot layout")
+	}
+	if !errors.Is(err, ErrPageLayout) {
+		t.Fatalf("OpenMmap invalid leaf slot layout error = %v, want ErrPageLayout", err)
+	}
+}
+
+func TestMmapTreeRejectsValidChecksumBranchWithInvalidChildSlotLayout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if !tree.pages[tree.root].isBranch() {
+		t.Fatalf("root is not a branch after many inserts")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	newest := keepOnlyNewestMetaPage(t, path)
+	corruptPageSlotValueLen(t, path, newest.root, 0, 9)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with invalid reachable branch slot layout")
+	}
+	if !errors.Is(err, ErrPageLayout) {
+		t.Fatalf("OpenMmap invalid branch slot layout error = %v, want ErrPageLayout", err)
+	}
+}
+
 func corruptMetaPage(t *testing.T, path string, metaIndex int) {
 	t.Helper()
 
@@ -1037,6 +1092,45 @@ func corruptMetaPage(t *testing.T, path string, metaIndex int) {
 	}
 }
 
+func keepOnlyNewestMetaPage(t *testing.T, path string) metaRecord {
+	t.Helper()
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("Open newest meta: %v", err)
+	}
+
+	type candidate struct {
+		index  int
+		record metaRecord
+	}
+	var candidates []candidate
+	for index := 0; index < metaPageCount; index++ {
+		buf := make([]byte, PageSize)
+		if _, err := file.ReadAt(buf, int64(index*PageSize)); err != nil {
+			file.Close()
+			t.Fatalf("ReadAt newest meta %d: %v", index, err)
+		}
+		record, ok := readMetaPage(buf)
+		if ok {
+			candidates = append(candidates, candidate{index: index, record: record})
+		}
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close newest meta reader: %v", err)
+	}
+	if len(candidates) == 0 {
+		t.Fatalf("no valid metadata pages found")
+	}
+	slices.SortFunc(candidates, func(left, right candidate) int {
+		return compareUint64Desc(left.record.revision, right.record.revision)
+	})
+	for _, candidate := range candidates[1:] {
+		corruptMetaPage(t, path, candidate.index)
+	}
+	return candidates[0].record
+}
+
 func corruptPagePayload(t *testing.T, path string, id PageID) {
 	t.Helper()
 
@@ -1052,5 +1146,33 @@ func corruptPagePayload(t *testing.T, path string, id PageID) {
 	}
 	if err := file.Sync(); err != nil {
 		t.Fatalf("Sync corrupt page %d: %v", id, err)
+	}
+}
+
+func corruptPageSlotValueLen(t *testing.T, path string, id PageID, slotIndex int, valueLen int) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile corrupt page slot %d: %v", id, err)
+	}
+	defer file.Close()
+
+	buf := make([]byte, PageSize)
+	offset := int64(id) * PageSize
+	if _, err := file.ReadAt(buf, offset); err != nil {
+		t.Fatalf("ReadAt corrupt page slot %d: %v", id, err)
+	}
+	p := &page{id: id, data: buf}
+	slot := p.readSlot(slotIndex)
+	slot.valueLen = uint16(valueLen)
+	p.writeSlot(slotIndex, slot)
+	p.updateChecksum()
+
+	if _, err := file.WriteAt(buf, offset); err != nil {
+		t.Fatalf("WriteAt corrupt page slot %d: %v", id, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("Sync corrupt page slot %d: %v", id, err)
 	}
 }
