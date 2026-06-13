@@ -216,6 +216,9 @@ func (t *Tree) newPage(id PageID, flags uint16) *page {
 }
 
 func (t *Tree) Sync() error {
+	if t == nil || t.closed {
+		return nil
+	}
 	if t.readOnly {
 		return nil
 	}
@@ -254,7 +257,6 @@ func (t *Tree) Close() error {
 	if t.arena != nil && t.activeReaderCount() > 0 {
 		return ErrActiveReaders
 	}
-	t.closed = true
 	if !t.readOnly {
 		if err := t.Sync(); err != nil {
 			if t.arena == nil {
@@ -263,6 +265,7 @@ func (t *Tree) Close() error {
 			return errors.Join(err, t.arena.close())
 		}
 	}
+	t.closed = true
 	if t.arena == nil {
 		return nil
 	}

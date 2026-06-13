@@ -813,7 +813,7 @@ func (t *Tree) syncMmap() error {
 }
 
 func (t *Tree) Advise(pattern MmapAccessPattern) error {
-	if t.arena == nil {
+	if t == nil || t.closed || t.arena == nil {
 		return nil
 	}
 	return t.arena.advise(pattern)
@@ -841,7 +841,7 @@ func (t *Tree) DropMmapCache() error {
 
 // MmapCacheStats reports kernel page-cache residency for an mmap-backed tree.
 func (t *Tree) MmapCacheStats() (MmapCacheStats, error) {
-	if t == nil || t.arena == nil {
+	if t == nil || t.closed || t.arena == nil {
 		return MmapCacheStats{}, nil
 	}
 	return t.arena.cacheStats()

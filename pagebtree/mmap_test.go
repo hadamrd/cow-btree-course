@@ -266,6 +266,38 @@ func TestMmapSnapshotAfterCloseIsInert(t *testing.T) {
 	}
 }
 
+func TestMmapClosedTreeMaintenanceAPIsAreNoOps(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 32})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	if _, replaced := tree.Put("alpha", []byte("one")); replaced {
+		t.Fatalf("first Put replaced existing key")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after Close = %v, want nil", err)
+	}
+	if err := tree.Advise(MmapAccessSequential); err != nil {
+		t.Fatalf("Advise after Close = %v, want nil", err)
+	}
+	if err := tree.DropMmapCache(); err != nil {
+		t.Fatalf("DropMmapCache after Close = %v, want nil", err)
+	}
+	stats, err := tree.MmapCacheStats()
+	if err != nil {
+		t.Fatalf("MmapCacheStats after Close error = %v, want nil", err)
+	}
+	if stats != (MmapCacheStats{}) {
+		t.Fatalf("MmapCacheStats after Close = %+v, want zero value", stats)
+	}
+}
+
 func TestMmapTreeGrowsMappingWhenPageCapacityIsExceeded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
