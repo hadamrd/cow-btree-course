@@ -13,6 +13,7 @@ type Tree struct {
 	reusedPages   int
 	arena         *mmapArena
 	closed        bool
+	readOnly      bool
 }
 
 func New(degree int) *Tree {
@@ -43,7 +44,7 @@ func (t *Tree) Get(key string) ([]byte, bool) {
 // Pages are never changed through an old page id. Before Put changes a page, it
 // first allocates a new page id and copies the old page contents there.
 func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
-	if t.closed {
+	if t.closed || t.readOnly {
 		return nil, false
 	}
 	if t.root == 0 {
@@ -139,6 +140,9 @@ func (t *Tree) newPage(id PageID, flags uint16) *page {
 }
 
 func (t *Tree) Sync() error {
+	if t.readOnly {
+		return nil
+	}
 	t.persistMeta()
 	if t.arena == nil {
 		return nil
@@ -151,7 +155,9 @@ func (t *Tree) Close() error {
 		return nil
 	}
 	t.closed = true
-	t.persistMeta()
+	if !t.readOnly {
+		t.persistMeta()
+	}
 	if t.arena == nil {
 		return nil
 	}

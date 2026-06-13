@@ -9,7 +9,7 @@ import "slices"
 // full B+tree sibling redistribution yet, but it does remove empty children,
 // rebuild branch separators, and collapse a one-child root.
 func (t *Tree) Delete(key string) ([]byte, bool) {
-	if t.closed || t.root == 0 {
+	if t.closed || t.readOnly || t.root == 0 {
 		return nil, false
 	}
 

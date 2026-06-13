@@ -17,6 +17,10 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	return nil, errors.New("mmap page storage is only available on Unix-like platforms")
 }
 
+func OpenMmapReadOnly(path string) (*Tree, error) {
+	return nil, errors.New("mmap page storage is only available on Unix-like platforms")
+}
+
 func (a *mmapArena) pageBytes(id PageID) ([]byte, error) {
 	return nil, errors.New("mmap page storage is only available on Unix-like platforms")
 }

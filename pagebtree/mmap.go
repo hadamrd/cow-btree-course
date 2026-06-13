@@ -46,6 +46,7 @@ type mmapArena struct {
 	data     []byte
 	maxPages int
 	locked   bool
+	readOnly bool
 }
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
@@ -53,7 +54,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := lockFile(file); err != nil {
+	if err := lockFile(file, true); err != nil {
 		file.Close()
 		return nil, err
 	}
@@ -124,6 +125,55 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	return tree, nil
 }
 
+func OpenMmapReadOnly(path string) (*Tree, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := lockFile(file, false); err != nil {
+		file.Close()
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		unlockFile(file)
+		file.Close()
+		return nil, err
+	}
+	if info.Size() == 0 || info.Size()%PageSize != 0 {
+		unlockFile(file)
+		file.Close()
+		return nil, fmt.Errorf("mmap tree file size %d is not page aligned", info.Size())
+	}
+
+	size := int(info.Size())
+	data, err := unix.Mmap(int(file.Fd()), 0, size, unix.PROT_READ, unix.MAP_SHARED)
+	if err != nil {
+		unlockFile(file)
+		file.Close()
+		return nil, err
+	}
+
+	arena := &mmapArena{
+		file:     file,
+		data:     data,
+		maxPages: int(info.Size()/PageSize) - metaPageCount,
+		locked:   true,
+		readOnly: true,
+	}
+	tree := &Tree{
+		pages:    map[PageID]*page{},
+		nextPage: firstTreePageID,
+		arena:    arena,
+		readOnly: true,
+	}
+	if err := tree.loadMeta(); err != nil {
+		arena.close()
+		return nil, err
+	}
+	return tree, nil
+}
+
 func (a *mmapArena) initialized() bool {
 	for index := 0; index < metaPageCount; index++ {
 		if _, ok := readMetaPage(a.data[index*PageSize : (index+1)*PageSize]); ok {
@@ -142,7 +192,7 @@ func (a *mmapArena) pageBytes(id PageID) ([]byte, error) {
 }
 
 func (a *mmapArena) sync() error {
-	if a == nil {
+	if a == nil || a.readOnly {
 		return nil
 	}
 	if err := unix.Msync(a.data, unix.MS_SYNC); err != nil {
@@ -157,8 +207,10 @@ func (a *mmapArena) close() error {
 	}
 
 	var errs []error
-	if err := a.sync(); err != nil {
-		errs = append(errs, err)
+	if !a.readOnly {
+		if err := a.sync(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if err := unix.Munmap(a.data); err != nil {
 		errs = append(errs, err)
@@ -175,8 +227,12 @@ func (a *mmapArena) close() error {
 	return errors.Join(errs...)
 }
 
-func lockFile(file *os.File) error {
-	err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+func lockFile(file *os.File, exclusive bool) error {
+	mode := unix.LOCK_SH | unix.LOCK_NB
+	if exclusive {
+		mode = unix.LOCK_EX | unix.LOCK_NB
+	}
+	err := unix.Flock(int(file.Fd()), mode)
 	if err == nil {
 		return nil
 	}
@@ -271,7 +327,7 @@ func compareUint64Desc(left, right uint64) int {
 }
 
 func (t *Tree) persistMeta() {
-	if t.arena == nil {
+	if t.arena == nil || t.arena.readOnly {
 		return
 	}
 

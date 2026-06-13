@@ -6,5 +6,6 @@
 // separator keys and child page ids, leaf pages store key/value records, and
 // overflow pages hold large values that do not fit cleanly inside a leaf cell.
 // Put and Delete publish new roots through copy-on-write, while snapshots keep
-// reading their older roots.
+// reading their older roots. OpenMmapReadOnly opens mmap files with a shared
+// read lock and rejects mutations through the returned tree handle.
 package pagebtree

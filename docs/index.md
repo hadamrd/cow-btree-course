@@ -45,7 +45,7 @@ pagebtree/
   delete.go     Page-copying deletion and root collapse
   snapshot.go   Read-only historical root page ids
   freelist.go   Reader-pinned retired pages and reusable page IDs
-  mmap.go       Mmap-backed page arena and dual metadata pages
+  mmap.go       Mmap-backed page arena, metadata recovery, and file locks
 
 cmd/cowbtree/        Logical B-tree demonstration
 cmd/pagebtree-demo/  Page-backed CoW demonstration

@@ -65,19 +65,24 @@ That is one of the reasons B-trees pair well with page-oriented storage:
 
 `OpenMmap` takes a non-blocking exclusive advisory lock on the database file. A second writer attempting to open the same path receives `ErrDatabaseLocked` until the first tree closes.
 
+`OpenMmapReadOnly` opens the same file with a shared advisory lock and a read-only mapping. Multiple read-only handles can coexist. A writer cannot open while any read-only handle is active, so cross-process readers are protected by the file lock rather than by a full reader table.
+
 ```mermaid
 sequenceDiagram
     participant A as Writer A
+    participant R as Reader
     participant B as Writer B
     participant F as DB file
     A->>F: OpenMmap + exclusive lock
+    A->>F: Close releases lock
+    R->>F: OpenMmapReadOnly + shared lock
     B->>F: OpenMmap
     F-->>B: ErrDatabaseLocked
-    A->>F: Close releases lock
+    R->>F: Close releases shared lock
     B->>F: OpenMmap succeeds
 ```
 
-This keeps the teaching engine honest: the mmap implementation has one writer at a time. It does not yet implement shared read locks or multi-process reader tables.
+This keeps the teaching engine honest: the mmap implementation has one writer at a time, and read-only processes can inspect a stable root without taking write permission. It still does not allow one writer to keep progressing while independent external readers pin old pages through a reader table.
 
 ## What Is Still Not Production-grade
 
@@ -86,7 +91,7 @@ This chapter makes the project more serious, but it is still not a production da
 - freelist state is persisted in the metadata page, but only with a bounded educational encoding
 - writes call `msync`, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed, but there is no page-level repair
-- file locking is exclusive-writer only; there is no shared-reader lock table
+- read-only mmap handles use shared file locks, but there is no reader table that allows a concurrent writer to recycle pages around external readers
 - overflow pages are linear chains, not a compact extent/tree structure
 - byte-full leaf rewrites can spill cells to overflow pages, but sibling redistribution is still key-count based
 - `Get` searches slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries

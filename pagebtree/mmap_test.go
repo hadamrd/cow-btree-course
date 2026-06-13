@@ -324,6 +324,97 @@ func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
 	}
 }
 
+func TestMmapReadOnlyOpensShareFileLockAndBlockWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	firstReader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly first: %v", err)
+	}
+	secondReader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		firstReader.Close()
+		t.Fatalf("OpenMmapReadOnly second: %v", err)
+	}
+
+	for name, reader := range map[string]*Tree{"first": firstReader, "second": secondReader} {
+		got, ok := reader.Get("alpha")
+		if !ok || string(got) != "one" {
+			secondReader.Close()
+			firstReader.Close()
+			t.Fatalf("%s reader Get(alpha) = %q, %v; want one, true", name, got, ok)
+		}
+	}
+
+	blockedWriter, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err == nil {
+		blockedWriter.Close()
+		secondReader.Close()
+		firstReader.Close()
+		t.Fatalf("writer unexpectedly opened while shared readers were active")
+	}
+	if !errors.Is(err, ErrDatabaseLocked) {
+		secondReader.Close()
+		firstReader.Close()
+		t.Fatalf("writer while readers active error = %v, want ErrDatabaseLocked", err)
+	}
+
+	if err := secondReader.Close(); err != nil {
+		firstReader.Close()
+		t.Fatalf("Close second reader: %v", err)
+	}
+	if err := firstReader.Close(); err != nil {
+		t.Fatalf("Close first reader: %v", err)
+	}
+
+	reopenedWriter, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer after readers close: %v", err)
+	}
+	if err := reopenedWriter.Close(); err != nil {
+		t.Fatalf("Close reopened writer: %v", err)
+	}
+}
+
+func TestMmapReadOnlyRejectsMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	defer reader.Close()
+
+	if old, replaced := reader.Put("alpha", []byte("two")); replaced || old != nil {
+		t.Fatalf("read-only Put = %q, %v; want nil, false", old, replaced)
+	}
+	if old, deleted := reader.Delete("alpha"); deleted || old != nil {
+		t.Fatalf("read-only Delete = %q, %v; want nil, false", old, deleted)
+	}
+	got, ok := reader.Get("alpha")
+	if !ok || string(got) != "one" {
+		t.Fatalf("read-only Get(alpha) after rejected mutations = %q, %v; want one, true", got, ok)
+	}
+}
+
 func TestMmapTreeRejectsCorruptReachableDataPage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
