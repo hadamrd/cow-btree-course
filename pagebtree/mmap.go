@@ -858,18 +858,21 @@ type metaRecord struct {
 func (t *Tree) loadMeta() error {
 	var records []metaRecord
 	var lastMetaErr error
+	var lastMetaErrRevision uint64
+	var lastMetaErrHasRevision bool
 	maxNextPage := firstTreePageID
 	for index := 0; index < metaPageCount; index++ {
-		record, ok, err := readMetaPageChecked(t.arena.data[index*PageSize : (index+1)*PageSize])
+		metaPage := t.arena.data[index*PageSize : (index+1)*PageSize]
+		record, ok, err := readMetaPageChecked(metaPage)
 		if err != nil {
-			lastMetaErr = err
+			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaError(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, metaPage)
 			continue
 		}
 		if !ok {
 			continue
 		}
 		if err := t.validateMetaBounds(record); err != nil {
-			lastMetaErr = err
+			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaErrorForRevision(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, record.revision)
 			continue
 		}
 		records = append(records, record)
@@ -899,17 +902,21 @@ func (t *Tree) loadMeta() error {
 		t.pages[id] = &page{id: id, data: data}
 	}
 
-	var lastErr error
+	var newestCandidateErr error
 	for _, record := range records {
 		t.applyMetaRecord(record)
 		freelistPages, err := t.resolveMetaFreelist(&record)
 		if err != nil {
-			lastErr = err
+			if newestCandidateErr == nil {
+				newestCandidateErr = err
+			}
 			continue
 		}
 		reachable, err := t.validateReachablePages()
 		if err != nil {
-			lastErr = err
+			if newestCandidateErr == nil {
+				newestCandidateErr = err
+			}
 			continue
 		}
 		owned := clonePageSet(reachable)
@@ -922,24 +929,34 @@ func (t *Tree) loadMeta() error {
 			owned[id] = true
 		}
 		if overlapErr != nil {
-			lastErr = overlapErr
+			if newestCandidateErr == nil {
+				newestCandidateErr = overlapErr
+			}
 			continue
 		}
 		reclaimable := clonePageSet(owned)
 		if err := t.validateFreelist(record.free, record.maxPages, reclaimable); err != nil {
-			lastErr = err
+			if newestCandidateErr == nil {
+				newestCandidateErr = err
+			}
 			continue
 		}
 		if err := t.validateRetiredPages(record.retired, record.revision, record.maxPages, reclaimable); err != nil {
-			lastErr = err
+			if newestCandidateErr == nil {
+				newestCandidateErr = err
+			}
 			continue
 		}
 		if err := t.validateLeafLinks(); err != nil {
-			lastErr = err
+			if newestCandidateErr == nil {
+				newestCandidateErr = err
+			}
 			continue
 		}
 		if err := t.validateMetaInvariants(record); err != nil {
-			lastErr = err
+			if newestCandidateErr == nil {
+				newestCandidateErr = err
+			}
 			continue
 		}
 		t.free = append([]PageID(nil), record.free...)
@@ -948,10 +965,38 @@ func (t *Tree) loadMeta() error {
 		t.metaFreelistPages = append([]PageID(nil), freelistPages...)
 		return nil
 	}
-	if lastErr != nil {
-		return lastErr
+	if newestCandidateErr != nil {
+		return newestCandidateErr
 	}
 	return fmt.Errorf("no usable mmap tree metadata page")
+}
+
+func newestMetaError(current error, currentRevision uint64, currentHasRevision bool, next error, data []byte) (error, uint64, bool) {
+	revision, ok := trustedMetaRevision(data)
+	if ok {
+		return newestMetaErrorForRevision(current, currentRevision, currentHasRevision, next, revision)
+	}
+	if current == nil {
+		return next, 0, false
+	}
+	return current, currentRevision, currentHasRevision
+}
+
+func newestMetaErrorForRevision(current error, currentRevision uint64, currentHasRevision bool, next error, nextRevision uint64) (error, uint64, bool) {
+	if current == nil || !currentHasRevision || nextRevision > currentRevision {
+		return next, nextRevision, true
+	}
+	return current, currentRevision, currentHasRevision
+}
+
+func trustedMetaRevision(data []byte) (uint64, bool) {
+	if len(data) < PageSize || isZeroPage(data[:PageSize]) {
+		return 0, false
+	}
+	if string(data[metaMagicOffset:metaMagicOffset+len(metaMagic)]) != metaMagic {
+		return 0, false
+	}
+	return binary.LittleEndian.Uint64(data[metaRevisionOff:]), true
 }
 
 func (t *Tree) applyMetaRecord(record metaRecord) {

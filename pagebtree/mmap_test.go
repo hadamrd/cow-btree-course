@@ -3181,6 +3181,71 @@ func TestMmapTreeRejectsEmptyReclaimRoot(t *testing.T) {
 	}
 }
 
+func TestMmapTreePrefersNewestCheckedMetadataError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	for i := 0; i < 24; i++ {
+		writer.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close initial writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	writer, err = OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		reader.Close()
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+	for i := 0; i < 12; i++ {
+		if _, ok := writer.Delete(fmt.Sprintf("key-%02d", i)); !ok {
+			writer.Close()
+			reader.Close()
+			t.Fatalf("Delete key-%02d = false, want true", i)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		reader.Close()
+		t.Fatalf("Close writer with external reader: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close reader: %v", err)
+	}
+
+	newestIndex, record := newestMetaPage(t, path)
+	for index := 0; index < metaPageCount; index++ {
+		if index != newestIndex {
+			corruptMetaPage(t, path, index)
+		}
+	}
+	if record.freeRoot == 0 {
+		t.Fatalf("newest metadata has no reclaim root")
+	}
+	rewriteReclaimPageRecords(t, path, record.freeRoot, nil)
+	replaceMetaBytesAt(t, path, newestIndex, func(data []byte) {
+		binary.LittleEndian.PutUint64(data[metaFreeCountOff:], 0)
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with unusable metadata pages")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap metadata error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "reclaim root without records") {
+		t.Fatalf("OpenMmap metadata error = %v, want newest checked metadata detail", err)
+	}
+}
+
 func TestMmapReadOnlyPinsReaderTableBeforeLoadingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
