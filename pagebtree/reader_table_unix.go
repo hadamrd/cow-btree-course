@@ -146,7 +146,7 @@ func (r *readerTable) updateRevision(revision uint64) error {
 	})
 }
 
-func (r *readerTable) oldest() (uint64, bool, error) {
+func (r *readerTable) oldest(maxRevision uint64) (uint64, bool, error) {
 	if r == nil {
 		return 0, false, nil
 	}
@@ -167,6 +167,9 @@ func (r *readerTable) oldest() (uint64, bool, error) {
 				}
 				continue
 			}
+			if err := validateReaderSlotRevision(slot, current, maxRevision); err != nil {
+				return err
+			}
 			if !found || current.revision < oldest {
 				oldest = current.revision
 				found = true
@@ -177,13 +180,13 @@ func (r *readerTable) oldest() (uint64, bool, error) {
 	return oldest, found, err
 }
 
-func (r *readerTable) stats() (MmapReaderStats, error) {
-	stats, _, err := r.scan(false)
+func (r *readerTable) stats(maxRevision uint64) (MmapReaderStats, error) {
+	stats, _, err := r.scan(maxRevision, false)
 	return stats, err
 }
 
-func (r *readerTable) cleanStale() (int, error) {
-	_, cleared, err := r.scan(true)
+func (r *readerTable) cleanStale(maxRevision uint64) (int, error) {
+	_, cleared, err := r.scan(maxRevision, true)
 	return cleared, err
 }
 
@@ -194,7 +197,7 @@ func (r *readerTable) close() error {
 	return errors.Join(r.release(), r.file.Close())
 }
 
-func (r *readerTable) scan(cleanStale bool) (MmapReaderStats, int, error) {
+func (r *readerTable) scan(maxRevision uint64, cleanStale bool) (MmapReaderStats, int, error) {
 	stats := MmapReaderStats{Slots: readerTableSlotCount}
 	cleared := 0
 	if r == nil {
@@ -220,6 +223,9 @@ func (r *readerTable) scan(cleanStale bool) (MmapReaderStats, int, error) {
 				continue
 			}
 			stats.ActiveSlots++
+			if err := validateReaderSlotRevision(slot, current, maxRevision); err != nil {
+				return err
+			}
 			if !stats.HasOldestRevision || current.revision < stats.OldestRevision {
 				stats.OldestRevision = current.revision
 				stats.HasOldestRevision = true
@@ -230,12 +236,19 @@ func (r *readerTable) scan(cleanStale bool) (MmapReaderStats, int, error) {
 	return stats, cleared, err
 }
 
+func validateReaderSlotRevision(slot int, current readerSlot, maxRevision uint64) error {
+	if current.revision > maxRevision {
+		return fmt.Errorf("%w: reader slot %d revision %d beyond tree revision %d", ErrReaderTable, slot, current.revision, maxRevision)
+	}
+	return nil
+}
+
 // MmapReaderStats reports the current mmap reader-table slots for this tree.
 func (t *Tree) MmapReaderStats() (MmapReaderStats, error) {
 	if t == nil || t.closed || t.arena == nil || t.arena.readerTable == nil {
 		return MmapReaderStats{}, nil
 	}
-	return t.arena.readerTable.stats()
+	return t.arena.readerTable.stats(t.revision)
 }
 
 // CleanStaleMmapReaders clears reader-table slots owned by dead processes.
@@ -243,7 +256,7 @@ func (t *Tree) CleanStaleMmapReaders() (int, error) {
 	if t == nil || t.closed || t.arena == nil || t.arena.readerTable == nil {
 		return 0, nil
 	}
-	return t.arena.readerTable.cleanStale()
+	return t.arena.readerTable.cleanStale(t.revision)
 }
 
 func (r *readerTable) ensureFileLocked() error {

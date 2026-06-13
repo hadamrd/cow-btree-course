@@ -27,15 +27,15 @@ const (
 
 type readerTable struct{}
 
-func (r *readerTable) oldest() (uint64, bool, error) {
+func (r *readerTable) oldest(maxRevision uint64) (uint64, bool, error) {
 	return 0, false, nil
 }
 
-func (r *readerTable) stats() (MmapReaderStats, error) {
+func (r *readerTable) stats(maxRevision uint64) (MmapReaderStats, error) {
 	return MmapReaderStats{}, nil
 }
 
-func (r *readerTable) cleanStale() (int, error) {
+func (r *readerTable) cleanStale(maxRevision uint64) (int, error) {
 	return 0, nil
 }
 

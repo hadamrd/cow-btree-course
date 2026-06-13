@@ -78,12 +78,14 @@
 // before recycling retired pages, so read-only mmap handles can coexist with a
 // writer while pinning old copy-on-write pages. MmapReaderStats reports live and
 // stale reader-table slots, and CleanStaleMmapReaders clears slots owned by dead
-// processes. Existing malformed reader-table sidecars return ErrReaderTable
-// instead of being reset, because resetting them could forget active reader
-// watermarks. Writable mmap handles can close while external reader-table slots
-// still pin retired pages because those pending retired records are published in
-// metadata; Close still returns ErrActiveReaders while in-process snapshots are
-// active because they hold slices into the mapping. Mmap-backed trees default to
+// processes. Existing malformed reader-table sidecars and live slots with
+// impossible future revisions return ErrReaderTable instead of being reset,
+// because resetting them could forget active reader watermarks; writer reclaim
+// treats reader-table scan errors as a conservative pin on all retired pages.
+// Writable mmap handles can close while external reader-table slots still pin
+// retired pages because those pending retired records are published in metadata;
+// Close still returns ErrActiveReaders while in-process snapshots are active
+// because they hold slices into the mapping. Mmap-backed trees default to
 // random-access kernel advice, and expose Advise so callers can pass random,
 // sequential, will-need, or normal-policy access-pattern hints to the mmap
 // mapping and, on Linux, the backing file's readahead policy without adding a
