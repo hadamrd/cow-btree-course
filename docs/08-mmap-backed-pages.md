@@ -170,6 +170,8 @@ flowchart TD
 
 `MmapReaderStats()` exposes the table shape: total slots, live active slots, stale slots whose process no longer exists, and the oldest live reader revision. `CleanStaleMmapReaders()` clears stale slots explicitly. Writers also clean dead-PID slots when scanning the oldest reader, but the public maintenance call makes reader-table hygiene visible in tests, demos, and operational experiments.
 
+Reader-table initialization is fail-closed. A missing or brand-new zero-length `.readers` file is initialized with the expected magic, version, and slot count. An existing sidecar with the wrong size, magic, version, or slot count returns `ErrReaderTable` instead of being reset. That matters because silently recreating a malformed table while read-only handles exist would erase their page-recycling watermarks.
+
 This is the same kernel idea described in the MDB paper: a single writer mutex is separate from the main database mapping, and the lock region contains reader slots that let writers decide when old copy-on-write pages are safe to reuse. This project keeps the table deliberately small and file-backed for study; LMDB's production table is shared-memory-oriented and cache-line-aware.
 
 ```mermaid
@@ -204,7 +206,7 @@ This chapter makes the project more serious, but it is still not a production da
 - `Sync` flushes dirty data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
 - file creation, mapped file growth, and compaction sync file-size or directory-entry changes, but the project still does not model every filesystem or storage-device ordering edge case
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed and validated for format, page size, degree, bounds, layout, routing, freelist safety, and key-count consistency, but there is no page-level repair
-- the reader table now lets read-only mmap handles coexist with a writer, pin recycling, and clean stale slots, but it is intentionally simpler than LMDB's production lock-table implementation
+- the reader table now lets read-only mmap handles coexist with a writer, pin recycling, clean stale slots, and reject malformed existing sidecars, but it is intentionally simpler than LMDB's production lock-table implementation
 - overflow pages are linear chains, not a compact extent/tree structure
 - byte-full leaf rewrites can spill cells to overflow pages, and key-underfull leaves and branches can merge or redistribute with siblings, but sibling redistribution is still key-count based rather than byte-balanced
 - `Get`, branch range traversal, and bounded leaf scans search slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries

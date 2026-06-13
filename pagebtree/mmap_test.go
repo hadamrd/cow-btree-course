@@ -2982,6 +2982,43 @@ func TestCleanStaleMmapReadersClearsDeadSlots(t *testing.T) {
 	}
 }
 
+func TestMmapRejectsMalformedExistingReaderTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	if err := os.WriteFile(path+".readers", []byte("not-a-reader-table"), 0o644); err != nil {
+		reader.Close()
+		t.Fatalf("corrupt reader table: %v", err)
+	}
+
+	blockedWriter, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err == nil {
+		blockedWriter.Close()
+		reader.Close()
+		t.Fatalf("OpenMmap succeeded with malformed reader table")
+	}
+	if !errors.Is(err, ErrReaderTable) {
+		reader.Close()
+		t.Fatalf("OpenMmap malformed reader table error = %v, want ErrReaderTable", err)
+	}
+
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close reader after malformed reader table: %v", err)
+	}
+}
+
 func TestMmapReadOnlyRejectsMutations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

@@ -5,6 +5,7 @@ package pagebtree
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sync/atomic"
@@ -231,10 +232,11 @@ func (r *readerTable) ensureFileLocked() error {
 	if err != nil {
 		return err
 	}
+	if info.Size() == 0 {
+		return r.initializeFileLocked()
+	}
 	if info.Size() != readerTableSize {
-		if err := r.file.Truncate(readerTableSize); err != nil {
-			return err
-		}
+		return fmt.Errorf("%w: reader table size %d, want %d", ErrReaderTable, info.Size(), readerTableSize)
 	}
 
 	header := make([]byte, readerTableHeaderSize)
@@ -246,12 +248,18 @@ func (r *readerTable) ensureFileLocked() error {
 		binary.LittleEndian.Uint64(header[16:24]) == readerTableSlotCount {
 		return nil
 	}
+	return fmt.Errorf("%w: reader table header mismatch", ErrReaderTable)
+}
 
+func (r *readerTable) initializeFileLocked() error {
+	if err := r.file.Truncate(readerTableSize); err != nil {
+		return err
+	}
 	zero := make([]byte, readerTableSize)
 	copy(zero[:8], readerTableMagic)
 	binary.LittleEndian.PutUint64(zero[8:16], readerTableVersion)
 	binary.LittleEndian.PutUint64(zero[16:24], readerTableSlotCount)
-	_, err = r.file.WriteAt(zero, 0)
+	_, err := r.file.WriteAt(zero, 0)
 	return err
 }
 

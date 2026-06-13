@@ -63,12 +63,14 @@
 // snapshots before recycling retired pages, so read-only mmap handles can
 // coexist with a writer while pinning old copy-on-write pages. MmapReaderStats
 // reports live and stale reader-table slots, and CleanStaleMmapReaders clears
-// slots owned by dead processes. Mmap-backed trees default to random-access
+// slots owned by dead processes. Existing malformed reader-table sidecars
+// return ErrReaderTable instead of being reset, because resetting them could
+// forget active reader watermarks. Mmap-backed trees default to random-access
 // kernel advice, and expose Advise so callers can pass random, sequential,
 // will-need, or normal-policy access-pattern hints to the mmap mapping and, on
-// Linux, the backing file's readahead policy without adding a second Go heap page
-// cache. WarmMmapTree follows the current root and overflow references, then
-// asks the kernel to prefetch only those reachable page ranges.
+// Linux, the backing file's readahead policy without adding a second Go heap
+// page cache. WarmMmapTree follows the current root and overflow references,
+// then asks the kernel to prefetch only those reachable page ranges.
 // DropMmapCache syncs writable mmap trees before asking the kernel to evict
 // clean mapped tree pages with MADV_DONTNEED and Linux file-level DONTNEED
 // advice. MmapCacheStats uses mincore on Unix to show how many mapped OS pages
