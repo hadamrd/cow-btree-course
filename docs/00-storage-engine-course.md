@@ -1,0 +1,626 @@
+# Storage Engine Course: mmap Copy-on-Write B+trees in Go
+
+This course is the long-form guide to the repository. It treats the project as a
+small storage-engine research kernel: not a production database, but serious
+enough to make the important mechanics concrete in code.
+
+The implementation line is inspired by OpenLDAP MDB/LMDB: one mapped file,
+fixed-size pages, copy-on-write updates, checked metadata pages, one serialized
+writer, read-only snapshots, reader watermarks, page recycling, and explicit
+kernel page-cache advice. The contrast line is OpenDJ/Berkeley DB Java Edition:
+log files, a managed heap cache, cleaner work, and recovery from logged state.
+
+Use this document as a course. Each module explains a term, shows a diagram,
+then points to exact code in this repository.
+
+## Module 0: What This Repository Is
+
+The repository has two teaching layers.
+
+- `btree` is the logical copy-on-write tree: easy to read, generic, and useful
+  for learning path copying without byte pages.
+- `pagebtree` is the storage-engine kernel: fixed `[4096]byte` pages, slotted
+  records, page IDs, branch child pointers, overflow pages, mmap persistence,
+  reader tables, reclaim metadata, kernel hints, and validation.
+
+```mermaid
+flowchart TD
+    App["Application: Put / Get / Range / Delete"] --> API["pagebtree.Tree"]
+    API --> Search["B+tree search and range walk"]
+    API --> COW["Copy-on-write page mutation"]
+    COW --> Pages["4096-byte slotted pages"]
+    Pages --> Mmap["mmap file arena"]
+    Mmap --> Kernel["Linux/Unix kernel page cache"]
+    API --> Readers["Snapshots and reader table"]
+    Readers --> Reclaim["Freelist and retired-page reclaim"]
+```
+
+Code to read:
+
+- Public tree state: [`pagebtree/tree.go#L5-L27`](../pagebtree/tree.go#L5-L27)
+- Research profile surface: [`pagebtree/kernel_profile.go#L3-L46`](../pagebtree/kernel_profile.go#L3-L46)
+- mmap open path: [`pagebtree/mmap.go#L92-L198`](../pagebtree/mmap.go#L92-L198)
+
+## Module 1: B-tree, B+tree, and Why Engines Use Pages
+
+A B-tree keeps keys sorted and shallow by storing many keys per node. A B+tree
+variant keeps user values in leaves and uses internal branch pages only for
+routing. That shape is common in storage engines because range scans can walk
+leaves in order, while point lookups descend through branch pages.
+
+In this repository, branch pages store separator keys and child page IDs. Leaf
+pages store key/value cells. The public API does not expose page IDs, but the
+engine uses them everywhere internally.
+
+```mermaid
+flowchart TD
+    R["Branch page<br/>keys: d, m, t"] --> C0["child 0<br/>< d"]
+    R --> C1["child 1<br/>d <= key < m"]
+    R --> C2["child 2<br/>m <= key < t"]
+    R --> C3["child 3<br/>key >= t"]
+    C0 --> L0["Leaf: a b c"]
+    C1 --> L1["Leaf: d e f"]
+    C2 --> L2["Leaf: m n r"]
+    C3 --> L3["Leaf: t x z"]
+```
+
+Important detail: this project uses B+tree-style leaves, but the branch search
+semantics are intentionally simple. The leftmost child handles keys before the
+first separator. A separator cell's value stores the child page ID for keys
+equal to or greater than that separator until the next separator.
+
+Code to read:
+
+- Branch page encoding: [`pagebtree/insert.go#L165-L178`](../pagebtree/insert.go#L165-L178)
+- Child routing from a branch page: [`pagebtree/page.go#L378-L387`](../pagebtree/page.go#L378-L387)
+- `Get` descends page by page: [`pagebtree/search.go#L16-L34`](../pagebtree/search.go#L16-L34)
+
+## Module 2: Slotted Pages
+
+A slotted page is a fixed-size byte page split into three regions:
+
+- A fixed header at the front.
+- A slot directory that grows right.
+- Variable-size cells that grow left.
+
+This is a classic database-page trick. The slot directory lets the page keep
+keys in sorted logical order while cell bytes live elsewhere in the same page.
+Cells can vary in size because a slot records offset, key length, value length,
+and flags.
+
+```mermaid
+flowchart LR
+    subgraph P["4096-byte page"]
+        H["Header<br/>flags, count, freeUpper, leftmost/next, CRC"]
+        S["Slot directory<br/>slot0 slot1 slot2 ->"]
+        F["Free space"]
+        C["<- Cells<br/>key/value bytes"]
+    end
+    H --> S --> F --> C
+```
+
+The core invariant is:
+
+```text
+header | slots grow right | free space | cells grow left
+```
+
+When a cell is appended, the code first checks the gap between the slot
+directory and `freeUpper`. Then it copies the key and value into the cell area,
+writes a slot entry, moves `freeUpper`, increases the slot count, and refreshes
+the checksum.
+
+Code to read:
+
+- Page size and slotted-page comment: [`pagebtree/page.go#L10-L13`](../pagebtree/page.go#L10-L13)
+- Header offsets and page flags: [`pagebtree/page.go#L23-L40`](../pagebtree/page.go#L23-L40)
+- Slot shape: [`pagebtree/page.go#L42-L47`](../pagebtree/page.go#L42-L47)
+- Appending a cell: [`pagebtree/page.go#L405-L430`](../pagebtree/page.go#L405-L430)
+- Layout validation: [`pagebtree/page.go#L175-L225`](../pagebtree/page.go#L175-L225)
+
+## Module 3: Searching a Slotted Page
+
+The lookup algorithm has two levels.
+
+First, the tree walk starts at the root page ID. If the page is a leaf, it
+binary-searches the page's slot keys and returns the matching value. If the page
+is a branch, it binary-searches the separator keys and chooses the next child
+page ID.
+
+Second, the page-level binary search does not decode all cells. It compares the
+target key against keys found through the slot directory. That is the point of
+slotted pages: the slot says where the key bytes are.
+
+```mermaid
+flowchart TD
+    A["root page id"] --> B{"leaf?"}
+    B -- yes --> C["binary search slots"]
+    C -- found --> D["read value cell"]
+    C -- missing --> E["not found"]
+    B -- no --> F["binary search separator slots"]
+    F --> G["read child page id from separator cell value"]
+    G --> A
+```
+
+This answers the common storage-engine question: yes, the branch cell value is
+the child page ID. In this code, the leftmost child page ID is stored in the page
+header and every other child is stored as an 8-byte page ID in the separator
+cell's value.
+
+Code to read:
+
+- Whole tree lookup loop: [`pagebtree/search.go#L16-L34`](../pagebtree/search.go#L16-L34)
+- Leaf cell lookup: [`pagebtree/page.go#L362-L368`](../pagebtree/page.go#L362-L368)
+- Branch child lookup: [`pagebtree/page.go#L378-L387`](../pagebtree/page.go#L378-L387)
+- Slot binary search: [`pagebtree/page.go#L389-L403`](../pagebtree/page.go#L389-L403)
+- Slot key comparison without decoding full pages: [`pagebtree/page.go#L330-L352`](../pagebtree/page.go#L330-L352)
+- Branch cells encode child page IDs: [`pagebtree/insert.go#L170-L177`](../pagebtree/insert.go#L170-L177)
+
+## Module 4: Copy-on-Write Path Copying
+
+Copy-on-write means a writer does not mutate the old visible page path. It
+copies the root, then copies each page on the search path before changing it.
+After the new path is ready, the tree publishes a new root page ID and revision.
+Old snapshots still hold the old root and can keep reading old pages.
+
+```mermaid
+flowchart LR
+    subgraph Before["Before write"]
+        R1["root r10"] --> B1["branch b20"] --> L1["leaf l30"]
+    end
+    subgraph After["After write"]
+        R2["new root r40"] --> B2["new branch b41"] --> L2["new leaf l42"]
+        R1 -. snapshot .-> B1
+        B1 -. snapshot .-> L1
+    end
+```
+
+This model trades extra writes for simple snapshot isolation. Readers never need
+to lock a page against mutation because the writer publishes new page IDs
+instead of changing pages reachable from older roots.
+
+Code to read:
+
+- `Put` copies the root and publishes a new root: [`pagebtree/tree.go#L63-L100`](../pagebtree/tree.go#L63-L100)
+- `copyPage` allocates a new page ID and retires the old one: [`pagebtree/tree.go#L220-L227`](../pagebtree/tree.go#L220-L227)
+- Recursive insertion copies child pages before descent: [`pagebtree/insert.go#L58-L77`](../pagebtree/insert.go#L58-L77)
+- Snapshots pin a root and revision: [`pagebtree/tree.go#L179-L191`](../pagebtree/tree.go#L179-L191)
+
+## Module 5: Insertion, Splits, and Separators
+
+Insertion starts by finding the child path for the key. If the leaf has space,
+the new key/value is inserted there. If it overflows by key count, the leaf is
+split in half and the first key of the right leaf becomes the separator inserted
+into the parent.
+
+Branches split similarly, but a branch split promotes the middle separator
+upward and creates a new right branch.
+
+```mermaid
+flowchart TD
+    A["insert key"] --> B["copy root/path"]
+    B --> C{"leaf has key?"}
+    C -- replace --> D["retire old overflow value if needed"]
+    C -- insert --> E{"leaf over max keys?"}
+    E -- no --> F["rewrite leaf cells"]
+    E -- yes --> G["split leaf"]
+    G --> H["return separator + right page id"]
+    H --> I{"parent over max keys?"}
+    I -- no --> J["rewrite parent branch"]
+    I -- yes --> K["split branch / maybe new root"]
+```
+
+The code deliberately favors clarity over byte-perfect production balancing.
+It has a degree-based maximum key count and additional overflow handling for
+large values that do not fit well inside a leaf page.
+
+Code to read:
+
+- Leaf insert and split: [`pagebtree/insert.go#L26-L56`](../pagebtree/insert.go#L26-L56)
+- Branch descent and split: [`pagebtree/insert.go#L58-L94`](../pagebtree/insert.go#L58-L94)
+- New root after split: [`pagebtree/tree.go#L83-L91`](../pagebtree/tree.go#L83-L91)
+- Leaf rewrite with overflow fallback: [`pagebtree/insert.go#L112-L136`](../pagebtree/insert.go#L112-L136)
+
+## Module 6: Delete, Merge, Redistribution, and Root Collapse
+
+Delete is also copy-on-write. It first confirms the key exists, then copies the
+root and descent path. It removes the leaf entry, retires overflow pages if the
+value was large, and repairs underfull leaves or branches by merging or
+redistributing with siblings. Finally it collapses a root that no longer needs
+to be a branch.
+
+```mermaid
+flowchart TD
+    A["Delete(key)"] --> B["Get first: avoid publishing no-op delete"]
+    B --> C["copy root/path"]
+    C --> D["remove leaf cell"]
+    D --> E{"underfull?"}
+    E -- no --> F["rebuild branch separators"]
+    E -- yes --> G["merge or redistribute siblings"]
+    G --> H["collapse one-child root if possible"]
+    H --> I["new revision"]
+```
+
+This is not a full production delete implementation. It has real merge and
+redistribution behavior, but it intentionally stops short of byte-balanced page
+packing across variable-size records.
+
+Code to read:
+
+- Delete API and copy-on-write contract: [`pagebtree/delete.go#L5-L33`](../pagebtree/delete.go#L5-L33)
+- Delete descent: [`pagebtree/delete.go#L35-L79`](../pagebtree/delete.go#L35-L79)
+- Borrow before branch descent: [`pagebtree/delete.go#L81-L129`](../pagebtree/delete.go#L81-L129)
+- Leaf merge/redistribution: [`pagebtree/delete.go#L131-L190`](../pagebtree/delete.go#L131-L190)
+- Branch merge/redistribution: [`pagebtree/delete.go#L192-L242`](../pagebtree/delete.go#L192-L242)
+
+## Module 7: Overflow Pages
+
+Slotted pages make small records efficient, but a large value can consume too
+much of a leaf. The project stores large values in overflow page chains. A leaf
+cell then stores a small typed reference: magic bytes, first overflow page ID,
+and total length.
+
+```mermaid
+flowchart LR
+    L["leaf slot<br/>key = photo<br/>value = OVF1 ref"] --> O1["overflow page 90<br/>payload chunk"]
+    O1 --> O2["overflow page 91<br/>payload chunk"]
+    O2 --> O3["overflow page 92<br/>last chunk"]
+```
+
+The slot flag matters. User data that happens to begin with `OVF1` is not
+treated as overflow unless the slot also carries the overflow flag.
+
+Code to read:
+
+- Overflow reference format: [`pagebtree/overflow.go#L8-L21`](../pagebtree/overflow.go#L8-L21)
+- Encode/decode overflow refs: [`pagebtree/overflow.go#L23-L42`](../pagebtree/overflow.go#L23-L42)
+- Large-value decision: [`pagebtree/overflow.go#L44-L60`](../pagebtree/overflow.go#L44-L60)
+- Writing overflow chains: [`pagebtree/overflow.go#L62-L95`](../pagebtree/overflow.go#L62-L95)
+- Reading and retiring overflow chains: [`pagebtree/overflow.go#L113-L145`](../pagebtree/overflow.go#L113-L145)
+
+## Module 8: mmap as the Page Arena
+
+The mmap version stores database pages in a single file mapping. Page ID `0` and
+page ID `1` are metadata pages. Tree pages begin at page ID `2`. A page ID maps
+to bytes with:
+
+```text
+offset = pageID * PageSize
+```
+
+With mmap, the engine reads and writes ordinary memory, while the kernel backs
+that memory with file pages. This project relies on the kernel page cache for
+raw page caching rather than copying every database page into a separate Go heap
+cache.
+
+```mermaid
+flowchart TD
+    Tree["Tree page ID"] --> Offset["pageID * 4096"]
+    Offset --> Mapping["mmap byte slice"]
+    Mapping --> Kernel["kernel page cache"]
+    Kernel --> Disk["database file"]
+```
+
+The open path is careful about existing file size, locks, mapping mode, reader
+table setup, kernel advice, and metadata recovery.
+
+Code to read:
+
+- mmap constants and metadata page count: [`pagebtree/mmap.go#L32-L53`](../pagebtree/mmap.go#L32-L53)
+- mmap options and arena state: [`pagebtree/mmap.go#L55-L79`](../pagebtree/mmap.go#L55-L79)
+- Writable open: [`pagebtree/mmap.go#L92-L198`](../pagebtree/mmap.go#L92-L198)
+- Read-only open with `PROT_READ`: [`pagebtree/mmap.go#L200-L275`](../pagebtree/mmap.go#L200-L275)
+- Page ID to byte slice: [`pagebtree/mmap.go#L297-L303`](../pagebtree/mmap.go#L297-L303)
+
+## Module 9: Dirty Pages, msync, and Metadata Publication
+
+Durability is about publication order. The engine should not publish metadata
+that points to data pages before those data pages are flushed. The project uses
+an explicit `Sync` boundary:
+
+1. Build any needed freelist/reclaim metadata pages.
+2. Sync dirty data pages.
+3. Write the alternating metadata page.
+4. Sync the metadata page.
+
+```mermaid
+sequenceDiagram
+    participant W as Writer
+    participant D as Dirty data pages
+    participant M as Metadata page
+    participant K as Kernel/file
+    W->>D: copy-on-write page changes
+    W->>K: msync dirty data ranges
+    W->>M: write checked root/revision metadata
+    W->>K: msync metadata page + file sync
+```
+
+The dirty-page tracker is page-ID based. It sorts dirty page IDs and coalesces
+adjacent runs before syncing.
+
+Code to read:
+
+- `Tree.Sync` chooses mmap sync: [`pagebtree/tree.go#L244-L255`](../pagebtree/tree.go#L244-L255)
+- mmap sync order: [`pagebtree/mmap.go#L1188-L1205`](../pagebtree/mmap.go#L1188-L1205)
+- Dirty data-page sync: [`pagebtree/mmap.go#L501-L539`](../pagebtree/mmap.go#L501-L539)
+- Per-range `msync`: [`pagebtree/mmap.go#L552-L564`](../pagebtree/mmap.go#L552-L564)
+- Metadata page sync: [`pagebtree/mmap.go#L576-L590`](../pagebtree/mmap.go#L576-L590)
+
+## Module 10: Dual Checked Metadata Pages
+
+The mmap file has two checked metadata pages. Revisions alternate between them:
+
+```text
+metadata slot = revision % 2
+```
+
+On recovery, the engine reads both metadata pages, validates checksums and
+format fields, sorts candidates newest-first, and accepts the first candidate
+whose root, reachable pages, freelist, reclaim records, leaf links, and logical
+key count all validate.
+
+```mermaid
+flowchart TD
+    A["read meta page 0"] --> C["valid records"]
+    B["read meta page 1"] --> C
+    C --> D["sort newest revision first"]
+    D --> E["map pages up to max nextPage"]
+    E --> F{"candidate validates?"}
+    F -- no --> G["try older candidate"]
+    F -- yes --> H["open recovered root"]
+```
+
+This is the core crash-recovery idea in miniature: a torn newest root can be
+rejected, while an older valid root remains usable.
+
+Code to read:
+
+- Recovery scan and newest-first sort: [`pagebtree/mmap.go#L866-L903`](../pagebtree/mmap.go#L866-L903)
+- Candidate mapping and validation: [`pagebtree/mmap.go#L908-L978`](../pagebtree/mmap.go#L908-L978)
+- Metadata slot/revision check: [`pagebtree/mmap.go#L986-L990`](../pagebtree/mmap.go#L986-L990)
+- Metadata write format and checksum: [`pagebtree/mmap.go#L1505-L1547`](../pagebtree/mmap.go#L1505-L1547)
+- Metadata checksum computation: [`pagebtree/mmap.go#L1550-L1555`](../pagebtree/mmap.go#L1550-L1555)
+
+## Module 11: Checksums, Layout Checks, and Invariants
+
+A checksum only proves the bytes match the stored checksum. It does not prove
+the bytes describe a valid tree. This project layers validation:
+
+- Page checksum.
+- Page layout.
+- Overflow-chain invariants.
+- Branch-routing invariants.
+- Freelist and retired-page invariants.
+- Metadata bounds and logical key-count invariants.
+
+```mermaid
+flowchart TD
+    A["page bytes"] --> B{"CRC valid?"}
+    B -- no --> X["reject"]
+    B -- yes --> C{"layout valid?"}
+    C -- no --> X
+    C -- yes --> D{"tree/overflow/freelist invariants valid?"}
+    D -- no --> X
+    D -- yes --> E["candidate can open"]
+```
+
+This distinction matters for real storage engines. A corrupt page can have a
+fresh checksum if the corruption was written through the engine or a test
+rewrote the checksum. Layout and semantic checks catch a different class of
+failure.
+
+Code to read:
+
+- Page checksum: [`pagebtree/page.go#L132-L149`](../pagebtree/page.go#L132-L149)
+- Page kind dispatch: [`pagebtree/page.go#L155-L173`](../pagebtree/page.go#L155-L173)
+- Slotted layout checks: [`pagebtree/page.go#L175-L225`](../pagebtree/page.go#L175-L225)
+- Freelist validation: [`pagebtree/mmap.go#L1557-L1577`](../pagebtree/mmap.go#L1557-L1577)
+- Retired-page validation: [`pagebtree/mmap.go#L1579-L1606`](../pagebtree/mmap.go#L1579-L1606)
+- Metadata invariant check: [`pagebtree/mmap.go#L1608-L1623`](../pagebtree/mmap.go#L1608-L1623)
+
+## Module 12: Freelists, Retired Pages, and Recycling
+
+Copy-on-write creates old pages. Those pages cannot be reused immediately if an
+old reader can still reach them. The engine therefore separates pages into:
+
+- Reachable pages: visible from the current root.
+- Retired pages: no longer current, but still possibly visible to old readers.
+- Free pages: safe to reuse.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Reachable
+    Reachable --> Retired: copied away by writer
+    Retired --> Free: all readers newer than retire revision
+    Free --> Reachable: allocated for new page
+```
+
+This is why deleting half the keys does not necessarily shrink the database
+file. Many pages become reusable inside the file, but the file remains allocated
+until a tail compaction can trim a contiguous free suffix. Interior free pages
+are reusable by the engine but still part of the file's allocated range.
+
+Code to read:
+
+- Free list and retired-page fields: [`pagebtree/tree.go#L12-L17`](../pagebtree/tree.go#L12-L17)
+- Allocation reuses free pages first: [`pagebtree/tree.go#L201-L218`](../pagebtree/tree.go#L201-L218)
+- Compaction refuses active readers and trims only safe tail pages: [`pagebtree/tree.go#L257-L275`](../pagebtree/tree.go#L257-L275)
+- Tail compaction mechanics: [`pagebtree/mmap.go#L375-L443`](../pagebtree/mmap.go#L375-L443)
+- Persisted reclaim recovery: [`pagebtree/mmap.go#L1099-L1151`](../pagebtree/mmap.go#L1099-L1151)
+
+## Module 13: Reader Tables and MVCC Watermarks
+
+An in-process snapshot is easy: the tree remembers an active reader revision.
+A read-only mmap process is harder because it may be in another process. This
+project uses a sidecar `.readers` file as a small LMDB-style reader table.
+
+A read-only handle claims a slot at revision `0` before metadata recovery. That
+provisional zero revision is a conservative pin: while the reader is between
+"I opened the file" and "I recovered the root revision", writers must not trust
+that old pages are reusable. After recovery, the reader updates the slot to the
+actual recovered revision.
+
+```mermaid
+sequenceDiagram
+    participant R as Read-only process
+    participant T as .readers table
+    participant W as Writer reclaim
+    R->>T: claim slot revision 0
+    R->>R: load checked metadata/root
+    R->>T: update slot to recovered revision
+    W->>T: scan oldest live revision
+    W->>W: recycle only pages retired before all live readers
+```
+
+The table is fail-closed. A malformed active slot with a future revision or a
+zero claim token returns `ErrReaderTable`. Writer reclaim then conservatively
+keeps retired pages pinned instead of recycling from an untrusted watermark.
+
+Code to read:
+
+- Reader table file shape: [`pagebtree/reader_table_unix.go#L17-L40`](../pagebtree/reader_table_unix.go#L17-L40)
+- Claim a reader slot: [`pagebtree/reader_table_unix.go#L74-L109`](../pagebtree/reader_table_unix.go#L74-L109)
+- Read-only pre-load claim and post-load update: [`pagebtree/mmap.go#L245-L273`](../pagebtree/mmap.go#L245-L273)
+- Oldest reader scan and stale PID cleanup: [`pagebtree/reader_table_unix.go#L149-L180`](../pagebtree/reader_table_unix.go#L149-L180)
+- Stats and maintenance scan: [`pagebtree/reader_table_unix.go#L205-L242`](../pagebtree/reader_table_unix.go#L205-L242)
+- Fail-closed slot validation: [`pagebtree/reader_table_unix.go#L244-L252`](../pagebtree/reader_table_unix.go#L244-L252)
+
+## Module 14: Kernel Page Cache, mmap Advice, and Prefetch
+
+With mmap, the kernel is the raw page cache. The engine can still cooperate with
+the kernel by giving access-pattern hints:
+
+- Random access for B+tree lookups, to avoid aggressive sequential readahead.
+- Sequential or will-need hints for scan experiments.
+- Dont-need hints for explicit clean-page cache drop experiments.
+- Exact next-leaf prefetch hints during linked-leaf range scans.
+
+```mermaid
+flowchart TD
+    A["B+tree lookup"] --> B["MADV_RANDOM / FADV_RANDOM"]
+    C["Range scan"] --> D["next-leaf WILLNEED hints"]
+    E["Experiment: drop cache"] --> F["MADV_DONTNEED / FADV_DONTNEED"]
+    B --> K["kernel page cache policy"]
+    D --> K
+    F --> K
+```
+
+The important design choice is restraint. The project does not try to outguess
+the kernel with a second raw page cache. It adds only a bounded derived routing
+cache for decoded branch separator arrays. The mapped bytes remain the source of
+truth.
+
+Code to read:
+
+- mmap access-pattern enum: [`pagebtree/mmap.go#L81-L90`](../pagebtree/mmap.go#L81-L90)
+- Range scan prefetcher: [`pagebtree/tree.go#L135-L167`](../pagebtree/tree.go#L135-L167)
+- Linked-leaf range prefetch calls: [`pagebtree/search.go#L97-L180`](../pagebtree/search.go#L97-L180)
+- Derived branch-routing cache: [`pagebtree/page_cache.go#L5-L33`](../pagebtree/page_cache.go#L5-L33)
+- Cache lookup by page checksum: [`pagebtree/page_cache.go#L52-L80`](../pagebtree/page_cache.go#L52-L80)
+- Profile flags for kernel cache vs heap cache: [`pagebtree/kernel_profile.go#L90-L99`](../pagebtree/kernel_profile.go#L90-L99)
+
+## Module 15: OpenLDAP/LMDB Versus OpenDJ/Berkeley JE
+
+OpenLDAP MDB/LMDB is the reference style for this repository:
+
+- Memory-map the database file.
+- Use copy-on-write B+tree pages.
+- Publish roots through checked metadata pages.
+- Allow many lock-free readers.
+- Serialize writers.
+- Recycle old pages only after reader watermarks allow it.
+- Let the operating system page cache own raw database-page caching.
+
+OpenDJ's Berkeley DB Java Edition lineage is a useful contrast:
+
+- The primary persistence shape is append-only log files.
+- B+tree nodes are managed through a Java heap cache.
+- Background cleaner work reclaims obsolete log records.
+- Recovery reconstructs state from logged records rather than selecting a
+  checked mapped-file root page.
+
+```mermaid
+flowchart LR
+    subgraph LMDB["OpenLDAP MDB/LMDB line"]
+        L1["mmap file"] --> L2["CoW pages"]
+        L2 --> L3["dual meta roots"]
+        L3 --> L4["reader-table reclaim"]
+        L4 --> L5["kernel page cache"]
+    end
+    subgraph JE["OpenDJ / Berkeley JE line"]
+        J1["append-only logs"] --> J2["heap cache"]
+        J2 --> J3["checkpoints"]
+        J3 --> J4["cleaner"]
+        J4 --> J5["log replay recovery"]
+    end
+```
+
+This project implements the core of the first line, not the second. It uses Go
+maps as an in-memory page directory around the mapped bytes, and it has a small
+derived branch-routing cache, but it intentionally does not build a Java-style
+raw page cache or append-only log cleaner.
+
+Code to read:
+
+- OpenLDAP-style profile fields: [`pagebtree/kernel_profile.go#L28-L45`](../pagebtree/kernel_profile.go#L28-L45)
+- mmap open and reader table: [`pagebtree/mmap.go#L92-L198`](../pagebtree/mmap.go#L92-L198)
+- Read-only mmap handle: [`pagebtree/mmap.go#L200-L275`](../pagebtree/mmap.go#L200-L275)
+- Metadata root recovery instead of log replay: [`pagebtree/mmap.go#L866-L984`](../pagebtree/mmap.go#L866-L984)
+- Bounded derived routing cache, not raw heap page cache: [`pagebtree/page_cache.go#L35-L80`](../pagebtree/page_cache.go#L35-L80)
+
+## Module 16: What Is Serious Here, and What Is Still Research
+
+Serious pieces in this repository:
+
+- Real fixed-size slotted pages.
+- Direct slot binary search for point lookup.
+- Branch child page IDs stored in page bytes.
+- Copy-on-write root publication.
+- Stable snapshots and external read-only mmap handles.
+- Reader-pinned page recycling.
+- Persisted reclaim records.
+- Dual checked metadata pages.
+- mmap-backed persistence with dirty-page sync.
+- Overflow page chains.
+- Layout and invariant validation.
+- Kernel page-cache hints and cache-residency stats.
+- Bounded derived branch-routing cache.
+
+Still research or incomplete compared with a production engine:
+
+- No concurrency-heavy lock manager.
+- No full transaction API with commit/abort batches.
+- No sparse-file hole punching.
+- No full vacuum that moves live pages.
+- No production-grade crash test harness with power-fail fault injection.
+- No byte-balanced deletion across variable-size records.
+- No multi-database catalog, duplicate keys, cursors, or comparator plugins.
+- No portability story beyond the Unix mmap path and non-Unix stubs.
+
+The value is that the core mechanisms are visible. You can read the code without
+first reading hundreds of thousands of lines of production database history.
+
+## Module 17: How to Study the Code
+
+Run the behavior contract first:
+
+```bash
+go test ./...
+go run ./cmd/pagebtree-demo
+go run ./cmd/mmapbtree-demo
+go run ./cmd/mdbkernel-demo
+```
+
+Then follow this path:
+
+1. Read `pagebtree/page.go` until the slotted page layout is clear.
+2. Read `pagebtree/search.go` and trace one `Get`.
+3. Read `pagebtree/insert.go` and trace one split.
+4. Read `pagebtree/tree.go` and identify exactly where root publication happens.
+5. Read `pagebtree/mmap.go` from `OpenMmap` through `loadMeta`.
+6. Read `pagebtree/reader_table_unix.go` and explain why revision `0` is a pin.
+7. Read `pagebtree/mmap_test.go` as the executable crash/recovery/reclaim spec.
+
+Final audit question for yourself: if a page ID is reused, which old readers
+could still have reached the old bytes? The whole COW/reclaim system exists to
+make that answer safe.

@@ -2,6 +2,8 @@
 
 This folder is a research guide for the code in this repository. Read it as a small storage-engine notebook: each chapter introduces one mechanism, points back to the implementation, and keeps the OpenLDAP MDB/LMDB design line in view.
 
+Start with the long course if you want the guided path with diagrams and direct code citations: [`00-storage-engine-course.md`](00-storage-engine-course.md).
+
 ## Research Goals
 
 By the end, you should be able to explain:
@@ -18,7 +20,8 @@ By the end, you should be able to explain:
 
 ```mermaid
 flowchart TD
-    A["01. B-tree theory"] --> B["02. Copy-on-write"]
+    Z["00. Storage engine course"] --> A["01. B-tree theory"]
+    A --> B["02. Copy-on-write"]
     B --> C["03. Insertion algorithm"]
     C --> D["04. Code tour"]
     D --> E["05. Exercises"]
@@ -68,13 +71,14 @@ docs/           Research chapters
 
 ## Suggested Reading Path
 
-1. Read the theory once without opening the code.
-2. Run `go test ./...` to see the behavior contract.
-3. Read `btree/tree_test.go`; it is the executable specification.
-4. Step through `Tree.Set` in `btree/tree.go`.
-5. Run `go run ./cmd/pagebtree-demo` to see page root ids change across writes.
-6. Read `docs/07-freelist-and-readers.md` to understand why old readers delay page reuse.
-7. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
-8. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, reader-table recycling, kernel page-cache behavior, Linux file-advice coordination, derived branch-routing cache behavior, exact reachable-page warm-up, tunable exact-page prefetch advice, and residency stats.
-9. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
-10. Change the degree in the demos and observe how `Stats` changes.
+1. Read [`00-storage-engine-course.md`](00-storage-engine-course.md) for the end-to-end course, diagrams, and code citations.
+2. Read the focused theory chapters once without opening the code.
+3. Run `go test ./...` to see the behavior contract.
+4. Read `btree/tree_test.go`; it is the executable specification.
+5. Step through `Tree.Set` in `btree/tree.go`.
+6. Run `go run ./cmd/pagebtree-demo` to see page root ids change across writes.
+7. Read `docs/07-freelist-and-readers.md` to understand why old readers delay page reuse.
+8. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
+9. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, reader-table recycling, kernel page-cache behavior, Linux file-advice coordination, derived branch-routing cache behavior, exact reachable-page warm-up, tunable exact-page prefetch advice, and residency stats.
+10. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
+11. Change the degree in the demos and observe how `Stats` changes.

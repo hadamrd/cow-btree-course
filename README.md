@@ -76,7 +76,11 @@ fmt.Println(profile.DerivedBranchRoutingCacheHits)
 
 ## Research Map
 
-Start with [`docs/index.md`](docs/index.md), then read in order:
+Start with [`docs/index.md`](docs/index.md). For the serious guided course with diagrams and direct code citations, start here:
+
+0. [`docs/00-storage-engine-course.md`](docs/00-storage-engine-course.md)
+
+Then read the focused chapters in order:
 
 1. [`docs/01-btree-theory.md`](docs/01-btree-theory.md)
 2. [`docs/02-copy-on-write.md`](docs/02-copy-on-write.md)
