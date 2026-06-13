@@ -34,9 +34,12 @@ Pages `0` and `1` are alternating metadata pages:
 - revision
 - degree
 - max page capacity
+- reusable page IDs
 - CRC32 checksum
 
 Each commit writes the metadata page selected by `revision % 2`. On reopen, the tree validates both checksums and chooses the newest valid metadata page. If the newest metadata page is torn or corrupted, the older valid page still points to a previous root.
+
+The reusable page IDs are stored directly in the metadata page for now. That keeps the lesson compact and makes close/reopen freelist behavior visible. A larger database would usually store freelist records in normal pages and have metadata point to the freelist root.
 
 Tree pages start at page id `2`. The page id maps directly to a byte range:
 
@@ -60,7 +63,7 @@ That is one of the reasons B-trees pair well with page-oriented storage:
 
 This chapter makes the project more serious, but it is still not a production database:
 
-- freelist state is not persisted across reopen yet
+- freelist state is persisted in the metadata page, but only with a bounded educational encoding
 - writes call `msync`, but there is no complete crash-safe write-order protocol
 - metadata pages are checksummed, but data pages are not
 - there is no file lock

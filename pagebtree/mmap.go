@@ -24,11 +24,14 @@ const (
 	metaDegreeOff    = 48
 	metaMaxPagesOff  = 56
 	metaChecksumOff  = 64
+	metaFreeCountOff = 72
+	metaFreeListOff  = 80
 	metaPageCount    = 2
 	minMmapPageCount = 2
 )
 
 const firstTreePageID = PageID(metaPageCount)
+const maxMetaFreePages = (PageSize - metaFreeListOff) / 8
 
 type MmapOptions struct {
 	Degree   int
@@ -160,6 +163,7 @@ type metaRecord struct {
 	revision uint64
 	degree   int
 	maxPages int
+	free     []PageID
 }
 
 func (t *Tree) loadMeta() error {
@@ -184,6 +188,7 @@ func (t *Tree) loadMeta() error {
 	t.length = newest.length
 	t.revision = newest.revision
 	t.degree = normalizeDegree(newest.degree)
+	t.free = append([]PageID(nil), newest.free...)
 	if t.nextPage < firstTreePageID {
 		t.nextPage = firstTreePageID
 	}
@@ -211,6 +216,7 @@ func (t *Tree) persistMeta() {
 		revision: t.revision,
 		degree:   t.degree,
 		maxPages: t.arena.maxPages,
+		free:     t.free,
 	})
 }
 
@@ -225,9 +231,18 @@ func readMetaPage(data []byte) (metaRecord, bool) {
 		return metaRecord{}, false
 	}
 	want := binary.LittleEndian.Uint32(data[metaChecksumOff:])
-	got := crc32.ChecksumIEEE(data[:metaChecksumOff])
+	got := metaChecksum(data)
 	if got != want {
 		return metaRecord{}, false
+	}
+	freeCount := int(binary.LittleEndian.Uint64(data[metaFreeCountOff:]))
+	if freeCount > maxMetaFreePages {
+		return metaRecord{}, false
+	}
+	free := make([]PageID, 0, freeCount)
+	for i := 0; i < freeCount; i++ {
+		offset := metaFreeListOff + i*8
+		free = append(free, PageID(binary.LittleEndian.Uint64(data[offset:])))
 	}
 	return metaRecord{
 		root:     PageID(binary.LittleEndian.Uint64(data[metaRootOff:])),
@@ -236,10 +251,15 @@ func readMetaPage(data []byte) (metaRecord, bool) {
 		revision: binary.LittleEndian.Uint64(data[metaRevisionOff:]),
 		degree:   int(binary.LittleEndian.Uint64(data[metaDegreeOff:])),
 		maxPages: int(binary.LittleEndian.Uint64(data[metaMaxPagesOff:])),
+		free:     free,
 	}, true
 }
 
 func writeMetaPage(data []byte, record metaRecord) {
+	if len(record.free) > maxMetaFreePages {
+		panic("freelist too large for educational meta-page encoding")
+	}
+
 	clear(data)
 	copy(data[metaMagicOffset:], metaMagic)
 	binary.LittleEndian.PutUint64(data[metaVersionOff:], metaVersion)
@@ -249,5 +269,17 @@ func writeMetaPage(data []byte, record metaRecord) {
 	binary.LittleEndian.PutUint64(data[metaRevisionOff:], record.revision)
 	binary.LittleEndian.PutUint64(data[metaDegreeOff:], uint64(record.degree))
 	binary.LittleEndian.PutUint64(data[metaMaxPagesOff:], uint64(record.maxPages))
-	binary.LittleEndian.PutUint32(data[metaChecksumOff:], crc32.ChecksumIEEE(data[:metaChecksumOff]))
+	binary.LittleEndian.PutUint64(data[metaFreeCountOff:], uint64(len(record.free)))
+	for i, id := range record.free {
+		offset := metaFreeListOff + i*8
+		binary.LittleEndian.PutUint64(data[offset:], uint64(id))
+	}
+	binary.LittleEndian.PutUint32(data[metaChecksumOff:], metaChecksum(data))
+}
+
+func metaChecksum(data []byte) uint32 {
+	checksum := crc32.NewIEEE()
+	_, _ = checksum.Write(data[:metaChecksumOff])
+	_, _ = checksum.Write(data[metaChecksumOff+4 : PageSize])
+	return checksum.Sum32()
 }

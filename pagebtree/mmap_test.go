@@ -144,6 +144,50 @@ func TestMmapTreeUsesNewestValidMetaPage(t *testing.T) {
 	}
 }
 
+func TestMmapTreePersistsFreelistAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 60; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("before-%02d", i)))
+	}
+
+	reader := tree.Snapshot()
+	tree.Put("key-30", []byte("after-30"))
+	reader.Close()
+	beforeClose := tree.Stats()
+	if beforeClose.FreePages == 0 {
+		t.Fatalf("FreePages before close = 0, want pages available to persist")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	afterReopen := reopened.Stats()
+	if afterReopen.FreePages != beforeClose.FreePages {
+		t.Fatalf("FreePages after reopen = %d, want %d", afterReopen.FreePages, beforeClose.FreePages)
+	}
+	allocatedBeforeReuse := afterReopen.AllocatedPages
+
+	reopened.Put("key-61", []byte("after-61"))
+	afterReuse := reopened.Stats()
+	if afterReuse.ReusedPages == 0 {
+		t.Fatalf("ReusedPages after reopen write = 0, want persisted freelist reuse")
+	}
+	if afterReuse.AllocatedPages > allocatedBeforeReuse+1 {
+		t.Fatalf("AllocatedPages grew from %d to %d despite persisted freelist pages", allocatedBeforeReuse, afterReuse.AllocatedPages)
+	}
+}
+
 func corruptMetaPage(t *testing.T, path string, metaIndex int) {
 	t.Helper()
 
