@@ -1037,7 +1037,7 @@ func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
 
 	p := t.pages[id]
 	if p == nil {
-		return fmt.Errorf("reachable page %d is missing", id)
+		return fmt.Errorf("%w: reachable page %d is missing", ErrTreeInvariant, id)
 	}
 	if !p.validChecksum() {
 		return fmt.Errorf("%w: page %d", ErrPageChecksum, id)

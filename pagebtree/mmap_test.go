@@ -1873,6 +1873,39 @@ func TestMmapTreeRejectsBranchThatReferencesChildTwice(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsBranchChildOutsideAllocatedRange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if !tree.pages[tree.root].isBranch() {
+		t.Fatalf("root is not a branch after many inserts")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	newest := keepOnlyNewestMetaPage(t, path)
+	corruptBranchLeftmostChild(t, path, newest.root, newest.nextPage)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with branch child outside allocated range")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("OpenMmap missing branch child error = %v, want ErrTreeInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("OpenMmap missing branch child error = %v, want missing detail", err)
+	}
+}
+
 func TestMmapTreeRejectsBranchSeparatorThatDoesNotMatchRightChild(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -2090,6 +2123,15 @@ func corruptBranchSlotChildToLeftmost(t *testing.T, path string, id PageID, slot
 		slot := p.readSlot(slotIndex)
 		valueStart := int(slot.offset) + int(slot.keyLen)
 		encodePageID(p.data[valueStart:valueStart+8], p.leftmostChild())
+		p.updateChecksum()
+	})
+}
+
+func corruptBranchLeftmostChild(t *testing.T, path string, id, child PageID) {
+	t.Helper()
+
+	mutatePage(t, path, id, func(p *page) {
+		p.setLeftmostChild(child)
 		p.updateChecksum()
 	})
 }

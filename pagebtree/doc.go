@@ -24,8 +24,8 @@
 // Reopen validation checks metadata format, version, database page size,
 // persisted degree, and bounds against the mapped file and declared capacity,
 // page checksums, and slotted-page structure before decoding reachable cells,
-// and it rejects branch routing that duplicates children or has separators that
-// no longer match right-child first keys.
+// and it rejects branch routing that points to missing children, duplicates
+// children, or has separators that no longer match right-child first keys.
 // Persisted leaf next pointers must match the branch-order leaf sequence.
 // Overflow chains must contain exactly the referenced number of payload bytes.
 // Reopen also rejects metadata whose stored length does not match the reachable
