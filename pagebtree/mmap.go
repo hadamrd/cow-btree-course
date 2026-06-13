@@ -930,7 +930,7 @@ func (t *Tree) loadMeta() error {
 			lastErr = err
 			continue
 		}
-		if err := t.validateRetiredPages(record.retired, record.maxPages, reclaimable); err != nil {
+		if err := t.validateRetiredPages(record.retired, record.revision, record.maxPages, reclaimable); err != nil {
 			lastErr = err
 			continue
 		}
@@ -1503,13 +1503,16 @@ func (t *Tree) validateFreelist(free []PageID, maxPages int, reachable map[PageI
 	return nil
 }
 
-func (t *Tree) validateRetiredPages(retired []retiredPage, maxPages int, claimed map[PageID]bool) error {
+func (t *Tree) validateRetiredPages(retired []retiredPage, metaRevision uint64, maxPages int, claimed map[PageID]bool) error {
 	seenRetired := map[PageID]bool{}
 	maxReusablePage := firstTreePageID + PageID(maxPages)
 	for _, retired := range retired {
 		id := retired.id
 		if retired.revision == 0 {
 			return fmt.Errorf("%w: retired page %d has zero revision", ErrFreelist, id)
+		}
+		if retired.revision > metaRevision {
+			return fmt.Errorf("%w: retired page %d has future revision %d beyond metadata revision %d", ErrFreelist, id, retired.revision, metaRevision)
 		}
 		if id >= maxReusablePage {
 			return fmt.Errorf("%w: retired page %d beyond metadata capacity %d", ErrFreelist, id, maxPages)

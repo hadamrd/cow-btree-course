@@ -57,6 +57,8 @@
 // synced before metadata points at them. When external readers pin retired pages,
 // version-3 metadata stores free and pending-retired reclaim records in checked
 // reclaim pages, preserving the retirement revision across writer close/reopen.
+// Reopen rejects reclaim records whose retired revision is zero or newer than
+// the metadata revision that references them.
 // Old freelist/reclaim-page generations become reusable only after neither
 // checked metadata page still names their chain.
 // OpenMmap uses a sidecar writer mutex so only one writer can publish at a time.
