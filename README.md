@@ -1,15 +1,16 @@
-# CoW B+tree Storage Lab
+# OpenLDAP-Style mmap B+tree Research Lab
 
-An experimental Go storage-engine lab for mmap-backed copy-on-write B+trees.
+An experimental Go storage-engine research lab for mmap-backed copy-on-write B+trees.
 
-The project is research-oriented: it keeps the code small enough to study, but follows the serious design line used by OpenLDAP LMDB/MDB: slotted pages, copy-on-write roots, mmap-backed page storage, dual metadata pages, reader-pinned recycling, and kernel page-cache cooperation. The docs compare that path with OpenDJ's Berkeley DB Java Edition lineage, where a Java heap cache, append-only logs, cleaning, and B+tree recovery make a very different set of tradeoffs.
+The reference design line is OpenLDAP MDB/LMDB: slotted pages in one mapped file, copy-on-write updates, alternating checked metadata pages, one serialized writer, lock-free readers, reader-table watermarks for recycling, and direct cooperation with the kernel page cache. The contrast design is OpenDJ's Berkeley DB Java Edition backend: Java heap caching, append-only `.jdb` logs, cleaner work, and B+tree recovery from logged state.
 
 ## What You Get
 
 - A clean generic B-tree package in [`btree/`](btree/)
 - A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages, linked leaves, overflow pages, growable/compactable mmap-backed storage, read-only mmap reader slots, stale-reader cleanup, tunable kernel page-cache advice, bounded branch-routing cache, and cache residency stats
+- A small `MDBKernelProfile` API that reports which OpenLDAP-style kernel mechanics are active on a live tree
 - Copy-on-write writes with stable read-only snapshots
-- Runnable demos in [`cmd/cowbtree`](cmd/cowbtree/) and [`cmd/pagebtree-demo`](cmd/pagebtree-demo/)
+- Runnable demos in [`cmd/cowbtree`](cmd/cowbtree/), [`cmd/pagebtree-demo`](cmd/pagebtree-demo/), [`cmd/mmapbtree-demo`](cmd/mmapbtree-demo/), and [`cmd/mdbkernel-demo`](cmd/mdbkernel-demo/)
 - Tests that document the behavior and invariants
 - Research notes and diagrams in [`docs/`](docs/)
 
@@ -20,6 +21,7 @@ go test ./...
 go run ./cmd/cowbtree
 go run ./cmd/pagebtree-demo
 go run ./cmd/mmapbtree-demo
+go run ./cmd/mdbkernel-demo
 ```
 
 ```go
@@ -51,6 +53,25 @@ tree.RangeBetween("k10", "k20", func(key string, value []byte) bool {
 })
 ```
 
+OpenLDAP-style mmap kernel profile:
+
+```go
+tree, _ := pagebtree.OpenMmap("research.db", pagebtree.MmapOptions{
+	Degree:   2,
+	MaxPages: 1024,
+})
+defer tree.Close()
+
+tree.Put("uid=alice", []byte("entry bytes"))
+profile := tree.MDBKernelProfile()
+
+fmt.Println(profile.Storage)          // mmap
+fmt.Println(profile.SlottedPages)     // true
+fmt.Println(profile.ReaderTable)      // true
+fmt.Println(profile.KernelPageCache)  // true
+fmt.Println(profile.RawHeapPageCache) // false
+```
+
 ## Research Map
 
 Start with [`docs/index.md`](docs/index.md), then read in order:
@@ -67,7 +88,7 @@ Start with [`docs/index.md`](docs/index.md), then read in order:
 
 ## Deliberate Scope
 
-This is a research implementation, not a production database. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, linked leaf key/value pages, lower-bound and bounded range scans, overflow pages, copy-on-write deletion, reader-pinned retired pages, a reusable freelist with checked spill pages for large persisted lists, versioned reclaim metadata for externally pinned retired pages, an LMDB-inspired read-only mmap reader table with stale-reader inspection and fail-closed format validation, a bounded derived branch-routing cache, and an optional growable mmap-backed page file with dirty-page `Sync`, conservative tail `Compact`, file-size/directory sync after remaps, `madvise` plus Linux file-advice access-pattern hints, tunable exact-leaf prefetch, and `mincore` cache residency stats. Production-grade crash-order proofs, byte-balanced deletion, multi-database catalogs, and full vacuum are still open research tracks.
+This is a research implementation, not a production database. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, linked leaf key/value pages, lower-bound and bounded range scans, overflow pages, copy-on-write deletion, reader-pinned retired pages, a reusable freelist with checked spill pages for large persisted lists, versioned reclaim metadata for externally pinned retired pages, an LMDB-inspired read-only mmap reader table with stale-reader inspection and fail-closed format validation, a bounded derived branch-routing cache, and an optional growable mmap-backed page file with dirty-page `Sync`, conservative tail `Compact`, file-size/directory sync after remaps, `madvise` plus Linux file-advice access-pattern hints, tunable exact-leaf prefetch, and `mincore` cache residency stats. Production-grade crash-order proofs, byte-balanced deletion, multi-database catalogs, sparse-file reclamation, and full vacuum are still open research tracks.
 
 ## License
 

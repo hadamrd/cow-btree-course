@@ -125,7 +125,7 @@ The package also exposes `MmapCacheStats`, backed by `mincore` on Unix. This is 
 - mapped OS page count
 - resident OS page count
 
-That lets learners see the distinction between the project's 4096-byte database pages and the kernel's VM pages. On some systems those sizes match; on others one OS page covers several database pages.
+That makes the distinction visible between the project's 4096-byte database pages and the kernel's VM pages. On some systems those sizes match; on others one OS page covers several database pages.
 
 ## Live Integrity Checks
 
@@ -216,4 +216,4 @@ This chapter makes the project more serious, but it is still not a production da
 - `Delete` removes records, borrows before descending into minimum-fill branches, merges or redistributes underfull leaves and branches, and collapses simple roots
 - `Compact` can truncate unused capacity and trailing free pages, but there is no full vacuum that moves live pages, rewrites page IDs, or punches sparse holes for interior free pages
 
-The goal is to make mmap concrete without burying the learner under every database-engine concern at once.
+The goal is to make mmap concrete without burying the reader under every database-engine concern at once.

@@ -40,7 +40,10 @@ func (r *readerTable) cleanStale() (int, error) {
 }
 
 type mmapArena struct {
-	readerTable *readerTable
+	readerTable   *readerTable
+	maxPages      int
+	accessPattern MmapAccessPattern
+	dirtyPages    map[PageID]bool
 }
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
@@ -91,6 +94,13 @@ func (t *Tree) MmapReaderStats() (MmapReaderStats, error) {
 
 func (t *Tree) CleanStaleMmapReaders() (int, error) {
 	return 0, nil
+}
+
+func normalizeMmapAccessPattern(pattern MmapAccessPattern) MmapAccessPattern {
+	if pattern == MmapAccessDefault {
+		return MmapAccessRandom
+	}
+	return pattern
 }
 
 func (a *mmapArena) close() error {

@@ -50,6 +50,59 @@ func TestMmapTreePersistsKeysAcrossCloseAndReopen(t *testing.T) {
 	}
 }
 
+func TestMDBKernelProfileDescribesOpenLDAPStyleMmapCore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:            2,
+		MaxPages:          64,
+		PageCacheCapacity: 8,
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 16; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	profile := tree.MDBKernelProfile()
+	if profile.Name != "openldap-mdb-inspired" {
+		t.Fatalf("Name = %q, want openldap-mdb-inspired", profile.Name)
+	}
+	if profile.Storage != "mmap" {
+		t.Fatalf("Storage = %q, want mmap", profile.Storage)
+	}
+	if profile.PageSize != PageSize {
+		t.Fatalf("PageSize = %d, want %d", profile.PageSize, PageSize)
+	}
+	if profile.MaxMappedPages != 64 {
+		t.Fatalf("MaxMappedPages = %d, want 64", profile.MaxMappedPages)
+	}
+	if profile.AccessPattern != MmapAccessRandom {
+		t.Fatalf("AccessPattern = %d, want random", profile.AccessPattern)
+	}
+	if !profile.SlottedPages || !profile.CopyOnWrite || !profile.BPlusTreePages {
+		t.Fatalf("page kernel flags = slotted:%v cow:%v bplus:%v; want all true", profile.SlottedPages, profile.CopyOnWrite, profile.BPlusTreePages)
+	}
+	if !profile.DualCheckedMetaPages || !profile.SerializedWriter || !profile.ReaderTable {
+		t.Fatalf("mmap kernel flags = meta:%v writer:%v readers:%v; want all true", profile.DualCheckedMetaPages, profile.SerializedWriter, profile.ReaderTable)
+	}
+	if !profile.ReaderPinnedRecycling || !profile.PersistedReclaimRecords {
+		t.Fatalf("reclaim flags = reader-pinned:%v persisted:%v; want all true", profile.ReaderPinnedRecycling, profile.PersistedReclaimRecords)
+	}
+	if !profile.KernelPageCache || profile.RawHeapPageCache {
+		t.Fatalf("cache flags = kernel:%v raw-heap:%v; want kernel true and raw heap false", profile.KernelPageCache, profile.RawHeapPageCache)
+	}
+	if !profile.DerivedBranchRoutingCache {
+		t.Fatalf("DerivedBranchRoutingCache = false, want true")
+	}
+	if profile.Revision != tree.Revision() || profile.Root == 0 || profile.Keys != tree.Len() {
+		t.Fatalf("profile root/revision/keys = root:%d rev:%d keys:%d; want live tree values", profile.Root, profile.Revision, profile.Keys)
+	}
+}
+
 func TestMmapReopenDoesNotExpandExistingFileFromMaxPagesHint(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

@@ -5,6 +5,10 @@
 // stable page ids, page bytes use a slotted layout, branch pages store separator
 // keys and child page ids, leaf pages store linked key/value records, and
 // overflow pages hold large values that do not fit cleanly inside a leaf cell.
+// MDBKernelProfile exposes that OpenLDAP-style kernel contract for a live tree,
+// including whether the tree is mmap-backed, uses checked dual metadata pages,
+// owns the serialized writer path, has a reader table, relies on the kernel
+// page cache for raw bytes, and only caches derived branch-routing metadata.
 // Put and Delete publish new roots through copy-on-write, while snapshots keep
 // reading their older roots. Leaf sibling-link repair is deferred while a
 // snapshot is active, because rewriting those headers in place would mutate

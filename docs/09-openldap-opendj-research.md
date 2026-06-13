@@ -1,138 +1,163 @@
 # 09. OpenLDAP, OpenDJ, and the Future Middle
 
-This repository is now framed as a storage-engine research lab. The reference line is OpenLDAP's MDB/LMDB design, not a generic classroom B-tree: a page-oriented B+tree, mapped into process memory, updated through copy-on-write, and protected by metadata pages plus reader watermarks.
+This repository is a storage-engine research lab. Its reference line is the OpenLDAP MDB/LMDB design: a page-oriented B+tree in a memory-mapped file, updated by copy-on-write, published through checked metadata pages, and recycled through reader watermarks.
 
-The contrast case is OpenDJ's JE backend lineage. OpenDJ stores directory data through Berkeley DB Java Edition, a transactional B-tree database implemented in Java. Its storage model relies on append-only `.jdb` log files; on open, the JE backend recreates its B-tree structure from those logs. Oracle's JE tuning notes emphasize that the heap cache should usually hold B-tree internal nodes for the active data set, because dirty internal nodes are written into the append-only log and later cleaned.
+The contrast case is OpenDJ's Berkeley DB Java Edition lineage. OpenDJ stores directory data through a Java transactional B-tree backend where updates are appended to `.jdb` log files, internal nodes are managed in a Java heap cache, and cleaner/recovery work is part of the normal lifecycle.
 
 Primary references:
 
 - OpenLDAP MDB paper: <https://www.openldap.org/pub/hyc/mdb-paper.pdf>
+- OpenLDAP administrator guide, `back-mdb`: <https://www.openldap.org/doc/admin24/backends.html>
 - OpenLDAP LMDB API and caveats: <https://github.com/openldap/openldap/blob/master/libraries/liblmdb/lmdb.h>
 - LMDB reader-lock table docs: <https://www.lmdb.tech/doc/group__readers.html>
-- Oracle Berkeley DB Java Edition FAQ: <https://www.oracle.com/database/technologies/berkeleydb-je-faq.html>
 - OpenDJ/Open Identity Platform backend storage notes: <https://doc.openidentityplatform.org/opendj/admin-guide/chap-import-export>
 - OpenDS/OpenDJ Berkeley DB JE glossary: <https://docs.oracle.com/cd/E19476-01/821-0510/def-berkeley-db-java-edition.html>
+- Oracle Berkeley DB Java Edition FAQ: <https://www.oracle.com/database/technologies/berkeleydb-je-faq.html>
 
 ## OpenLDAP LMDB Strategy
 
-LMDB is a single-level-store design. The database file is mapped into virtual memory; ordinary loads read database bytes, and the operating system page cache decides what is resident. The MDB paper describes the removal of database/backend cache layers as a central OpenLDAP improvement: fewer copies, fewer cache-tuning knobs, and fewer lock dependencies.
+OpenLDAP's `mdb` backend is built on LMDB. The OpenLDAP administrator guide describes it as the recommended primary backend and notes the practical consequence: it uses no application-level cache and requires little search-performance tuning compared with older Berkeley DB backends. The LMDB API documentation states the storage idea directly: the database is exposed through a memory map, fetches return mapped data, pages use copy-on-write, writes are serialized, and readers run without blocking writers.
 
-The kernel shape is:
+That combination is the state-of-practice design this repository studies:
 
 - page IDs map directly to file offsets
-- writes never overwrite the old snapshot's pages
-- a writer copies modified pages and publishes a new root through alternating metadata pages
-- readers keep using the root revision they opened
-- the writer can recycle retired pages only when no reader table slot names an old enough revision
-- writers are serialized by one writer mutex
-- readers do not block the writer; they only delay page reuse
+- the OS page cache is the raw page cache
+- database code does not duplicate raw page bytes in a heap cache
+- writes copy modified pages instead of overwriting old pages
+- a commit publishes a new root through alternating metadata pages
+- readers hold a root revision and do not take tree latches
+- one writer owns the write mutex
+- old pages are recyclable only after no reader-table slot can still see them
 
 ```mermaid
 flowchart TD
-    M0["meta page 0<br/>root rev N"] --> R0["old root"]
-    M1["meta page 1<br/>root rev N+1"] --> R1["new root"]
-
-    R0 --> A["old branch/leaf pages"]
-    R1 --> B["copied branch/leaf pages"]
-    B --> C["new or reused pages"]
-
-    T["reader table"] --> S["oldest active revision"]
-    S --> F["freelist reclaim decision"]
-    F -->|safe| C
-    F -->|pinned| G["append/grow instead"]
+    V["virtual address"] --> M["mmap db file"]
+    M --> P["fixed-size slotted pages"]
+    P --> B["B+tree branches and leaves"]
+    W["single writer"] --> C["copy dirty path"]
+    C --> N["new pages"]
+    N --> Meta["alternate checked meta page"]
+    R["readers"] --> Rev["stable root revision"]
+    Rev --> Old["old pages stay readable"]
+    Table["reader table"] --> Oldest["oldest visible revision"]
+    Oldest --> Free["safe page recycling"]
 ```
 
-The important research point is that LMDB is not "mmap plus a B-tree" in isolation. The design works because mmap, copy-on-write, double-buffered metadata, a freelist, and a reader table all fit together. Remove the reader table and long-lived readers either block writers or risk page reuse corruption. Remove copy-on-write and readers can observe torn mutations. Remove checked metadata and recovery cannot choose a stable root.
+The key research observation is that "mmap B+tree" is not enough. The kernel works because the pieces reinforce each other. Without copy-on-write, readers can observe overwritten bytes. Without checked metadata pages, recovery cannot distinguish the last stable root from a torn commit. Without reader watermarks, the writer cannot know when a retired page is safe to reuse. Without a deliberate page-cache policy, Linux readahead may do unhelpful guessing for random point lookups.
 
-## What This Repo Implements
+## Kernel Implemented Here
 
-The `pagebtree` package now implements the core kernel of that strategy in Go:
+The `pagebtree` package implements the core of that OpenLDAP-style kernel in Go. It is not LMDB, and it does not try to clone LMDB's C API. It implements the storage mechanics that matter for study:
 
 - fixed 4096-byte slotted pages with header, slot directory, and cells
 - B+tree branch pages with separator keys and child page IDs
-- leaf pages with key/value cells, linked leaves, and overflow chains
+- linked leaf pages with inline values and overflow chains
+- direct slotted-page point search and bounded range scans
 - copy-on-write `Put` and `Delete`
 - checked dual mmap metadata pages at page IDs `0` and `1`
 - dirty data-page sync before metadata publication
-- persisted freelist metadata, including checked freelist spill pages
-- reader-pinned recycling for in-process snapshots
-- mmap read-only handles that claim sidecar reader-table slots
-- `MmapReaderStats` and `CleanStaleMmapReaders` for reader-table hygiene
-- fail-closed reader-table format validation through `ErrReaderTable`
-- one sidecar writer mutex, so one writer can coexist with read-only mmap readers
-- version-3 metadata reclaim pages that persist externally pinned retired pages by retirement revision
-- conservative compaction that refuses to shrink while a reader-table slot is active
-- `madvise`, Linux `posix_fadvise`, exact linked-leaf prefetch, explicit warm-up, explicit cache drop, and `mincore` residency stats
+- growable and compactable mmap file geometry
+- one sidecar writer mutex
+- read-only mmap handles with sidecar reader-table slots
+- reader-pinned retired-page recycling
+- checked freelist pages for large reusable-ID lists
+- versioned reclaim pages for externally pinned retired records
+- exact reachable-page warm-up and exact linked-leaf prefetch
+- Linux `posix_fadvise` coordination alongside `madvise`
+- `mincore` residency stats for observing kernel page-cache behavior
+- a bounded derived branch-routing cache, not a raw page-byte cache
 
-The reader-table code lives in `pagebtree/reader_table_unix.go`. The writer sees it through `oldestReaderRevision` in `pagebtree/freelist.go`; that function combines local snapshots and mmap reader-table slots before retired pages move into the reusable free list. `OpenMmapReadOnly` claims a provisional revision-0 slot before metadata recovery, then updates that slot to the recovered root revision and clears it on `Close`. The revision-0 pin closes the race where a writer might otherwise recycle pages between a reader choosing a root and registering its watermark. `MmapReaderStats` reports live and stale slots, and `CleanStaleMmapReaders` clears slots whose process ID no longer exists. Existing malformed reader-table sidecars return `ErrReaderTable` rather than being silently reinitialized, because resetting them could forget active reader watermarks. When external readers still pin retired pages, writable mmap handles publish pending-retired `(pageID, revision)` records in checked reclaim pages before close. A later writer recovers those records, keeps them retired while the reader table still names an old revision, and moves them to the reusable free list after the reader leaves.
+`Tree.MDBKernelProfile()` makes that kernel explicit at runtime:
+
+```go
+profile := tree.MDBKernelProfile()
+fmt.Println(profile.Storage)                 // "mmap"
+fmt.Println(profile.DualCheckedMetaPages)    // true
+fmt.Println(profile.ReaderTable)             // true
+fmt.Println(profile.KernelPageCache)         // true
+fmt.Println(profile.RawHeapPageCache)        // false
+fmt.Println(profile.DerivedBranchRoutingCache)
+```
+
+The demo in `cmd/mdbkernel-demo` opens a mapped database, writes keys, opens a read-only reader, mutates through the writer, and prints the profile plus reader-table state.
 
 ```mermaid
 sequenceDiagram
-    participant Reader as OpenMmapReadOnly
+    participant Writer as mmap writer
+    participant Meta as checked meta pages
+    participant Reader as read-only mmap reader
     participant Table as reader table
-    participant Writer as OpenMmap writer
     participant Free as retired/free pages
 
+    Writer->>Meta: publish revision N
     Reader->>Table: claim slot at revision 0
-    Reader->>Table: update slot to revision N
-    Writer->>Free: retire old page P at revision N
-    Writer->>Table: MmapReaderStats observes reader
+    Reader->>Meta: recover root revision N
+    Reader->>Table: update slot to N
+    Writer->>Writer: copy-on-write update
+    Writer->>Free: retire old pages at N
     Writer->>Table: scan oldest reader
     Table-->>Writer: oldest = N
-    Writer->>Free: keep P retired
-    Writer->>Free: sync reclaim metadata for P,N
-    Writer->>Writer: close and release writer mutex
-    Writer->>Free: later writer reopens P,N as retired
-    Reader->>Table: close slot
-    Writer->>Table: scan oldest reader
-    Table-->>Writer: no active reader
-    Writer->>Free: move P to reusable free list
+    Writer->>Free: keep pages retired
+    Writer->>Meta: publish reclaim records
+    Reader->>Table: clear slot
+    Writer->>Free: later reuse becomes safe
 ```
 
 ## OpenDJ and Berkeley DB JE
 
-OpenDJ's JE backend is a different research point. It uses Berkeley DB Java Edition, which the OpenDS/OpenDJ glossary describes as a transactional B-tree database used as the primary database for user data. The Open Identity Platform docs describe JE backend storage as append-only log files named like `number.jdb`; a cleaner thread copies active records to new log files so old log files can be deleted, and recovery recreates the B-tree structure from those logs.
+OpenDJ's JE backend explores a different design. The OpenDS/OpenDJ glossary describes Berkeley DB Java Edition as a pure Java transactional B-tree database used as the primary database for user data. The Open Identity Platform documentation describes JE backend files as append-only logs named like `number.jdb`; updates go to the highest-numbered log file, old log files are cleaned by copying still-active records forward, and recovery recreates the B-tree from logged state.
 
-Oracle's JE FAQ explains the cache consequence: for read-write workloads, JE strongly recommends enough cache for B-tree internal nodes in the active data set. If bottom internal nodes are not cached, random operations fetch them from the filesystem; when dirty nodes are evicted, they are appended to the log and later create cleaner work. Leaf data can be handled differently, sometimes relying more on the filesystem cache to reduce JVM garbage collection pressure.
+Oracle's JE FAQ makes the cache tradeoff precise. For read/write workloads, JE strongly benefits from enough heap cache to keep B-tree internal nodes for the active data set. If bottom internal nodes are not cached, operations can force random filesystem reads; when dirty internal nodes are evicted, they are appended to the log and later create cleaner work. Leaf record data can be handled differently, sometimes relying more on the filesystem cache to reduce JVM garbage collection cost.
 
 ```mermaid
 flowchart LR
-    App["OpenDJ operation"] --> Cache["JE heap cache<br/>internal nodes"]
-    Cache --> BTree["B+tree structure"]
-    BTree --> Log["append-only .jdb logs"]
+    App["OpenDJ operation"] --> Heap["JE heap cache<br/>internal B-tree nodes"]
+    Heap --> Tree["B+tree state"]
+    App --> Log["append-only .jdb logs"]
+    Tree --> Log
     Log --> Cleaner["cleaner copies live records"]
-    Cleaner --> NewLog["new log files"]
-    Log --> Recovery["open recovery<br/>rebuild B-tree"]
+    Cleaner --> NewLogs["new log files"]
+    Log --> Recovery["open recovery<br/>reconstruct B-tree"]
 ```
 
-That is not worse or better in the abstract. It is a different compromise:
+The two designs optimize different problems:
 
-- JE gives Java-managed transactional storage with log cleaning and recovery.
-- LMDB gives mapped pages, MVCC roots, no database-level page cache, and no background cleaner.
-- JE must reason about heap cache sizing and cleaner feedback loops.
-- LMDB must reason about map size, long-lived readers, and reader-table hygiene.
+- LMDB minimizes database-owned machinery: no raw heap page cache, no WAL, no background cleaner, direct mapped reads.
+- JE fits a Java runtime model: managed objects, transactional logs, cleaner work, and explicit cache sizing.
+- LMDB's hard problems are map sizing, long-lived readers, page reuse, crash-order publication, and reader-table hygiene.
+- JE's hard problems are heap pressure, internal-node residency, log cleaning, checkpoint/recovery cost, and cleaner feedback loops.
 
-## The Future Middle
+## Future Middle
 
-A modern middle path is not "add every cache back." The interesting direction is selective structure on top of a single-level store:
+The modern middle is not to add a big database cache back on top of mmap. A more interesting direction is to keep the single-level-store shape while adding narrow, measurable structure:
 
-- keep raw page bytes in mmap and the kernel page cache
-- cache only derived metadata that is expensive to decode, such as branch routing entries
-- make prefetch exact and structure-aware, such as linked-leaf windows and reachable-page warm-up
-- expose residency and hint counters so tuning can be measured
-- use reader watermarks for page recycling rather than global reader/writer exclusion
-- keep background work optional and bounded, not an always-on cleaner
+- raw database bytes remain in mmap and the kernel page cache
+- point lookups default to random access advice to reduce broad Linux readahead
+- range scans issue exact `WILLNEED` hints for known linked leaves
+- warm-up follows reachable tree and overflow pages, not the whole file
+- derived routing metadata is cached by page checksum, bounded by LRU
+- cache residency, warm-up hints, and prefetch hints are observable through stats
+- recycling uses reader watermarks rather than global reader/writer exclusion
+- background work stays optional and bounded
 
-This repository already takes that middle path in small form: raw bytes are not duplicated in a Go heap page cache, but decoded branch-routing metadata is cached by page checksum; point lookups default to random-friendly kernel advice, while bounded scans issue exact `WILLNEED` hints only for known next leaves.
+```mermaid
+flowchart TD
+    Mmap["mmap raw pages"] --> Kernel["kernel page cache"]
+    BTree["B+tree structure"] --> Exact["exact prefetch / warm-up"]
+    BTree --> Derived["derived branch-routing cache"]
+    Readers["reader watermarks"] --> Reclaim["safe recycling"]
+    Metrics["residency and hint stats"] --> Tuning["measured tuning"]
+```
 
-Future research tracks:
+Open research tracks for this repo:
 
 - replace the simple sidecar reader table with a cache-line-aligned mmap lock region
 - add reader-table migration tooling for future incompatible sidecar formats
 - model multi-database catalogs inside one mapped file
 - make deletion byte-balanced, not only key-count balanced
-- add a formal crash-order test harness for metadata, freelist, and growth/shrink ordering
+- add a crash-order harness for metadata, freelist, reclaim, growth, and shrink
 - investigate sparse-file hole punching for interior free extents without moving live pages
-- compare exact structure-aware prefetch against Linux default readahead on large workloads
+- compare exact structure-aware prefetch with Linux default readahead on large workloads
+- benchmark derived branch-routing cache hit rates against pure direct slotted-page search
 
-The direction is intentionally between OpenLDAP MDB and OpenDJ JE: keep LMDB's small mmap/MVCC core, but add explicit observability and narrowly scoped derived caches where modern workloads benefit.
+The intended direction sits between OpenLDAP MDB and OpenDJ JE: keep the small mmap/MVCC kernel, then add only the observability, exact prefetch, and derived metadata that can prove their value.

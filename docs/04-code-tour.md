@@ -71,11 +71,11 @@ If you add new write operations, keep that discipline. Any helper that mutates a
 
 ## Stats
 
-`btree/stats.go` is not needed for the data structure itself. It exists so learners can observe height and node count while experimenting.
+`btree/stats.go` is not needed for the data structure itself. It exists so readers can observe height and node count while experimenting.
 
 ## Page-backed Tree
 
-`pagebtree/` is the second implementation. It keeps the learner-friendly search shape, but replaces direct child pointers with page ids and stores page contents in a slotted byte layout.
+`pagebtree/` is the second implementation. It keeps the search shape easy to audit, but replaces direct child pointers with page ids and stores page contents in a slotted byte layout.
 
 ```mermaid
 flowchart LR

@@ -1,8 +1,8 @@
-# CoW B+tree Storage Lab
+# OpenLDAP-Style mmap B+tree Research Lab
 
-This folder is a research guide for the code in this repository. Read it as a small storage-engine notebook: each chapter introduces one mechanism, points back to the implementation, and keeps the OpenLDAP LMDB/MDB design line in view.
+This folder is a research guide for the code in this repository. Read it as a small storage-engine notebook: each chapter introduces one mechanism, points back to the implementation, and keeps the OpenLDAP MDB/LMDB design line in view.
 
-## Learning Goals
+## Research Goals
 
 By the end, you should be able to explain:
 
@@ -10,7 +10,8 @@ By the end, you should be able to explain:
 - How node splits preserve sorted search.
 - Why copy-on-write updates can keep old snapshots readable.
 - What path copying shares, what it copies, and why.
-- Why OpenLDAP's mmap/MVCC path differs from OpenDJ's Berkeley DB Java Edition path.
+- How the repository's `MDBKernelProfile` maps a live tree onto OpenLDAP-style mmap/MVCC mechanics.
+- Why OpenLDAP's mmap/MVCC path differs from OpenDJ's Berkeley DB Java Edition log-and-cache path.
 - Where this research implementation still differs from a production database index.
 
 ## Map
@@ -54,12 +55,14 @@ pagebtree/
   integrity.go  Public open-tree invariant checks
   mmap_readers.go Reader-table stats shape
   mmap_warm.go  Exact reachable-page mmap warm-up advice
+  kernel_profile.go OpenLDAP-style mmap kernel research profile
   reader_table_unix.go LMDB-style mmap reader table and writer mutex sidecars
   mmap.go       Mmap-backed page arena, metadata recovery, dirty sync, compact, tunable advice, cache stats, and locks
 
 cmd/cowbtree/        Logical B-tree demonstration
 cmd/pagebtree-demo/  Page-backed CoW demonstration
 cmd/mmapbtree-demo/  Mmap persistence demonstration
+cmd/mdbkernel-demo/  OpenLDAP-style mmap kernel profile demonstration
 docs/           Research chapters
 ```
 
