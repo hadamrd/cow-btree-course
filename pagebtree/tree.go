@@ -169,6 +169,9 @@ func (t *Tree) Snapshot() *Snapshot {
 }
 
 func (t *Tree) Stats() Stats {
+	if t == nil || t.closed {
+		return Stats{}
+	}
 	return statsFor(t)
 }
 

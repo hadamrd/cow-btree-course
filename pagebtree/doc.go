@@ -23,8 +23,8 @@
 // active. Close returns ErrActiveReaders for mmap-backed trees while snapshots
 // are active, because those snapshots still read slices backed by the mapping.
 // A Snapshot requested after Close is inert and does not register a reader.
-// Post-close maintenance calls such as Sync, Advise, DropMmapCache, and
-// MmapCacheStats do not touch the released mapping.
+// Post-close inspection and maintenance calls such as Stats, Sync, Advise,
+// DropMmapCache, and MmapCacheStats do not touch the released mapping.
 // Reopen validation checks metadata format, version, database page size,
 // persisted degree, and bounds against the mapped file and declared capacity,
 // page checksums, and slotted-page structure before decoding reachable cells,

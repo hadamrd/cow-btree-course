@@ -298,6 +298,28 @@ func TestMmapClosedTreeMaintenanceAPIsAreNoOps(t *testing.T) {
 	}
 }
 
+func TestMmapClosedTreeStatsIsZero(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 32})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	if _, replaced := tree.Put("alpha", []byte("one")); replaced {
+		t.Fatalf("first Put replaced existing key")
+	}
+	if stats := tree.Stats(); stats.Root == 0 || stats.Storage != "mmap" {
+		t.Fatalf("open tree Stats = %+v, want mmap stats with root", stats)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if stats := tree.Stats(); stats != (Stats{}) {
+		t.Fatalf("Stats after Close = %+v, want zero value", stats)
+	}
+}
+
 func TestMmapTreeGrowsMappingWhenPageCapacityIsExceeded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
