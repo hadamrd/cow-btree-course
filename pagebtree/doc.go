@@ -7,8 +7,9 @@
 // overflow pages hold large values that do not fit cleanly inside a leaf cell.
 // MDBKernelProfile exposes that OpenLDAP-style kernel contract for a live tree,
 // including whether the tree is mmap-backed, uses checked dual metadata pages,
-// owns the serialized writer path, has a reader table, relies on the kernel
-// page cache for raw bytes, and only caches derived branch-routing metadata.
+// owns the serialized writer path, persists reclaim records, has a reader
+// table, relies on the kernel page cache for raw bytes, and only caches derived
+// branch-routing metadata.
 // The profile also reports that derived cache's capacity and live counters, so
 // experiments can distinguish kernel page-cache behavior from Go-side routing
 // reuse.

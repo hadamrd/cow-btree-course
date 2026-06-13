@@ -33,6 +33,45 @@ func TestPutAndGetKeysFromPageBackedTree(t *testing.T) {
 	}
 }
 
+func TestMDBKernelProfileDescribesMemoryCoreWithoutMmapMechanics(t *testing.T) {
+	tree := NewWithOptions(2, Options{PageCacheCapacity: 4})
+	for i := 0; i < 16; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	for i := 0; i < 2; i++ {
+		got, ok := tree.Get("key-11")
+		if !ok || string(got) != "value-11" {
+			t.Fatalf("Get(key-11) = %q, %v; want value-11, true", got, ok)
+		}
+	}
+
+	profile := tree.MDBKernelProfile()
+	if profile.Storage != "memory" {
+		t.Fatalf("Storage = %q, want memory", profile.Storage)
+	}
+	if !profile.SlottedPages || !profile.BPlusTreePages || !profile.CopyOnWrite {
+		t.Fatalf("page flags = slotted:%v bplus:%v cow:%v; want all true", profile.SlottedPages, profile.BPlusTreePages, profile.CopyOnWrite)
+	}
+	if profile.DualCheckedMetaPages || profile.SerializedWriter || profile.ReaderTable {
+		t.Fatalf("mmap flags = meta:%v writer:%v readers:%v; want all false for memory tree", profile.DualCheckedMetaPages, profile.SerializedWriter, profile.ReaderTable)
+	}
+	if !profile.ReaderPinnedRecycling || profile.PersistedReclaimRecords {
+		t.Fatalf("reclaim flags = reader-pinned:%v persisted:%v; want in-memory pinning without persisted reclaim records", profile.ReaderPinnedRecycling, profile.PersistedReclaimRecords)
+	}
+	if profile.KernelPageCache || profile.RawHeapPageCache {
+		t.Fatalf("cache flags = kernel:%v raw-heap:%v; want no mmap kernel cache and no duplicate raw heap cache", profile.KernelPageCache, profile.RawHeapPageCache)
+	}
+	if !profile.DerivedBranchRoutingCache || profile.DerivedBranchRoutingCacheCapacity != 4 {
+		t.Fatalf("derived cache = enabled:%v capacity:%d; want enabled capacity 4", profile.DerivedBranchRoutingCache, profile.DerivedBranchRoutingCacheCapacity)
+	}
+	if profile.DerivedBranchRoutingCacheHits == 0 || profile.DerivedBranchRoutingCacheMisses == 0 {
+		t.Fatalf("derived cache hits/misses = %d/%d; want both nonzero", profile.DerivedBranchRoutingCacheHits, profile.DerivedBranchRoutingCacheMisses)
+	}
+	if profile.MaxMappedPages != 0 || profile.DirtyPages != 0 {
+		t.Fatalf("mapped fields = max:%d dirty:%d; want zero for memory tree", profile.MaxMappedPages, profile.DirtyPages)
+	}
+}
+
 func TestPutReplacesExistingKey(t *testing.T) {
 	tree := New(2)
 	tree.Put("alpha", []byte("one"))

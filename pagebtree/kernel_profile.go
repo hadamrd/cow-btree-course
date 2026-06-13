@@ -52,15 +52,14 @@ type MDBKernelProfile struct {
 // and kernel page-cache pieces that make the OpenLDAP-style kernel interesting.
 func (t *Tree) MDBKernelProfile() MDBKernelProfile {
 	profile := MDBKernelProfile{
-		Name:                    "openldap-mdb-inspired",
-		Storage:                 "memory",
-		PageSize:                PageSize,
-		SlottedPages:            true,
-		BPlusTreePages:          true,
-		CopyOnWrite:             true,
-		ReaderPinnedRecycling:   true,
-		PersistedReclaimRecords: true,
-		RawHeapPageCache:        false,
+		Name:                  "openldap-mdb-inspired",
+		Storage:               "memory",
+		PageSize:              PageSize,
+		SlottedPages:          true,
+		BPlusTreePages:        true,
+		CopyOnWrite:           true,
+		ReaderPinnedRecycling: true,
+		RawHeapPageCache:      false,
 	}
 	if t == nil {
 		return profile
@@ -95,6 +94,7 @@ func (t *Tree) MDBKernelProfile() MDBKernelProfile {
 	profile.DualCheckedMetaPages = true
 	profile.SerializedWriter = !t.readOnly
 	profile.ReaderTable = t.arena.readerTable != nil
+	profile.PersistedReclaimRecords = true
 	profile.KernelPageCache = true
 	return profile
 }
