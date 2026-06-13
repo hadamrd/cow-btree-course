@@ -1098,6 +1098,9 @@ func (t *Tree) validateOverflowValue(raw []byte, flags uint16, seen map[PageID]b
 	if !ok {
 		return nil
 	}
+	if ref.first == 0 {
+		return fmt.Errorf("%w: overflow reference has no first page", ErrOverflowInvariant)
+	}
 	var length int
 	for id := ref.first; id != 0; {
 		if seen[id] {
