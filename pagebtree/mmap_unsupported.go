@@ -21,6 +21,7 @@ const (
 	MmapAccessRandom
 	MmapAccessSequential
 	MmapAccessWillNeed
+	mmapAccessDontNeed
 )
 
 type mmapArena struct{}
@@ -56,6 +57,10 @@ func (t *Tree) compactMmapTail() error {
 }
 
 func (t *Tree) Advise(pattern MmapAccessPattern) error {
+	return nil
+}
+
+func (t *Tree) DropMmapCache() error {
 	return nil
 }
 

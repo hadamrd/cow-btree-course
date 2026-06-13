@@ -32,10 +32,12 @@
 // OpenMmapReadOnly opens mmap files with a shared read lock and rejects
 // mutations through the returned tree handle. Mmap-backed trees expose Advise so
 // callers can pass random, sequential, or will-need access-pattern hints to the
-// kernel page cache without adding a second Go heap page cache. MmapCacheStats
-// uses mincore on Unix to show how many mapped OS pages are resident in that
-// kernel cache. Current-tree Get also keeps a small checksum-keyed cache of
-// decoded branch routing metadata. That derived cache is bounded by
+// kernel page cache without adding a second Go heap page cache. DropMmapCache
+// syncs writable mmap trees before asking the kernel to evict clean mapped tree
+// pages with MADV_DONTNEED. MmapCacheStats uses mincore on Unix to show how
+// many mapped OS pages are resident in that kernel cache. Current-tree Get also
+// keeps a small checksum-keyed cache of decoded branch routing metadata. That
+// derived cache is bounded by
 // least-recently-used eviction and can be sized through Options or MmapOptions;
 // Stats exposes its capacity, entries, hits, misses, invalidations, evictions,
 // range-prefetch window, and range-prefetch hint count.

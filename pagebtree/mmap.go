@@ -69,6 +69,7 @@ const (
 	MmapAccessRandom
 	MmapAccessSequential
 	MmapAccessWillNeed
+	mmapAccessDontNeed
 )
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
@@ -569,6 +570,8 @@ func mmapAdvice(pattern MmapAccessPattern) (int, error) {
 		return unix.MADV_SEQUENTIAL, nil
 	case MmapAccessWillNeed:
 		return unix.MADV_WILLNEED, nil
+	case mmapAccessDontNeed:
+		return unix.MADV_DONTNEED, nil
 	default:
 		return 0, fmt.Errorf("unknown mmap access pattern %d", pattern)
 	}
@@ -752,6 +755,26 @@ func (t *Tree) Advise(pattern MmapAccessPattern) error {
 		return nil
 	}
 	return t.arena.advise(pattern)
+}
+
+// DropMmapCache asks the kernel to evict clean mmap-backed tree pages.
+//
+// Writable trees sync first so MADV_DONTNEED is only applied to clean pages.
+// Read-only mmap handles skip the sync and issue the advice directly.
+// Memory-backed trees treat this as a no-op.
+func (t *Tree) DropMmapCache() error {
+	if t == nil || t.closed || t.arena == nil {
+		return nil
+	}
+	if !t.readOnly {
+		if err := t.Sync(); err != nil {
+			return err
+		}
+	}
+	if t.nextPage <= firstTreePageID {
+		return nil
+	}
+	return t.arena.advisePageRange(firstTreePageID, t.nextPage, mmapAccessDontNeed)
 }
 
 // MmapCacheStats reports kernel page-cache residency for an mmap-backed tree.

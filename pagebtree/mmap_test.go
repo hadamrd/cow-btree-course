@@ -801,6 +801,83 @@ func TestMmapReadOnlyAccessAdviceKeepsReadsWorking(t *testing.T) {
 	}
 }
 
+func TestMmapDropCacheSyncsBeforeDontNeedAdvice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	for i := 0; i < 20; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var events []string
+	tree.arena.syncObserver = func(event string) {
+		events = append(events, event)
+	}
+	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == mmapAccessDontNeed {
+			events = append(events, fmt.Sprintf("drop:%d-%d", start, end))
+		}
+	}
+
+	if err := tree.DropMmapCache(); err != nil {
+		t.Fatalf("DropMmapCache: %v", err)
+	}
+	want := []string{"data", "meta", fmt.Sprintf("drop:%d-%d", firstTreePageID, tree.nextPage)}
+	if !slices.Equal(events, want) {
+		t.Fatalf("DropMmapCache events = %v, want %v", events, want)
+	}
+	if len(tree.arena.dirtyPages) != 0 {
+		t.Fatalf("dirty pages after DropMmapCache = %v, want none", tree.arena.dirtyPages)
+	}
+	if got, ok := tree.Get("key-09"); !ok || string(got) != "value-09" {
+		t.Fatalf("Get after DropMmapCache = %q, %v; want value-09, true", got, ok)
+	}
+}
+
+func TestMmapReadOnlyDropCacheSkipsSyncAndAdvisesPages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	defer reader.Close()
+
+	var events []string
+	reader.arena.syncObserver = func(event string) {
+		events = append(events, event)
+	}
+	reader.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == mmapAccessDontNeed {
+			events = append(events, fmt.Sprintf("drop:%d-%d", start, end))
+		}
+	}
+
+	if err := reader.DropMmapCache(); err != nil {
+		t.Fatalf("read-only DropMmapCache: %v", err)
+	}
+	want := []string{fmt.Sprintf("drop:%d-%d", firstTreePageID, reader.nextPage)}
+	if !slices.Equal(events, want) {
+		t.Fatalf("read-only DropMmapCache events = %v, want %v", events, want)
+	}
+	if got, ok := reader.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("read-only Get after DropMmapCache = %q, %v; want one, true", got, ok)
+	}
+}
+
 func TestMmapCacheStatsReportsKernelResidency(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

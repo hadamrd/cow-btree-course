@@ -62,6 +62,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := reopened.DropMmapCache(); err != nil {
+		log.Fatal(err)
+	}
+	afterDropStats, err := reopened.MmapCacheStats()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Printf("mmap file: %s\n", path)
 	fmt.Printf("file size before compact: %d bytes\n", beforeCompact.Size())
@@ -69,5 +76,6 @@ func main() {
 	fmt.Printf("key-17: %s\n", value)
 	fmt.Println("key-05: deleted")
 	fmt.Printf("stats: %+v\n", reopened.Stats())
-	fmt.Printf("cache: %+v\n", cacheStats)
+	fmt.Printf("cache before drop: %+v\n", cacheStats)
+	fmt.Printf("cache after drop:  %+v\n", afterDropStats)
 }

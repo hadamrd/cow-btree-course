@@ -77,6 +77,8 @@ The important caching point is that mmap already uses the kernel page cache. Add
 
 These are hints, not contracts. The kernel can ignore them or combine them with its own readahead heuristics. Correctness comes from the page checksums, copy-on-write roots, and metadata validation, not from prefetch behavior.
 
+The package also exposes `DropMmapCache()`, which is intentionally separate from `Advise`. It is not an access pattern; it is an explicit cache-pressure operation. Writable mmap trees call `Sync` first, then issue `madvise(MADV_DONTNEED)` over the allocated tree-page range. Read-only mmap handles skip the sync and issue the advice directly. Use it after a batch job, verification pass, or demo experiment when you want to tell the kernel that these clean mapped pages do not need to stay resident.
+
 ## Coordinating With Linux Readahead
 
 Linux already tries to detect sequential access on file-backed mappings. That is helpful for a table scan, but a B+tree point lookup is not a table scan: after the root, the next useful page is chosen by key comparison, not by physical page number. If we let the kernel assume too much sequential locality, it can pull unrelated pages into memory and evict pages we actually need.
@@ -86,6 +88,7 @@ The implementation therefore uses three rules:
 - keep normal point lookups random-friendly with `MADV_RANDOM` or default advice
 - prefetch only exact page IDs when the tree knows the next page, such as linked leaves during a range scan
 - avoid prefetch when the tree cannot prove the hint is still correct, such as while active readers have deferred leaf-link repair
+- drop clean mapped pages only through the explicit `DropMmapCache` path, after writable state has been synced
 
 This is why `RangeFrom` and `RangeBetween` first descend the tree to the correct lower-bound leaf, then issue small `MADV_WILLNEED` hints for a bounded window of linked next leaves. The default window is `DefaultRangePrefetchLeafWindow` pages. `MmapOptions.RangePrefetchLeafWindow` can set a smaller or larger exact-page window, and a negative value disables linked-leaf prefetch entirely. These scans do not switch the whole mapping to sequential mode for ordinary bounded scans. Broad `MADV_SEQUENTIAL` remains available through `Tree.Advise` for explicit bulk passes, such as a full verification walk, where physical readahead is likely to be useful.
 
@@ -134,6 +137,9 @@ flowchart TD
 
     C["MmapCacheStats"] --> M["mincore"]
     M --> K["resident OS pages"]
+
+    X["DropMmapCache"] --> Y["Sync dirty pages + metadata"]
+    Y --> Z["MADV_DONTNEED clean tree-page range"]
 ```
 
 ## File Lock
