@@ -1390,6 +1390,9 @@ func readMetaPageChecked(data []byte) (metaRecord, bool, error) {
 	freeRoot := PageID(0)
 	rootField := PageID(binary.LittleEndian.Uint64(data[metaFreeListOff:]))
 	if version >= 3 {
+		if freeCount == 0 && rootField != 0 {
+			return metaRecord{}, false, fmt.Errorf("%w: metadata reclaim root without records", ErrMetaInvariant)
+		}
 		if freeCount > 0 && rootField == 0 {
 			return metaRecord{}, false, fmt.Errorf("%w: metadata reclaim list has zero root", ErrMetaInvariant)
 		}

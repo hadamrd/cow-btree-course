@@ -3036,7 +3036,12 @@ func TestMmapTreeRejectsReclaimRecordWithFutureRevision(t *testing.T) {
 		t.Fatalf("Close reader: %v", err)
 	}
 
-	record := keepOnlyNewestMetaPage(t, path)
+	newestIndex, record := newestMetaPage(t, path)
+	for index := 0; index < metaPageCount; index++ {
+		if index != newestIndex {
+			zeroMetaPage(t, path, index)
+		}
+	}
 	if record.freeRoot == 0 {
 		t.Fatalf("newest metadata has no reclaim root")
 	}
@@ -3055,6 +3060,71 @@ func TestMmapTreeRejectsReclaimRecordWithFutureRevision(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "future revision") {
 		t.Fatalf("OpenMmap future reclaim revision error = %v, want future revision detail", err)
+	}
+}
+
+func TestMmapTreeRejectsEmptyReclaimRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	for i := 0; i < 24; i++ {
+		writer.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close initial writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	writer, err = OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		reader.Close()
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+	for i := 0; i < 12; i++ {
+		if _, ok := writer.Delete(fmt.Sprintf("key-%02d", i)); !ok {
+			writer.Close()
+			reader.Close()
+			t.Fatalf("Delete key-%02d = false, want true", i)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		reader.Close()
+		t.Fatalf("Close writer with external reader: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close reader: %v", err)
+	}
+
+	newestIndex, record := newestMetaPage(t, path)
+	for index := 0; index < metaPageCount; index++ {
+		if index != newestIndex {
+			zeroMetaPage(t, path, index)
+		}
+	}
+	if record.freeRoot == 0 {
+		t.Fatalf("newest metadata has no reclaim root")
+	}
+	rewriteReclaimPageRecords(t, path, record.freeRoot, nil)
+	replaceMetaBytesAt(t, path, newestIndex, func(data []byte) {
+		binary.LittleEndian.PutUint64(data[metaFreeCountOff:], 0)
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with empty reclaim root")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap empty reclaim root error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "reclaim root without records") {
+		t.Fatalf("OpenMmap empty reclaim root error = %v, want reclaim root detail", err)
 	}
 }
 
@@ -3774,6 +3844,23 @@ func corruptMetaPage(t *testing.T, path string, metaIndex int) {
 	}
 }
 
+func zeroMetaPage(t *testing.T, path string, metaIndex int) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile zero meta: %v", err)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteAt(make([]byte, PageSize), int64(metaIndex*PageSize)); err != nil {
+		t.Fatalf("WriteAt zero meta %d: %v", metaIndex, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("Sync zero meta %d: %v", metaIndex, err)
+	}
+}
+
 func keepOnlyNewestMetaPage(t *testing.T, path string) metaRecord {
 	t.Helper()
 
@@ -3855,6 +3942,29 @@ func replaceNewestMetaBytes(t *testing.T, path string, rewrite func([]byte)) {
 	}
 }
 
+func replaceMetaBytesAt(t *testing.T, path string, index int, rewrite func([]byte)) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile rewrite raw meta at index: %v", err)
+	}
+	defer file.Close()
+
+	buf := make([]byte, PageSize)
+	if _, err := file.ReadAt(buf, int64(index*PageSize)); err != nil {
+		t.Fatalf("ReadAt rewrite raw meta %d: %v", index, err)
+	}
+	rewrite(buf)
+	binary.LittleEndian.PutUint32(buf[metaChecksumOff:], metaChecksum(buf))
+	if _, err := file.WriteAt(buf, int64(index*PageSize)); err != nil {
+		t.Fatalf("WriteAt rewrite raw meta %d: %v", index, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("Sync rewrite raw meta %d: %v", index, err)
+	}
+}
+
 func rewriteReclaimRecord(t *testing.T, path string, pageID PageID, index int, rewrite func(reclaimRecord) reclaimRecord) {
 	t.Helper()
 
@@ -3881,6 +3991,29 @@ func rewriteReclaimRecord(t *testing.T, path string, pageID PageID, index int, r
 
 	records := p.reclaimRecords()
 	records[index] = rewrite(records[index])
+	rewriteReclaimPageRecords(t, path, pageID, records)
+}
+
+func rewriteReclaimPageRecords(t *testing.T, path string, pageID PageID, records []reclaimRecord) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile rewrite reclaim page records: %v", err)
+	}
+	defer file.Close()
+
+	buf := make([]byte, PageSize)
+	if _, err := file.ReadAt(buf, int64(pageID)*PageSize); err != nil {
+		t.Fatalf("ReadAt reclaim page %d: %v", pageID, err)
+	}
+	p := &page{id: pageID, data: buf}
+	if !p.validChecksum() {
+		t.Fatalf("reclaim page %d checksum invalid before record rewrite", pageID)
+	}
+	if p.flags() != flagReclaim {
+		t.Fatalf("page %d flags = %x, want reclaim", pageID, p.flags())
+	}
 	writeReclaimPage(p, p.reclaimNext(), records)
 	if _, err := file.WriteAt(buf, int64(pageID)*PageSize); err != nil {
 		t.Fatalf("WriteAt reclaim page %d: %v", pageID, err)
