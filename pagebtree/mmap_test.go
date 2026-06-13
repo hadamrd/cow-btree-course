@@ -1803,6 +1803,82 @@ func TestMmapCompactShrinkFaultMatrixPreservesReadableMapping(t *testing.T) {
 	}
 }
 
+func TestMmapCompactShrinkCrashImageMatrixClassifiesCompactedRoot(t *testing.T) {
+	tests := []struct {
+		name  string
+		fault mmapFaultPoint
+	}{
+		{
+			name:  "before file size sync",
+			fault: mmapFaultBeforeFileSizeSync,
+		},
+		{
+			name:  "before directory sync",
+			fault: mmapFaultBeforeDirectorySync,
+		},
+		{
+			name:  "before replacement remap",
+			fault: mmapFaultBeforeRemap,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertMmapCompactShrinkCrashImageClassifiesCompactedRoot(t, tt.fault)
+		})
+	}
+}
+
+func assertMmapCompactShrinkCrashImageClassifiesCompactedRoot(t *testing.T, fault mmapFaultPoint) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "course.db")
+	forced := fmt.Errorf("forced %s fault", fault)
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	expectedNextPage := tree.nextPage
+	var crashImage string
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			crashImage = copyMmapCrashImage(t, path, string(point))
+			return forced
+		}
+		return nil
+	}
+
+	err = tree.Compact()
+	if !errors.Is(err, forced) {
+		t.Fatalf("Compact fault error = %v, want forced fault", err)
+	}
+	if crashImage == "" {
+		t.Fatalf("fault %s did not capture a crash image", fault)
+	}
+	if err := tree.arena.close(); err != nil {
+		t.Fatalf("forced crash close arena: %v", err)
+	}
+	tree.closed = true
+
+	recovered, err := OpenMmap(crashImage, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap compact shrink crash image for %s: %v", fault, err)
+	}
+	defer recovered.Close()
+	if recovered.nextPage != expectedNextPage {
+		t.Fatalf("compact shrink crash image nextPage after %s = %d, want compacted %d", fault, recovered.nextPage, expectedNextPage)
+	}
+	for i := 0; i < 12; i++ {
+		key := fmt.Sprintf("key-%02d", i)
+		if got, ok := recovered.Get(key); !ok || string(got) != fmt.Sprintf("value-%02d", i) {
+			t.Fatalf("compact shrink crash image Get(%s) after %s = %q, %v", key, fault, got, ok)
+		}
+	}
+}
+
 func assertMmapCompactShrinkFaultPreservesReadableMapping(t *testing.T, fault mmapFaultPoint, wantPoints []mmapFaultPoint) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "course.db")

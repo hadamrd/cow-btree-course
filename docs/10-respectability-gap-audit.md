@@ -29,7 +29,7 @@ storage-engine artifact.
 
 | Gap | Why it matters | Current state | Next useful slice |
 | --- | --- | --- | --- |
-| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication images and growth images. A full power-fail matrix is still missing. | Extend copied-image classification to compact shrink, freelist/reclaim spills, and obsolete metadata-page generation reclaim. |
+| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication, growth, and compact-shrink images. A full power-fail matrix is still missing. | Extend copied-image classification to freelist/reclaim spills and obsolete metadata-page generation reclaim. |
 | Transaction batching | Real engines commit a unit of work, not one implicit root publish per call. | `Put` and `Delete` mutate the live in-process root immediately; `Sync` is the durability boundary only for mmap. | Add an explicit write batch that stages multiple operations and publishes one revision. |
 | Cursor API | Real B+tree users need `seek`/`next` control, not only callback scans. | Closed in this pass with snapshot-backed forward cursors. | Extend cursors with bounded end keys, reverse traversal, and delete-through-cursor experiments. |
 | Comparator and key model | Production B+trees cannot be hardwired to Go string ordering. | Page cells store strings and compare byte-by-byte through string order. | Introduce byte-key APIs and an explicit comparator boundary before adding prefix compression. |
@@ -103,6 +103,9 @@ the copied file through a fresh mmap handle, and classifies the recovery point:
 before-data-sync recovers the old root, while after-metadata-write and
 before-metadata-sync recover the new root. The copied-image growth matrix proves
 that file-size, directory-sync, and pre-remap growth images still recover the old
-durable root because growth never publishes metadata. The next respectable step
-is to reuse that copied-image harness for compact shrink, freelist/reclaim
-spills, and obsolete metadata-page generation reclaim.
+durable root because growth never publishes metadata. The copied-image
+compact-shrink matrix proves that file-size, directory-sync, and pre-remap
+shrink images reopen the compacted root and preserve all live keys, because
+compaction publishes metadata before the physical shrink. The next respectable
+step is to reuse that copied-image harness for freelist/reclaim spills and
+obsolete metadata-page generation reclaim.
