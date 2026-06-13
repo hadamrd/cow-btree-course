@@ -1982,6 +1982,96 @@ func TestMmapSyncFaultMatrixReopensOldRoot(t *testing.T) {
 	}
 }
 
+func TestMmapSyncCrashImageMatrixClassifiesRecoveryRoot(t *testing.T) {
+	tests := []struct {
+		name         string
+		fault        mmapFaultPoint
+		wantNewRoot  bool
+		wantKeyValue string
+	}{
+		{
+			name:         "before data sync",
+			fault:        mmapFaultBeforeDataSync,
+			wantNewRoot:  false,
+			wantKeyValue: "",
+		},
+		{
+			name:         "after metadata write",
+			fault:        mmapFaultAfterMetaWrite,
+			wantNewRoot:  true,
+			wantKeyValue: "two",
+		},
+		{
+			name:         "before metadata sync",
+			fault:        mmapFaultBeforeMetaSync,
+			wantNewRoot:  true,
+			wantKeyValue: "two",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertMmapSyncCrashImageClassifiesRecoveryRoot(t, tt.fault, tt.wantNewRoot, tt.wantKeyValue)
+		})
+	}
+}
+
+func assertMmapSyncCrashImageClassifiesRecoveryRoot(t *testing.T, fault mmapFaultPoint, wantNewRoot bool, wantKeyValue string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "course.db")
+	forced := fmt.Errorf("forced %s fault", fault)
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+
+	tree.Put("bravo", []byte("two"))
+	var crashImage string
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			crashImage = copyMmapCrashImage(t, path, string(point))
+			return forced
+		}
+		return nil
+	}
+
+	err = tree.Sync()
+	if !errors.Is(err, forced) {
+		t.Fatalf("Sync fault error = %v, want forced fault", err)
+	}
+	if crashImage == "" {
+		t.Fatalf("fault %s did not capture a crash image", fault)
+	}
+	if err := tree.arena.close(); err != nil {
+		t.Fatalf("forced crash close arena: %v", err)
+	}
+	tree.closed = true
+
+	recovered, err := OpenMmap(crashImage, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap crash image for %s: %v", fault, err)
+	}
+	defer recovered.Close()
+	if got, ok := recovered.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("crash image Get(alpha) after %s = %q, %v; want one, true", fault, got, ok)
+	}
+	got, ok := recovered.Get("bravo")
+	if wantNewRoot {
+		if !ok || string(got) != wantKeyValue {
+			t.Fatalf("crash image Get(bravo) after %s = %q, %v; want %q, true", fault, got, ok, wantKeyValue)
+		}
+		return
+	}
+	if ok {
+		t.Fatalf("crash image Get(bravo) after %s = %q, true; want old root without bravo", fault, got)
+	}
+}
+
 func assertMmapSyncFaultReopensOldRoot(t *testing.T, fault mmapFaultPoint, wantPoints []mmapFaultPoint) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "course.db")
@@ -5082,6 +5172,40 @@ func fileSize(t *testing.T, path string) int64 {
 		t.Fatalf("Stat(%s): %v", path, err)
 	}
 	return info.Size()
+}
+
+func copyMmapCrashImage(t *testing.T, path string, label string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Read crash image source %s: %v", path, err)
+	}
+	image := filepath.Join(t.TempDir(), "crash-"+sanitizeCrashImageLabel(label)+".db")
+	if err := os.WriteFile(image, data, 0o644); err != nil {
+		t.Fatalf("Write crash image %s: %v", image, err)
+	}
+	return image
+}
+
+func sanitizeCrashImageLabel(label string) string {
+	var b strings.Builder
+	for _, r := range label {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	if b.Len() == 0 {
+		return "image"
+	}
+	return b.String()
 }
 
 func createSparseFile(t *testing.T, path string, size int64) {

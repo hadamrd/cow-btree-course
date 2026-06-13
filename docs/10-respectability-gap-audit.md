@@ -29,7 +29,7 @@ storage-engine artifact.
 
 | Gap | Why it matters | Current state | Next useful slice |
 | --- | --- | --- | --- |
-| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal matrix now covers before-data-sync, after-metadata-write, before-metadata-sync, growth before-file-size-sync/before-directory-sync/before-remap, and compact-shrink before-file-size-sync/before-directory-sync/before-remap boundaries. A full power-fail matrix is still missing. | Add a deterministic crash harness that reopens from copied on-disk images at each injected boundary. |
+| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication images as old-root before data sync and new-root after metadata write / before metadata sync. A full power-fail matrix is still missing. | Extend copied-image classification to growth, compact shrink, freelist/reclaim spills, and obsolete metadata-page generation reclaim. |
 | Transaction batching | Real engines commit a unit of work, not one implicit root publish per call. | `Put` and `Delete` mutate the live in-process root immediately; `Sync` is the durability boundary only for mmap. | Add an explicit write batch that stages multiple operations and publishes one revision. |
 | Cursor API | Real B+tree users need `seek`/`next` control, not only callback scans. | Closed in this pass with snapshot-backed forward cursors. | Extend cursors with bounded end keys, reverse traversal, and delete-through-cursor experiments. |
 | Comparator and key model | Production B+trees cannot be hardwired to Go string ordering. | Page cells store strings and compare byte-by-byte through string order. | Introduce byte-key APIs and an explicit comparator boundary before adding prefix compression. |
@@ -97,7 +97,10 @@ back mapped metadata bytes before returning. The growth matrix proves failed
 file-size/directory/remap boundaries preserve the old mapping, old capacity, old
 file size, and old durable root. The compact-shrink matrix proves failed
 file-size/directory/remap boundaries preserve the readable old mapping and
-restore the physical file size before returning. The next respectable step is a
-deterministic crash harness that snapshots the on-disk image at each boundary,
-reopens it in a fresh handle, and classifies whether the old root or new root is
-the valid recovery point.
+restore the physical file size before returning. The copied-image sync matrix
+now snapshots the database file at injected sync-publication boundaries, reopens
+the copied file through a fresh mmap handle, and classifies the recovery point:
+before-data-sync recovers the old root, while after-metadata-write and
+before-metadata-sync recover the new root. The next respectable step is to reuse
+that copied-image harness for growth, compact shrink, freelist/reclaim spills,
+and obsolete metadata-page generation reclaim.
