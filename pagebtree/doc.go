@@ -53,14 +53,16 @@
 // random-access kernel advice, and expose Advise so callers can pass random,
 // sequential, will-need, or normal-policy access-pattern hints to the mmap
 // mapping and, on Linux, the backing file's readahead policy without adding a
-// second Go heap page cache. DropMmapCache syncs writable mmap trees before
-// asking the kernel to evict clean mapped tree pages with MADV_DONTNEED and
-// Linux file-level DONTNEED advice. MmapCacheStats uses mincore on Unix to show
-// how many mapped OS pages are resident in that kernel cache. Current-tree Get also
-// keeps a small checksum-keyed cache of decoded branch routing metadata. That
-// derived cache is bounded by
-// least-recently-used eviction and can be sized through Options or MmapOptions;
-// Stats exposes its capacity, entries, hits, misses, invalidations, evictions,
-// range-prefetch window, range-prefetch hint-call count, and exact pages
-// covered by those hints.
+// second Go heap page cache. WarmMmapTree follows the current root and overflow
+// references, then asks the kernel to prefetch only those reachable page ranges.
+// DropMmapCache syncs writable mmap trees before asking the kernel to evict
+// clean mapped tree pages with MADV_DONTNEED and Linux file-level DONTNEED
+// advice. MmapCacheStats uses mincore on Unix to show how many mapped OS pages
+// are resident in that kernel cache. Current-tree Get also keeps a small
+// checksum-keyed cache of decoded branch routing metadata. That derived cache
+// is bounded by least-recently-used eviction and can be sized through Options
+// or MmapOptions; Stats exposes its capacity, entries, hits, misses,
+// invalidations, evictions, range-prefetch window, range-prefetch hint-call
+// count, and exact pages covered by those hints, plus mmap warm-up hint-call
+// and page counts.
 package pagebtree

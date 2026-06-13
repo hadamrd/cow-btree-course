@@ -22,6 +22,8 @@ type Tree struct {
 	rangePrefetchLeafWindow int
 	rangePrefetchHints      int
 	rangePrefetchPages      int
+	mmapWarmupHints         int
+	mmapWarmupPages         int
 }
 
 type Options struct {

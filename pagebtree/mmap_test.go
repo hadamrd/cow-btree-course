@@ -327,6 +327,9 @@ func TestMmapClosedTreeMaintenanceAPIsAreNoOps(t *testing.T) {
 	if err := tree.Advise(MmapAccessSequential); err != nil {
 		t.Fatalf("Advise after Close = %v, want nil", err)
 	}
+	if err := tree.WarmMmapTree(); err != nil {
+		t.Fatalf("WarmMmapTree after Close = %v, want nil", err)
+	}
 	if err := tree.DropMmapCache(); err != nil {
 		t.Fatalf("DropMmapCache after Close = %v, want nil", err)
 	}
@@ -1686,6 +1689,69 @@ func TestMmapDropCacheAdvisesBackingFileAfterSync(t *testing.T) {
 	want := []string{"data", "meta", fmt.Sprintf("file-drop:%d-%d", firstTreePageID, tree.nextPage)}
 	if !slices.Equal(events, want) {
 		t.Fatalf("DropMmapCache events = %v, want %v", events, want)
+	}
+}
+
+func TestMmapWarmTreeAdvisesOnlyReachablePages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 256})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 48; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	large := bytes.Repeat([]byte("x"), PageSize*2+77)
+	tree.Put("large", large)
+	for i := 0; i < 8; i++ {
+		if _, deleted := tree.Delete(fmt.Sprintf("key-%02d", i)); !deleted {
+			t.Fatalf("Delete(key-%02d) = false, want true", i)
+		}
+	}
+	if len(tree.free) == 0 {
+		t.Fatalf("test setup produced no reusable pages")
+	}
+
+	var advised []pageRange
+	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == MmapAccessWillNeed {
+			advised = append(advised, pageRange{start: start, end: end})
+		}
+	}
+
+	if err := tree.WarmMmapTree(); err != nil {
+		t.Fatalf("WarmMmapTree: %v", err)
+	}
+	if len(advised) == 0 {
+		t.Fatalf("WarmMmapTree issued no WILLNEED advice")
+	}
+
+	warmed := map[PageID]bool{}
+	for _, r := range advised {
+		for id := r.start; id < r.end; id++ {
+			warmed[id] = true
+		}
+	}
+	for _, id := range tree.free {
+		if warmed[id] {
+			t.Fatalf("WarmMmapTree advised reusable page %d from free list %v", id, tree.free)
+		}
+	}
+	stats := tree.Stats()
+	if len(warmed) != stats.Pages {
+		t.Fatalf("WarmMmapTree advised %d pages, want reachable page count %d", len(warmed), stats.Pages)
+	}
+	if stats.MmapWarmupHints != len(advised) {
+		t.Fatalf("MmapWarmupHints = %d, want observed hint calls %d", stats.MmapWarmupHints, len(advised))
+	}
+	if stats.MmapWarmupPages != len(warmed) {
+		t.Fatalf("MmapWarmupPages = %d, want observed warmed pages %d", stats.MmapWarmupPages, len(warmed))
+	}
+	if got, ok := tree.Get("large"); !ok || !bytes.Equal(got, large) {
+		t.Fatalf("Get(large) after WarmMmapTree len = %d, %v; want len %d, true", len(got), ok, len(large))
 	}
 }
 

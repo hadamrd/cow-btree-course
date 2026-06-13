@@ -39,6 +39,9 @@ func main() {
 	if err := reopened.Advise(pagebtree.MmapAccessRandom); err != nil {
 		log.Fatal(err)
 	}
+	if err := reopened.WarmMmapTree(); err != nil {
+		log.Fatal(err)
+	}
 
 	value, ok := reopened.Get("key-17")
 	if !ok {
@@ -69,12 +72,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	warmStats := reopened.Stats()
 
 	fmt.Printf("mmap file: %s\n", path)
 	fmt.Printf("file size before compact: %d bytes\n", beforeCompact.Size())
 	fmt.Printf("file size after compact:  %d bytes\n", afterCompact.Size())
 	fmt.Printf("key-17: %s\n", value)
 	fmt.Println("key-05: deleted")
+	fmt.Printf("warmup: %d hint calls over %d reachable pages\n", warmStats.MmapWarmupHints, warmStats.MmapWarmupPages)
 	fmt.Printf("stats: %+v\n", reopened.Stats())
 	fmt.Printf("cache before drop: %+v\n", cacheStats)
 	fmt.Printf("cache after drop:  %+v\n", afterDropStats)

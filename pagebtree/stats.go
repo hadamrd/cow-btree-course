@@ -24,6 +24,8 @@ type Stats struct {
 	RangePrefetchLeafWindow int
 	RangePrefetchHints      int
 	RangePrefetchPages      int
+	MmapWarmupHints         int
+	MmapWarmupPages         int
 }
 
 func statsFor(t *Tree) Stats {
@@ -47,6 +49,8 @@ func statsFor(t *Tree) Stats {
 	stats.RangePrefetchLeafWindow = t.rangePrefetchLeafWindow
 	stats.RangePrefetchHints = t.rangePrefetchHints
 	stats.RangePrefetchPages = t.rangePrefetchPages
+	stats.MmapWarmupHints = t.mmapWarmupHints
+	stats.MmapWarmupPages = t.mmapWarmupPages
 	return stats
 }
 

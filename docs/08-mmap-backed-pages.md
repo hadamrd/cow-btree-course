@@ -78,7 +78,9 @@ The important caching point is that mmap already uses the kernel page cache. Add
 
 These are hints, not contracts. The kernel can ignore them or combine them with its own readahead heuristics. Correctness comes from the page checksums, copy-on-write roots, and metadata validation, not from prefetch behavior.
 
-The package also exposes `DropMmapCache()`, which is intentionally separate from `Advise`. It is not an access pattern; it is an explicit cache-pressure operation. Writable mmap trees call `Sync` first, then issue `DONTNEED` advice over the allocated tree-page range: `MADV_DONTNEED` for the mapping and, on Linux, `FADV_DONTNEED` for the backing file. Read-only mmap handles skip the sync and issue the advice directly. Use it after a batch job, verification pass, or demo experiment when you want to tell the kernel that these clean mapped pages do not need to stay resident.
+The package also exposes `WarmMmapTree()` and `DropMmapCache()`, which are intentionally separate from `Advise`. `WarmMmapTree` is not a broad access pattern. It follows the current B+tree root, branch children, leaf overflow references, and overflow chains, then issues `WILLNEED` only for the reachable page IDs it found. Adjacent page IDs are coalesced before calling the kernel, and reusable/free pages are skipped because they are not reachable from the current root. `Stats.MmapWarmupHints` and `Stats.MmapWarmupPages` show the number of hint calls and exact database pages covered.
+
+`DropMmapCache()` is the opposite cache-pressure operation. Writable mmap trees call `Sync` first, then issue `DONTNEED` advice over the allocated tree-page range: `MADV_DONTNEED` for the mapping and, on Linux, `FADV_DONTNEED` for the backing file. Read-only mmap handles skip the sync and issue the advice directly. Use it after a batch job, verification pass, or demo experiment when you want to tell the kernel that these clean mapped pages do not need to stay resident.
 
 ## Coordinating With Linux Readahead
 
@@ -88,6 +90,7 @@ The implementation therefore uses four rules:
 
 - keep normal point lookups random-friendly with default `MADV_RANDOM` advice
 - prefetch only exact page ranges when the tree knows the next pages, such as linked leaves during a range scan
+- warm the current tree with `WarmMmapTree` when the caller explicitly wants reachable pages resident before a read-heavy phase
 - avoid prefetch when the tree cannot prove the hint is still correct, such as while active readers have deferred leaf-link repair
 - drop clean mapped pages only through the explicit `DropMmapCache` path, after writable state has been synced
 
@@ -98,6 +101,8 @@ The project also has a small user-space page cache, but it deliberately does not
 That derived cache is bounded with least-recently-used eviction. `DefaultPageCacheCapacity` is used unless a memory tree is created with `NewWithOptions` or an mmap tree is opened with `MmapOptions.PageCacheCapacity`. A negative capacity disables this derived cache, while still leaving raw bytes in the mmap and kernel page cache. `Stats` exposes `PageCacheCapacity`, `PageCacheEntries`, `PageCacheHits`, `PageCacheMisses`, `PageCacheInvalidations`, and `PageCacheEvictions` so this behavior is visible.
 
 `Range`, `RangeFrom(start)`, and `RangeBetween(start, end)` now use the B+tree's leaf links to make smaller hints than a whole-file sequential policy. `RangeFrom` first walks the branch pages to the leaf that can contain `start`, so it avoids scanning the left side of the tree before the lower bound. `RangeBetween` also stops before the exclusive `end` key and does not prefetch a next leaf if that leaf's first key is already outside the requested interval. When no active reader has deferred leaf-link repair, the scan walks leaf-to-leaf and asks the kernel to prefetch the configured window of exact next leaf pages with `MADV_WILLNEED`; adjacent page IDs inside that window are coalesced into one `madvise` range. It does not ask Linux to guess far ahead across the whole mapping. If readers are active and current leaf links may be stale, the scan falls back to the recursive branch walk and skips leaf prefetch. `Stats.RangePrefetchLeafWindow`, `Stats.RangePrefetchHints`, and `Stats.RangePrefetchPages` make the configured window, successful hint-call count, and exact pages covered visible while experimenting.
+
+`WarmMmapTree` is useful after opening a database or before a known read-heavy phase. It is more expensive than doing nothing because the tree must read page headers and child pointers to discover the exact reachable set, but that cost is deliberate: the hint is based on B+tree structure rather than Linux guessing from physical file offsets. It also includes reachable overflow pages, so large values are warmed with their leaf references, and it skips deleted/reusable pages even if they are still allocated inside the file.
 
 ```mermaid
 flowchart LR
@@ -138,6 +143,9 @@ flowchart TD
 
     C["MmapCacheStats"] --> M["mincore"]
     M --> K["resident OS pages"]
+
+    W["WarmMmapTree"] --> E["walk current root reachability"]
+    E --> N["MADV_WILLNEED exact tree + overflow pages"]
 
     X["DropMmapCache"] --> Y["Sync dirty pages + metadata"]
     Y --> Z["MADV_DONTNEED clean tree-page range"]
