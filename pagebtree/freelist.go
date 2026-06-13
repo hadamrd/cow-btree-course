@@ -2,7 +2,10 @@ package pagebtree
 
 import "errors"
 
-var ErrFreelist = errors.New("freelist invalid")
+var (
+	ErrFreelist      = errors.New("freelist invalid")
+	ErrActiveReaders = errors.New("tree has active readers")
+)
 
 type retiredPage struct {
 	id       PageID

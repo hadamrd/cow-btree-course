@@ -177,6 +177,45 @@ func TestMmapTreePersistsDeleteAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMmapCloseWaitsForActiveSnapshots(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 32})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	if _, replaced := tree.Put("alpha", []byte("one")); replaced {
+		t.Fatalf("first Put replaced existing key")
+	}
+
+	snapshot := tree.Snapshot()
+	err = tree.Close()
+	if !errors.Is(err, ErrActiveReaders) {
+		t.Fatalf("Close with active snapshot error = %v, want ErrActiveReaders", err)
+	}
+
+	if got, ok := tree.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("tree Get after refused Close = %q, %v; want one, true", got, ok)
+	}
+	if got, ok := snapshot.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("snapshot Get after refused Close = %q, %v; want one, true", got, ok)
+	}
+
+	snapshot.Close()
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close after snapshot release: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after close: %v", err)
+	}
+	defer reopened.Close()
+	if got, ok := reopened.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("reopened Get(alpha) = %q, %v; want one, true", got, ok)
+	}
+}
+
 func TestMmapTreeGrowsMappingWhenPageCapacityIsExceeded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

@@ -20,7 +20,8 @@
 // allocation reaches the current capacity. File-size changes from growth and
 // compaction sync the data file and parent directory. Compact can trim unused
 // mapped capacity and a suffix of already-free page ids when no snapshot is
-// active.
+// active. Close returns ErrActiveReaders for mmap-backed trees while snapshots
+// are active, because those snapshots still read slices backed by the mapping.
 // Reopen validation checks metadata format, version, database page size,
 // persisted degree, and bounds against the mapped file and declared capacity,
 // page checksums, and slotted-page structure before decoding reachable cells,

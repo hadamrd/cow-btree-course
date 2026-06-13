@@ -248,6 +248,9 @@ func (t *Tree) Close() error {
 	if t == nil || t.closed {
 		return nil
 	}
+	if t.arena != nil && t.activeReaderCount() > 0 {
+		return ErrActiveReaders
+	}
 	t.closed = true
 	if !t.readOnly {
 		if err := t.Sync(); err != nil {
