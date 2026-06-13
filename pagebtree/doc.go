@@ -16,7 +16,10 @@
 // Put and Delete publish new roots through copy-on-write. WriteBatch stages
 // multiple point Put/Delete operations, keeps the current root hidden until
 // Commit, then publishes one new revision if any staged operation changed the
-// tree. Snapshots and cursors keep reading their older roots. A cursor opened
+// tree. CommitDetailed reports per-operation old values and explicit invalid
+// commit errors, and restores the pre-commit tree state if a staged mutation
+// panics before publication. Snapshots and cursors keep reading their older
+// roots. A cursor opened
 // from Tree owns a snapshot and must be closed to release the reader pin; a
 // cursor opened from Snapshot borrows that snapshot and does not register
 // another reader. Leaf sibling-link repair is deferred while a snapshot or

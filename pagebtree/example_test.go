@@ -52,6 +52,25 @@ func ExampleTree_Batch() {
 	// 1
 }
 
+func ExampleWriteBatch_CommitDetailed() {
+	tree := pagebtree.New(2)
+	tree.Put("alpha", []byte("one"))
+
+	batch := tree.Batch()
+	batch.Put("alpha", []byte("two"))
+	batch.Delete("missing")
+	result, _ := batch.CommitDetailed()
+
+	fmt.Println(result.Changed)
+	for _, op := range result.Operations {
+		fmt.Println(op.Kind, op.Key, op.Existed, string(op.OldValue), op.Changed)
+	}
+	// Output:
+	// true
+	// put alpha true one true
+	// delete missing false  false
+}
+
 func ExampleTree_RangeFrom() {
 	tree := pagebtree.New(2)
 	for _, key := range []string{"alpha", "bravo", "charlie", "delta"} {

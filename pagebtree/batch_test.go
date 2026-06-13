@@ -1,6 +1,8 @@
 package pagebtree
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -72,6 +74,139 @@ func TestWriteBatchRollbackAndEmptyCommitDoNotPublishRevision(t *testing.T) {
 	}
 	if got := tree.Revision(); got != beforeRevision {
 		t.Fatalf("Revision after empty Commit = %d, want %d", got, beforeRevision)
+	}
+}
+
+func TestWriteBatchCommitDetailedReportsOperationResults(t *testing.T) {
+	tree := New(2)
+	tree.Put("alpha", []byte("one"))
+	beforeRevision := tree.Revision()
+
+	batch := tree.Batch()
+	batch.Put("alpha", []byte("two"))
+	batch.Delete("missing")
+	batch.Delete("alpha")
+	batch.Put("bravo", []byte("three"))
+
+	result, err := batch.CommitDetailed()
+	if err != nil {
+		t.Fatalf("CommitDetailed error: %v", err)
+	}
+	if !result.Changed {
+		t.Fatalf("CommitDetailed Changed = false, want true")
+	}
+	if got := tree.Revision(); got != beforeRevision+1 {
+		t.Fatalf("Revision after CommitDetailed = %d, want %d", got, beforeRevision+1)
+	}
+	if len(result.Operations) != 4 {
+		t.Fatalf("CommitDetailed operations = %d, want 4", len(result.Operations))
+	}
+
+	check := func(index int, kind BatchOperation, key string, existed bool, old string, changed bool) {
+		t.Helper()
+		got := result.Operations[index]
+		if got.Kind != kind || got.Key != key || got.Existed != existed || got.Changed != changed {
+			t.Fatalf("operation %d = %+v, want kind=%s key=%s existed=%v changed=%v", index, got, kind, key, existed, changed)
+		}
+		if old == "" {
+			if got.OldValue != nil {
+				t.Fatalf("operation %d OldValue = %q, want nil", index, got.OldValue)
+			}
+			return
+		}
+		if string(got.OldValue) != old {
+			t.Fatalf("operation %d OldValue = %q, want %q", index, got.OldValue, old)
+		}
+		got.OldValue[0] = 'X'
+	}
+
+	check(0, BatchPutOperation, "alpha", true, "one", true)
+	check(1, BatchDeleteOperation, "missing", false, "", false)
+	check(2, BatchDeleteOperation, "alpha", true, "two", true)
+	check(3, BatchPutOperation, "bravo", false, "", true)
+
+	if got, ok := tree.Get("alpha"); ok {
+		t.Fatalf("Get(alpha) after CommitDetailed = %q, true; want deleted", got)
+	}
+	if got, ok := tree.Get("bravo"); !ok || string(got) != "three" {
+		t.Fatalf("Get(bravo) after CommitDetailed = %q, %v; want three, true", got, ok)
+	}
+}
+
+func TestWriteBatchCommitDetailedReturnsExplicitNoOpErrors(t *testing.T) {
+	tree := New(2)
+	rolledBack := tree.Batch()
+	rolledBack.Put("alpha", []byte("one"))
+	rolledBack.Rollback()
+	if _, err := rolledBack.CommitDetailed(); !errors.Is(err, ErrBatchClosed) {
+		t.Fatalf("CommitDetailed after Rollback error = %v, want ErrBatchClosed", err)
+	}
+
+	readOnly := &Tree{readOnly: true}
+	readOnlyBatch := readOnly.Batch()
+	readOnlyBatch.Put("alpha", []byte("one"))
+	if _, err := readOnlyBatch.CommitDetailed(); !errors.Is(err, ErrReadOnly) {
+		t.Fatalf("CommitDetailed read-only error = %v, want ErrReadOnly", err)
+	}
+
+	closed := New(2)
+	closed.closed = true
+	closedBatch := closed.Batch()
+	closedBatch.Put("alpha", []byte("one"))
+	if _, err := closedBatch.CommitDetailed(); !errors.Is(err, ErrTreeClosed) {
+		t.Fatalf("CommitDetailed closed tree error = %v, want ErrTreeClosed", err)
+	}
+}
+
+func TestMmapWriteBatchCommitDetailedRollsBackOnPanic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+
+	beforeRevision := tree.Revision()
+	beforeRoot := tree.root
+	beforeNextPage := tree.nextPage
+	beforeDirty := len(tree.arena.dirtyPages)
+	forced := fmt.Errorf("forced growth panic")
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == mmapFaultBeforeRemap {
+			return forced
+		}
+		return nil
+	}
+
+	batch := tree.Batch()
+	for i := 0; i < 32; i++ {
+		batch.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	result, err := batch.CommitDetailed()
+	if !errors.Is(err, ErrBatchPanic) {
+		t.Fatalf("CommitDetailed panic error = %v, want ErrBatchPanic", err)
+	}
+	if result.Changed {
+		t.Fatalf("CommitDetailed Changed after panic = true, want false")
+	}
+	if got := tree.Revision(); got != beforeRevision {
+		t.Fatalf("Revision after batch panic = %d, want %d", got, beforeRevision)
+	}
+	if tree.root != beforeRoot || tree.nextPage != beforeNextPage {
+		t.Fatalf("tree geometry after batch panic = root:%d next:%d, want root:%d next:%d", tree.root, tree.nextPage, beforeRoot, beforeNextPage)
+	}
+	if got, ok := tree.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("Get(alpha) after batch panic = %q, %v; want one, true", got, ok)
+	}
+	if _, ok := tree.Get("key-00"); ok {
+		t.Fatalf("Get(key-00) after batch panic = true, want rollback")
+	}
+	if got := len(tree.arena.dirtyPages); got != beforeDirty {
+		t.Fatalf("dirty pages after batch panic = %d, want %d", got, beforeDirty)
 	}
 }
 

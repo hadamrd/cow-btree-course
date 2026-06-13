@@ -585,7 +585,8 @@ Serious pieces in this repository:
 - Layout and invariant validation.
 - Kernel page-cache hints and cache-residency stats.
 - Bounded derived branch-routing cache.
-- Explicit point write batches that publish one revision.
+- Explicit point write batches that publish one revision and can report
+  per-operation old values through `CommitDetailed`.
 - A sorted-map model/fuzz target for put, delete, batch, range, cursor, and
   integrity-check operation streams.
 - An mmap sorted-map model/fuzz target that injects sync/close/reopen cycles
@@ -600,8 +601,9 @@ Serious pieces in this repository:
 Still research or incomplete compared with a production engine:
 
 - No concurrency-heavy lock manager.
-- No full ACID transaction API; point write batches exist, but richer
-  transaction ergonomics and failure rollback remain research work.
+- No full ACID transaction API; point write batches exist with detailed commit
+  reporting and panic rollback, but cursor/range-aware writes remain research
+  work.
 - No sparse-file hole punching.
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with true power-fail fault injection;
