@@ -28,7 +28,7 @@ Each page uses the classic slotted-page shape:
 
 ```mermaid
 flowchart LR
-    H["header<br/>flags, slot count, freeUpper, leftmost child, checksum"] --> S["slot directory<br/>offset, keyLen, valueLen"]
+    H["header<br/>flags, slot count, freeUpper, leftmost child, checksum"] --> S["slot directory<br/>offset, keyLen, valueLen, flags"]
     S --> F["free space"]
     C["cells<br/>key bytes + value bytes"] --> F
 ```
@@ -102,6 +102,21 @@ For a lookup:
 
 That rule matches B+tree separator semantics: branch keys route the search, while actual values live in leaf pages.
 
+## Overflow Values
+
+Small values live directly inside leaf cells. A large value would crowd out the slot directory and make page splits about byte capacity instead of tree shape. To keep the teaching tree simple while still handling real byte slices, large values are stored in overflow pages:
+
+```mermaid
+flowchart LR
+    Leaf["leaf slot<br/>key=large<br/>value=OVF1 ref"] --> O1["overflow page 41<br/>payload chunk"]
+    O1 --> O2["overflow page 42<br/>payload chunk"]
+    O2 --> O3["overflow page 43<br/>payload chunk"]
+```
+
+The leaf slot carries an overflow flag. When that flag is set, the cell value is a small `OVF1` reference containing the first overflow page id and the logical value length. When the flag is not set, the cell value is ordinary user bytes, even if those bytes happen to start with `OVF1`. Each overflow page stores a payload chunk and the next overflow page id. `Get` follows that chain and returns a fresh byte slice to the caller.
+
+Overflow pages are immutable once published. When a large value is replaced, the old overflow chain is retired with the same reader-pinned freelist rules as copied tree pages, so older snapshots can still read the old bytes until they close.
+
 ## Snapshot Proof
 
 ```mermaid
@@ -127,7 +142,7 @@ The page package models page identity, root publication, and slotted cell storag
 - Pages are kept in an in-memory map rather than written to disk.
 - The implementation rewrites a copied page from decoded entries during insertion; it does not do in-place cell compaction.
 - `Get` searches slots directly, but insertion still decodes page contents before rewriting the copied page.
-- `PageSize` is enforced by the slotted writer, but the examples use tiny degree values so page overflow is not the main teaching problem.
+- Large values use overflow pages, but leaf pages do not yet rebalance based on byte fullness.
 - Branch pages contain separator keys and child page ids; values live in leaves.
 - There is no deletion or disk persistence yet.
 

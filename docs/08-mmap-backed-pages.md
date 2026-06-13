@@ -48,7 +48,7 @@ offset = pageID * PageSize
 size   = PageSize
 ```
 
-Tree pages also carry CRC32 checksums in their slotted-page header. On reopen, `OpenMmap` walks the pages reachable from the chosen root and rejects corruption before serving reads.
+Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from the chosen root, including overflow chains referenced by leaf values, and rejects corruption before serving reads.
 
 ## Why Mmap Helps
 
@@ -85,9 +85,9 @@ This chapter makes the project more serious, but it is still not a production da
 
 - freelist state is persisted in the metadata page, but only with a bounded educational encoding
 - writes call `msync`, but there is no complete crash-safe write-order protocol
-- metadata pages and reachable tree pages are checksummed, but there is no page-level repair
+- metadata pages, reachable tree pages, and reachable overflow pages are checksummed, but there is no page-level repair
 - file locking is exclusive-writer only; there is no shared-reader lock table
-- there are no overflow pages for large records
+- overflow pages are linear chains, not a compact extent/tree structure
 - `Get` searches slot directories directly, but insertion still rewrites copied pages from decoded entries
 - page capacity is fixed at open time
 

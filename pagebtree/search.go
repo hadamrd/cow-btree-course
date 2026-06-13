@@ -6,7 +6,11 @@ func searchPage(pages map[PageID]*page, root PageID, key string) ([]byte, bool) 
 	for root != 0 {
 		p := pages[root]
 		if p.isLeaf() {
-			return p.searchLeafValue(key)
+			raw, flags, found := p.searchLeafCell(key)
+			if !found {
+				return nil, false
+			}
+			return resolveLeafValue(pages, raw, flags), true
 		}
 
 		root = p.searchBranchChild(key)
@@ -22,7 +26,7 @@ func rangePage(pages map[PageID]*page, root PageID, visit func(string, []byte) b
 	p := pages[root]
 	if p.isLeaf() {
 		for _, entry := range p.leafEntries() {
-			if !visit(entry.key, cloneBytes(entry.value)) {
+			if !visit(entry.key, resolveLeafValue(pages, entry.value, entry.slotFlags)) {
 				return false
 			}
 		}

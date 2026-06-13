@@ -25,14 +25,16 @@ const (
 	headerLeftmostOffset  = 8
 	headerChecksumOffset  = 16
 
-	flagLeaf   = uint16(0x01)
-	flagBranch = uint16(0x02)
+	flagLeaf     = uint16(0x01)
+	flagBranch   = uint16(0x02)
+	flagOverflow = uint16(0x04)
 )
 
 type slot struct {
 	offset   uint16
 	keyLen   uint16
 	valueLen uint16
+	flags    uint16
 }
 
 type page struct {
@@ -79,6 +81,10 @@ func (p *page) isLeaf() bool {
 
 func (p *page) isBranch() bool {
 	return p.flags()&flagBranch != 0
+}
+
+func (p *page) isOverflow() bool {
+	return p.flags()&flagOverflow != 0
 }
 
 func (p *page) slotCount() uint16 {
@@ -134,6 +140,7 @@ func (p *page) readSlot(index int) slot {
 		offset:   binary.LittleEndian.Uint16(p.data[base:]),
 		keyLen:   binary.LittleEndian.Uint16(p.data[base+2:]),
 		valueLen: binary.LittleEndian.Uint16(p.data[base+4:]),
+		flags:    binary.LittleEndian.Uint16(p.data[base+6:]),
 	}
 }
 
@@ -142,7 +149,7 @@ func (p *page) writeSlot(index int, s slot) {
 	binary.LittleEndian.PutUint16(p.data[base:], s.offset)
 	binary.LittleEndian.PutUint16(p.data[base+2:], s.keyLen)
 	binary.LittleEndian.PutUint16(p.data[base+4:], s.valueLen)
-	binary.LittleEndian.PutUint16(p.data[base+6:], 0)
+	binary.LittleEndian.PutUint16(p.data[base+6:], s.flags)
 }
 
 func (p *page) readCell(index int) (string, []byte) {
@@ -195,11 +202,27 @@ func (p *page) compareCellKey(index int, key string) int {
 }
 
 func (p *page) searchLeafValue(key string) ([]byte, bool) {
-	index, found := p.searchSlot(key)
+	value, _, found := p.searchLeafCell(key)
 	if !found {
 		return nil, false
 	}
-	return p.readCellValue(index), true
+	return value, true
+}
+
+func (p *page) searchLeafCell(key string) ([]byte, uint16, bool) {
+	index, found := p.searchSlot(key)
+	if !found {
+		return nil, 0, false
+	}
+	return p.readCellValue(index), p.readSlot(index).flags, true
+}
+
+func (p *page) overflowRef(key string) (overflowRef, bool) {
+	raw, flags, found := p.searchLeafCell(key)
+	if !found {
+		return overflowRef{}, false
+	}
+	return decodeOverflowRef(raw, flags)
 }
 
 func (p *page) searchBranchChild(key string) PageID {
@@ -230,6 +253,10 @@ func (p *page) searchSlot(key string) (int, bool) {
 }
 
 func (p *page) appendCell(key string, value []byte) bool {
+	return p.appendCellWithFlags(key, value, 0)
+}
+
+func (p *page) appendCellWithFlags(key string, value []byte, flags uint16) bool {
 	cellSize := len(key) + len(value)
 	needed := slotSize + cellSize
 	if int(p.freeUpper())-(pageHeaderSize+int(p.slotCount())*slotSize) < needed {
@@ -245,6 +272,7 @@ func (p *page) appendCell(key string, value []byte) bool {
 		offset:   uint16(cellOffset),
 		keyLen:   uint16(len(key)),
 		valueLen: uint16(len(value)),
+		flags:    flags,
 	})
 	p.setFreeUpper(cellOffset)
 	p.setSlotCount(uint16(slotIndex + 1))
@@ -294,8 +322,9 @@ func cloneValues(values [][]byte) [][]byte {
 func (p *page) leafEntries() []leafEntry {
 	entries := make([]leafEntry, 0, p.slotCount())
 	for i := 0; i < int(p.slotCount()); i++ {
+		slot := p.readSlot(i)
 		key, value := p.readCell(i)
-		entries = append(entries, leafEntry{key: key, value: value})
+		entries = append(entries, leafEntry{key: key, value: value, encoded: true, slotFlags: slot.flags})
 	}
 	return entries
 }

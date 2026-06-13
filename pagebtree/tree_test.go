@@ -1,6 +1,7 @@
 package pagebtree
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"testing"
@@ -259,6 +260,72 @@ func TestBranchSlotSearchChoosesChildPageID(t *testing.T) {
 		if got := branch.searchBranchChild(tc.key); got != tc.want {
 			t.Fatalf("searchBranchChild(%q) = %d, want %d", tc.key, got, tc.want)
 		}
+	}
+}
+
+func TestLargeValuesUseOverflowPagesAndRemainCopyOnWrite(t *testing.T) {
+	tree := New(2)
+	large := bytes.Repeat([]byte("x"), PageSize*2+123)
+
+	tree.Put("large", large)
+
+	got, ok := tree.Get("large")
+	if !ok {
+		t.Fatalf("Get missed large value")
+	}
+	if !bytes.Equal(got, large) {
+		t.Fatalf("large value length/content mismatch: got len %d, want len %d", len(got), len(large))
+	}
+	got[0] = 'X'
+	again, ok := tree.Get("large")
+	if !ok || !bytes.Equal(again, large) {
+		t.Fatalf("large value read leaked mutable storage")
+	}
+	if tree.Stats().Pages < 3 {
+		t.Fatalf("Pages = %d, want leaf plus overflow pages", tree.Stats().Pages)
+	}
+
+	snapshot := tree.Snapshot()
+	updated := bytes.Repeat([]byte("y"), PageSize+77)
+	tree.Put("large", updated)
+	withReader := tree.Stats()
+	if withReader.RetiredPages == 0 {
+		t.Fatalf("RetiredPages = 0 with reader open after replacing overflow value")
+	}
+	if withReader.FreePages != 0 {
+		t.Fatalf("FreePages = %d with reader open, want 0", withReader.FreePages)
+	}
+
+	old, ok := snapshot.Get("large")
+	if !ok || !bytes.Equal(old, large) {
+		t.Fatalf("snapshot large value mismatch: len %d, ok %v", len(old), ok)
+	}
+	current, ok := tree.Get("large")
+	if !ok || !bytes.Equal(current, updated) {
+		t.Fatalf("current large value mismatch after update: len %d, ok %v", len(current), ok)
+	}
+	snapshot.Close()
+	afterClose := tree.Stats()
+	if afterClose.FreePages == 0 {
+		t.Fatalf("FreePages = 0 after reader close, want retired overflow pages reusable")
+	}
+}
+
+func TestInlineValueThatLooksLikeOverflowReferenceStaysInline(t *testing.T) {
+	tree := New(2)
+	value := []byte("OVF1not-a-page-ref!!")
+	if len(value) != overflowRefSize {
+		t.Fatalf("test value length = %d, want %d", len(value), overflowRefSize)
+	}
+
+	tree.Put("looks-like-ref", value)
+
+	got, ok := tree.Get("looks-like-ref")
+	if !ok {
+		t.Fatalf("Get missed inline value")
+	}
+	if !bytes.Equal(got, value) {
+		t.Fatalf("Get returned %q, want %q", got, value)
 	}
 }
 

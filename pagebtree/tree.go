@@ -49,7 +49,7 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 	if t.root == 0 {
 		id := t.allocPage()
 		leaf := t.newPage(id, flagLeaf)
-		mustWriteLeafEntries(leaf, []leafEntry{{key: key, value: cloneBytes(value)}})
+		t.writeLeafEntries(leaf, []leafEntry{{key: key, value: cloneBytes(value)}})
 		t.pages[id] = leaf
 		t.root = id
 		t.length = 1

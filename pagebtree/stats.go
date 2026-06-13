@@ -69,6 +69,10 @@ func countPagesAndKeys(pages map[PageID]*page, root PageID, seen map[PageID]bool
 	separatorCount := 0
 	if p.isLeaf() {
 		keyCount = int(p.slotCount())
+		for _, entry := range p.leafEntries() {
+			overflowPages := countOverflowPages(pages, entry.value, entry.slotFlags, seen)
+			pageCount += overflowPages
+		}
 	} else {
 		separatorCount = int(p.slotCount())
 	}
@@ -79,4 +83,18 @@ func countPagesAndKeys(pages map[PageID]*page, root PageID, seen map[PageID]bool
 		separatorCount += childSeparators
 	}
 	return pageCount, keyCount, separatorCount
+}
+
+func countOverflowPages(pages map[PageID]*page, raw []byte, flags uint16, seen map[PageID]bool) int {
+	ref, ok := decodeOverflowRef(raw, flags)
+	if !ok {
+		return 0
+	}
+	count := 0
+	for id := ref.first; id != 0 && !seen[id]; {
+		seen[id] = true
+		count++
+		id = pages[id].overflowNext()
+	}
+	return count
 }

@@ -336,6 +336,11 @@ func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
 		return fmt.Errorf("%w: page %d", ErrPageChecksum, id)
 	}
 	if p.isLeaf() {
+		for _, entry := range p.leafEntries() {
+			if err := t.validateOverflowValue(entry.value, entry.slotFlags, seen); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	if !p.isBranch() {
@@ -345,6 +350,39 @@ func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
 		if err := t.validatePage(child, seen); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (t *Tree) validateOverflowValue(raw []byte, flags uint16, seen map[PageID]bool) error {
+	ref, ok := decodeOverflowRef(raw, flags)
+	if !ok {
+		return nil
+	}
+	var length int
+	for id := ref.first; id != 0; {
+		if seen[id] {
+			return fmt.Errorf("overflow chain loops through page %d", id)
+		}
+		seen[id] = true
+		p := t.pages[id]
+		if p == nil {
+			return fmt.Errorf("reachable overflow page %d is missing", id)
+		}
+		if !p.validChecksum() {
+			return fmt.Errorf("%w: page %d", ErrPageChecksum, id)
+		}
+		if !p.isOverflow() {
+			return fmt.Errorf("overflow page %d has invalid flags %x", id, p.flags())
+		}
+		if p.overflowPayloadLen() > overflowPayloadSize {
+			return fmt.Errorf("overflow page %d payload length %d exceeds capacity", id, p.overflowPayloadLen())
+		}
+		length += p.overflowPayloadLen()
+		id = p.overflowNext()
+	}
+	if length < ref.length {
+		return fmt.Errorf("overflow chain length %d is shorter than referenced length %d", length, ref.length)
 	}
 	return nil
 }

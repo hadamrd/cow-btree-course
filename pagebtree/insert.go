@@ -3,8 +3,10 @@ package pagebtree
 import "slices"
 
 type leafEntry struct {
-	key   string
-	value []byte
+	key       string
+	value     []byte
+	encoded   bool
+	slotFlags uint16
 }
 
 type splitResult struct {
@@ -28,15 +30,16 @@ func (t *Tree) insertLeaf(pageID PageID, key string, value []byte) ([]byte, bool
 		return compareStrings(entry.key, key)
 	})
 	if found {
-		old := cloneBytes(entries[index].value)
-		entries[index].value = cloneBytes(value)
-		mustWriteLeafEntries(p, entries)
+		old := resolveLeafValue(t.pages, entries[index].value, entries[index].slotFlags)
+		t.retireOverflowValue(entries[index].value, entries[index].slotFlags)
+		entries[index] = leafEntry{key: key, value: cloneBytes(value)}
+		t.writeLeafEntries(p, entries)
 		return old, true, nil
 	}
 
 	insertAt(&entries, index, leafEntry{key: key, value: cloneBytes(value)})
 	if len(entries) <= maxKeys(t.degree) {
-		mustWriteLeafEntries(p, entries)
+		t.writeLeafEntries(p, entries)
 		return nil, false, nil
 	}
 
@@ -44,8 +47,8 @@ func (t *Tree) insertLeaf(pageID PageID, key string, value []byte) ([]byte, bool
 	rightID := t.allocPage()
 	right := t.newPage(rightID, flagLeaf)
 	t.pages[rightID] = right
-	mustWriteLeafEntries(p, entries[:mid])
-	mustWriteLeafEntries(right, entries[mid:])
+	t.writeLeafEntries(p, entries[:mid])
+	t.writeLeafEntries(right, entries[mid:])
 	return nil, false, &splitResult{separator: entries[mid].key, right: rightID}
 }
 
@@ -97,6 +100,21 @@ func mustWriteLeafEntries(p *page, entries []leafEntry) {
 	p.reset(flagLeaf)
 	for _, entry := range entries {
 		if !p.appendCell(entry.key, entry.value) {
+			panic("leaf page overflow")
+		}
+	}
+	p.updateChecksum()
+}
+
+func (t *Tree) writeLeafEntries(p *page, entries []leafEntry) {
+	p.reset(flagLeaf)
+	for _, entry := range entries {
+		value := entry.value
+		flags := entry.slotFlags
+		if !entry.encoded {
+			value, flags = t.leafCellValue(entry.key, entry.value)
+		}
+		if !p.appendCellWithFlags(entry.key, value, flags) {
 			panic("leaf page overflow")
 		}
 	}
