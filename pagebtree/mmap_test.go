@@ -2383,6 +2383,123 @@ func TestMmapSyncPersistsFreelistLargerThanMetadataPage(t *testing.T) {
 	}
 }
 
+func TestMmapLargeFreelistCrashImageMatrixClassifiesRecoveryRoot(t *testing.T) {
+	tests := []struct {
+		name          string
+		fault         mmapFaultPoint
+		wantFreelist  bool
+		wantPointSeen []mmapFaultPoint
+	}{
+		{
+			name:          "before data sync",
+			fault:         mmapFaultBeforeDataSync,
+			wantFreelist:  false,
+			wantPointSeen: []mmapFaultPoint{mmapFaultBeforeDataSync},
+		},
+		{
+			name:         "after metadata write",
+			fault:        mmapFaultAfterMetaWrite,
+			wantFreelist: true,
+			wantPointSeen: []mmapFaultPoint{
+				mmapFaultBeforeDataSync,
+				mmapFaultAfterMetaWrite,
+			},
+		},
+		{
+			name:         "before metadata sync",
+			fault:        mmapFaultBeforeMetaSync,
+			wantFreelist: true,
+			wantPointSeen: []mmapFaultPoint{
+				mmapFaultBeforeDataSync,
+				mmapFaultAfterMetaWrite,
+				mmapFaultBeforeMetaSync,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertMmapLargeFreelistCrashImageClassifiesRecoveryRoot(t, tt.fault, tt.wantFreelist, tt.wantPointSeen)
+		})
+	}
+}
+
+func assertMmapLargeFreelistCrashImageClassifiesRecoveryRoot(t *testing.T, fault mmapFaultPoint, wantFreelist bool, wantPointSeen []mmapFaultPoint) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "course.db")
+	forced := fmt.Errorf("forced %s fault", fault)
+	freeCount := maxMetaFreePages + 17
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 2048})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	clear(tree.arena.dirtyPages)
+
+	tree.free = make([]PageID, freeCount)
+	for i := range tree.free {
+		tree.free[i] = firstTreePageID + 1 + PageID(i)
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(freeCount)
+
+	var crashImage string
+	var points []mmapFaultPoint
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		points = append(points, point)
+		if point == fault {
+			crashImage = copyMmapCrashImage(t, path, string(point))
+			return forced
+		}
+		return nil
+	}
+
+	err = tree.Sync()
+	if !errors.Is(err, forced) {
+		t.Fatalf("Sync fault error = %v, want forced fault", err)
+	}
+	if !slices.Equal(points, wantPointSeen) {
+		t.Fatalf("large-freelist fault points = %v, want %v", points, wantPointSeen)
+	}
+	if crashImage == "" {
+		t.Fatalf("fault %s did not capture a crash image", fault)
+	}
+	if err := tree.arena.close(); err != nil {
+		t.Fatalf("forced crash close arena: %v", err)
+	}
+	tree.closed = true
+
+	recovered, err := OpenMmap(crashImage, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap large-freelist crash image for %s: %v", fault, err)
+	}
+	defer recovered.Close()
+	if got, ok := recovered.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("large-freelist crash image Get(alpha) after %s = %q, %v; want one, true", fault, got, ok)
+	}
+	if !wantFreelist {
+		if got := recovered.Stats().FreePages; got != 0 {
+			t.Fatalf("large-freelist crash image FreePages after %s = %d, want old metadata with none", fault, got)
+		}
+		return
+	}
+	if got := recovered.Stats().FreePages; got != freeCount {
+		t.Fatalf("large-freelist crash image FreePages after %s = %d, want %d", fault, got, freeCount)
+	}
+	allocatedBeforeReuse := recovered.Stats().AllocatedPages
+	recovered.Put("bravo", []byte("two"))
+	afterReuse := recovered.Stats()
+	if afterReuse.ReusedPages == 0 {
+		t.Fatalf("large-freelist crash image ReusedPages after %s = 0, want persisted freelist reuse", fault)
+	}
+	if afterReuse.AllocatedPages > allocatedBeforeReuse+1 {
+		t.Fatalf("large-freelist crash image AllocatedPages grew from %d to %d despite persisted freelist after %s", allocatedBeforeReuse, afterReuse.AllocatedPages, fault)
+	}
+}
+
 func TestMmapSyncReclaimsObsoleteFreelistPagesAfterBothMetaPagesAdvance(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
