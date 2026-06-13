@@ -14,7 +14,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var ErrDatabaseLocked = errors.New("mmap tree database is already locked")
+var (
+	ErrDatabaseLocked = errors.New("mmap tree database is already locked")
+	ErrMetaInvariant  = errors.New("metadata invariant invalid")
+)
 
 const (
 	metaMagic        = "COWBTREE"
@@ -569,6 +572,10 @@ func (t *Tree) loadMeta() error {
 			lastErr = err
 			continue
 		}
+		if err := t.validateMetaInvariants(record); err != nil {
+			lastErr = err
+			continue
+		}
 		return nil
 	}
 	if lastErr != nil {
@@ -730,6 +737,37 @@ func (t *Tree) validateFreelist(free []PageID, reachable map[PageID]bool) error 
 		seenFree[id] = true
 	}
 	return nil
+}
+
+func (t *Tree) validateMetaInvariants(record metaRecord) error {
+	if record.length < 0 {
+		return fmt.Errorf("%w: length %d is negative", ErrMetaInvariant, record.length)
+	}
+	keyCount := t.countReachableKeys(t.root, map[PageID]bool{})
+	if keyCount != record.length {
+		return fmt.Errorf("%w: length %d does not match reachable key count %d", ErrMetaInvariant, record.length, keyCount)
+	}
+	return nil
+}
+
+func (t *Tree) countReachableKeys(id PageID, seen map[PageID]bool) int {
+	if id == 0 || seen[id] {
+		return 0
+	}
+	seen[id] = true
+
+	p := t.pages[id]
+	if p == nil {
+		return 0
+	}
+	if p.isLeaf() {
+		return int(p.slotCount())
+	}
+	count := 0
+	for _, child := range p.childIDs() {
+		count += t.countReachableKeys(child, seen)
+	}
+	return count
 }
 
 func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {

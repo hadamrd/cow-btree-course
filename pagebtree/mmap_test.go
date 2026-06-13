@@ -892,6 +892,35 @@ func TestMmapTreeRejectsOutOfRangePersistedFreelistEntry(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsMetadataLengthThatDoesNotMatchReachableKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 30; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	replaceNewestMetaRecord(t, path, func(record metaRecord) metaRecord {
+		record.length++
+		return record
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with mismatched metadata length")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap metadata length error = %v, want ErrMetaInvariant", err)
+	}
+}
+
 func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -1251,6 +1280,15 @@ func keepOnlyNewestMetaPage(t *testing.T, path string) metaRecord {
 func replaceNewestMetaFreeList(t *testing.T, path string, free []PageID) metaRecord {
 	t.Helper()
 
+	return replaceNewestMetaRecord(t, path, func(record metaRecord) metaRecord {
+		record.free = append([]PageID(nil), free...)
+		return record
+	})
+}
+
+func replaceNewestMetaRecord(t *testing.T, path string, rewrite func(metaRecord) metaRecord) metaRecord {
+	t.Helper()
+
 	index, record := newestMetaPage(t, path)
 	for candidateIndex := 0; candidateIndex < metaPageCount; candidateIndex++ {
 		if candidateIndex != index {
@@ -1258,7 +1296,7 @@ func replaceNewestMetaFreeList(t *testing.T, path string, free []PageID) metaRec
 		}
 	}
 
-	record.free = append([]PageID(nil), free...)
+	record = rewrite(record)
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatalf("OpenFile rewrite meta: %v", err)

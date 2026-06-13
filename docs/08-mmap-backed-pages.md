@@ -37,7 +37,7 @@ Pages `0` and `1` are alternating metadata pages:
 - reusable page IDs
 - CRC32 checksum
 
-`Sync` is the explicit durability boundary. Writable mmap pages are marked dirty when copy-on-write allocates or reuses their page IDs. `Sync` flushes those dirty tree and overflow page bytes first, then writes the metadata page selected by `revision % 2`, then flushes that metadata page. `Close` calls `Sync` for writable trees. On reopen, the tree validates both metadata checksums, then tries candidate records from newest to oldest. A candidate is usable only if the root and every reachable tree or overflow page pass validation and the persisted freelist is safe to reuse. If the newest metadata page is torn, corrupted, points at a torn root page, or names an unsafe reusable page, the older valid page can still point to a previous root.
+`Sync` is the explicit durability boundary. Writable mmap pages are marked dirty when copy-on-write allocates or reuses their page IDs. `Sync` flushes those dirty tree and overflow page bytes first, then writes the metadata page selected by `revision % 2`, then flushes that metadata page. `Close` calls `Sync` for writable trees. On reopen, the tree validates both metadata checksums, then tries candidate records from newest to oldest. A candidate is usable only if the root and every reachable tree or overflow page pass validation, the metadata length matches the reachable leaf-key count, and the persisted freelist is safe to reuse. If the newest metadata page is torn, corrupted, points at a torn root page, stores the wrong logical length, or names an unsafe reusable page, the older valid page can still point to a previous root.
 
 The reusable page IDs are stored directly in the metadata page for now. That keeps the lesson compact and makes close/reopen freelist behavior visible. Reopen checks that each persisted reusable page ID is inside the allocated page range, appears only once, and is not reachable from the accepted root or its overflow chains. A larger database would usually store freelist records in normal pages and have metadata point to the freelist root.
 
@@ -148,7 +148,7 @@ This chapter makes the project more serious, but it is still not a production da
 
 - freelist state is persisted and validated in the metadata page, but only with a bounded educational encoding
 - `Sync` flushes dirty data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
-- metadata pages, reachable tree pages, and reachable overflow pages are checksummed and structurally validated, but there is no page-level repair
+- metadata pages, reachable tree pages, and reachable overflow pages are checksummed and validated for layout, routing, freelist safety, and key-count consistency, but there is no page-level repair
 - read-only mmap handles use shared file locks, but there is no reader table that allows a concurrent writer to recycle pages around external readers
 - overflow pages are linear chains, not a compact extent/tree structure
 - byte-full leaf rewrites can spill cells to overflow pages, but sibling redistribution is still key-count based
