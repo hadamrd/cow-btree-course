@@ -882,9 +882,22 @@ func (t *Tree) validateMetaInvariants(record metaRecord) error {
 	if record.length < 0 {
 		return fmt.Errorf("%w: length %d is negative", ErrMetaInvariant, record.length)
 	}
+	if err := validatePersistedDegree(record.degree); err != nil {
+		return err
+	}
 	keyCount := t.countReachableKeys(t.root, map[PageID]bool{})
 	if keyCount != record.length {
 		return fmt.Errorf("%w: length %d does not match reachable key count %d", ErrMetaInvariant, record.length, keyCount)
+	}
+	return nil
+}
+
+func validatePersistedDegree(degree int) error {
+	if degree < 2 {
+		return fmt.Errorf("%w: degree %d below minimum 2", ErrMetaInvariant, degree)
+	}
+	if degree > maxPageDegree {
+		return fmt.Errorf("%w: degree %d exceeds page capacity %d", ErrMetaInvariant, degree, maxPageDegree)
 	}
 	return nil
 }

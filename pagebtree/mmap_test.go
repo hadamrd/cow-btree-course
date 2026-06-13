@@ -1335,6 +1335,68 @@ func TestMmapTreeRejectsMetadataPageSizeMismatch(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsMetadataDegreeBelowMinimum(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	replaceNewestMetaRecord(t, path, func(record metaRecord) metaRecord {
+		record.degree = 1
+		return record
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with metadata degree below minimum")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap metadata degree error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "degree") {
+		t.Fatalf("OpenMmap metadata degree error = %v, want degree detail", err)
+	}
+}
+
+func TestMmapTreeRejectsMetadataDegreeBeyondPageCapacity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	replaceNewestMetaRecord(t, path, func(record metaRecord) metaRecord {
+		record.degree = 10_000
+		return record
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with metadata degree beyond page capacity")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap metadata degree capacity error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "degree") {
+		t.Fatalf("OpenMmap metadata degree capacity error = %v, want degree detail", err)
+	}
+}
+
 func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

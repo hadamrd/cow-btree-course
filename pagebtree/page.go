@@ -23,6 +23,8 @@ var (
 const (
 	pageHeaderSize = 20
 	slotSize       = 8
+	maxPageSlots   = (PageSize - pageHeaderSize) / slotSize
+	maxPageDegree  = (maxPageSlots + 1) / 2
 
 	headerFlagsOffset     = 0
 	headerSlotCountOffset = 2
