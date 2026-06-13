@@ -2747,6 +2747,41 @@ func TestMmapTreeRejectsMetadataPageSizeMismatch(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsMetadataRevisionInWrongSlot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	newestIndex, record := newestMetaPage(t, path)
+	for index := 0; index < metaPageCount; index++ {
+		if index != newestIndex {
+			corruptMetaPage(t, path, index)
+		}
+	}
+	replaceMetaBytesAt(t, path, newestIndex, func(data []byte) {
+		binary.LittleEndian.PutUint64(data[metaRevisionOff:], record.revision+1)
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with metadata revision in the wrong slot")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap wrong-slot metadata error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "metadata revision") || !strings.Contains(err.Error(), "slot") {
+		t.Fatalf("OpenMmap wrong-slot metadata error = %v, want revision slot detail", err)
+	}
+}
+
 func TestMmapTreeRejectsMetadataDegreeBelowMinimum(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

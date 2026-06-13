@@ -871,6 +871,10 @@ func (t *Tree) loadMeta() error {
 		if !ok {
 			continue
 		}
+		if err := validateMetaSlot(record, index); err != nil {
+			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaErrorForRevision(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, record.revision)
+			continue
+		}
 		if err := t.validateMetaBounds(record); err != nil {
 			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaErrorForRevision(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, record.revision)
 			continue
@@ -969,6 +973,13 @@ func (t *Tree) loadMeta() error {
 		return newestCandidateErr
 	}
 	return fmt.Errorf("no usable mmap tree metadata page")
+}
+
+func validateMetaSlot(record metaRecord, index int) error {
+	if int(record.revision%metaPageCount) != index {
+		return fmt.Errorf("%w: metadata revision %d stored in slot %d", ErrMetaInvariant, record.revision, index)
+	}
+	return nil
 }
 
 func newestMetaError(current error, currentRevision uint64, currentHasRevision bool, next error, data []byte) (error, uint64, bool) {
