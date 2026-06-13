@@ -59,4 +59,4 @@ The median moves into the parent. Keys smaller than the median stay in the left 
 
 ## What This Project Leaves Out
 
-This course focuses on insertion and snapshots. Deletion is intentionally omitted because correct B-tree deletion adds borrow and merge cases that can obscure the first lesson. The exercises chapter explains how to add it once the core mechanics are clear.
+The first logical `btree` package focuses on insertion and snapshots. The page-backed package later adds an educational copy-on-write delete path, but full production deletion still has more cases: borrow, merge, and byte-balanced redistribution are separate topics once the core mechanics are clear.

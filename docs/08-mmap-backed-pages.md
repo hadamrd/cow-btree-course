@@ -10,7 +10,7 @@ This is the first step from an in-memory model toward a real storage engine. The
 go run ./cmd/mmapbtree-demo
 ```
 
-The demo creates a temporary database file, inserts keys, closes the tree, reopens the file, and reads a key back through the B+tree search path.
+The demo creates a temporary database file, inserts keys, deletes one key, closes the tree, reopens the file, and reads back through the B+tree search path.
 
 ## File Layout
 
@@ -89,7 +89,8 @@ This chapter makes the project more serious, but it is still not a production da
 - file locking is exclusive-writer only; there is no shared-reader lock table
 - overflow pages are linear chains, not a compact extent/tree structure
 - byte-full leaf rewrites can spill cells to overflow pages, but sibling redistribution is still key-count based
-- `Get` searches slot directories directly, but insertion still rewrites copied pages from decoded entries
+- `Get` searches slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries
+- `Delete` removes records and collapses simple roots, but does not yet implement full sibling borrow/merge rebalancing
 - page capacity is fixed at open time
 
 The goal is to make mmap concrete without burying the learner under every database-engine concern at once.

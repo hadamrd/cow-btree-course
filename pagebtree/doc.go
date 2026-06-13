@@ -5,4 +5,6 @@
 // by stable page ids, page bytes use a slotted layout, branch pages store
 // separator keys and child page ids, leaf pages store key/value records, and
 // overflow pages hold large values that do not fit cleanly inside a leaf cell.
+// Put and Delete publish new roots through copy-on-write, while snapshots keep
+// reading their older roots.
 package pagebtree

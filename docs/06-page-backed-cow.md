@@ -37,7 +37,7 @@ The header and slots grow from the front of the page. Cells are copied from the 
 
 Searching a page does not have to decode every cell into Go structs. The slot directory is already sorted by key, so `Get` can binary-search the slots, compare the query key against only the candidate cell key bytes, and then read only the selected value or child page id.
 
-## Put and Get
+## Put, Get, and Delete
 
 The runnable demo is:
 
@@ -52,9 +52,10 @@ tree := pagebtree.New(2)
 tree.Put("k01", []byte("value-01"))
 
 value, ok := tree.Get("k01")
+old, deleted := tree.Delete("k01")
 ```
 
-`Get` returns a copy of the stored bytes so callers cannot mutate page contents by holding a returned slice.
+`Get` and `Delete` return copies of stored bytes so callers cannot mutate page contents by holding a returned slice.
 
 ## Copy-on-Write With Page IDs
 
@@ -81,6 +82,22 @@ sequenceDiagram
 The old pages remain in the page map. A snapshot keeps its old root id and can still read the old path.
 
 Page IDs from copied old pages are not immediately reusable if a reader can still reach them. The next chapter covers reader-pinned recycling. The chapter after that moves the same page bytes into an mmap-backed file.
+
+Delete follows the same copy-before-descend rule:
+
+```mermaid
+sequenceDiagram
+    participant Delete
+    participant Pages
+    participant Meta
+    Delete->>Pages: copy root before removing key
+    Delete->>Pages: copy child on search path
+    Delete->>Pages: remove leaf cell and retire overflow chain
+    Delete->>Pages: remove empty child and rebuild separators
+    Delete->>Meta: publish new root page id
+```
+
+The implementation is intentionally conservative. It removes empty children and collapses a one-child root, but it does not yet borrow from siblings or merge underfull non-root pages to maintain a strict minimum fill factor.
 
 ## Walking Branch Pages
 
@@ -142,10 +159,11 @@ The test `TestSnapshotKeepsOldRootAfterCopyOnWritePuts` proves this behavior:
 The page package models page identity, root publication, and slotted cell storage, but it is still intentionally readable:
 
 - Pages are kept in an in-memory map rather than written to disk.
-- The implementation rewrites a copied page from decoded entries during insertion; it does not do in-place cell compaction.
+- The implementation rewrites a copied page from decoded entries during insertion and deletion; it does not do in-place cell compaction.
 - `Get` searches slots directly, but insertion still decodes page contents before rewriting the copied page.
 - Byte-full leaf rewrites spill inline cells to overflow pages, but the tree still does not do byte-balanced redistribution between sibling leaves.
+- `Delete` removes records, retires overflow pages, removes empty children, and collapses a one-child root; it does not yet implement full sibling borrow/merge rebalancing.
 - Branch pages contain separator keys and child page ids; values live in leaves.
-- There is no deletion or disk persistence yet.
+- Disk persistence is introduced in the mmap chapter.
 
 Those are good next exercises once the page-id copy-on-write and freelist mechanics are clear.

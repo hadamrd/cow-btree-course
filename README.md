@@ -7,7 +7,7 @@ The project is intentionally small, heavily commented, and organized as a course
 ## What You Get
 
 - A clean generic B-tree package in [`btree/`](btree/)
-- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages
+- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages, overflow pages, and mmap-backed storage
 - Copy-on-write writes with stable read-only snapshots
 - Runnable demos in [`cmd/cowbtree`](cmd/cowbtree/) and [`cmd/pagebtree-demo`](cmd/pagebtree-demo/)
 - Tests that document the behavior and invariants
@@ -40,6 +40,7 @@ tree := pagebtree.New(2)
 tree.Put("k01", []byte("value-01"))
 
 value, ok := tree.Get("k01")
+old, deleted := tree.Delete("k01")
 ```
 
 ## Course Map
@@ -57,7 +58,7 @@ Start with [`docs/index.md`](docs/index.md), then read in order:
 
 ## Deliberate Scope
 
-This is a teaching implementation, not a production storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, leaf key/value records, reader-pinned retired pages, a reusable freelist, and an optional mmap-backed page file. Deletion, crash-safe commit, write-ahead logging, and full durability hardening are left as guided exercises.
+This is a teaching implementation, not a production storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, leaf key/value records, overflow pages, educational deletion, reader-pinned retired pages, a reusable freelist, and an optional mmap-backed page file. Full deletion rebalancing, crash-safe commit, write-ahead logging, and durability hardening are left as guided exercises.
 
 ## License
 

@@ -27,9 +27,9 @@ The reverse of in-order traversal is:
 2. Visit key.
 3. Visit left child.
 
-## Exercise 3: Implement Delete
+## Exercise 3: Implement Full Delete Rebalancing
 
-Deletion has more cases than insertion. A robust implementation should keep every node on the descent path above the minimum key count before recursing.
+The page-backed package includes an educational delete path: it copies the descent path, removes the leaf record, retires overflow pages, removes empty children, rebuilds separators, and collapses a one-child root. A full B-tree delete still has more cases than insertion. A robust production implementation should keep every node on the descent path above the minimum key count before recursing.
 
 ```mermaid
 flowchart TD
@@ -43,7 +43,7 @@ flowchart TD
     G -- no --> I["merge siblings"]
 ```
 
-Keep the copy-on-write rule: clone any node before changing it.
+Keep the copy-on-write rule: clone any node before changing it. Then extend the page-backed implementation with sibling borrow/merge and byte-balanced redistribution.
 
 ## Exercise 4: Convert `btree` to a B+tree
 

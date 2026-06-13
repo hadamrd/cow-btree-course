@@ -53,6 +53,109 @@ func TestPutReplacesExistingKey(t *testing.T) {
 	}
 }
 
+func TestDeleteRemovesKeyAndKeepsSnapshotVersion(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	snapshot := tree.Snapshot()
+	beforeRoot := tree.Stats().Root
+
+	old, deleted := tree.Delete("key-17")
+	if !deleted {
+		t.Fatalf("Delete did not report deleting key-17")
+	}
+	if string(old) != "value-17" {
+		t.Fatalf("Delete old value = %q, want value-17", old)
+	}
+	if tree.Len() != 39 {
+		t.Fatalf("Len after delete = %d, want 39", tree.Len())
+	}
+	if _, ok := tree.Get("key-17"); ok {
+		t.Fatalf("current tree still contains deleted key")
+	}
+	if got, ok := snapshot.Get("key-17"); !ok || string(got) != "value-17" {
+		t.Fatalf("snapshot Get(key-17) = %q, %v; want value-17, true", got, ok)
+	}
+	if tree.Stats().Root == beforeRoot {
+		t.Fatalf("Delete reused old root page id %d; want copy-on-write root", beforeRoot)
+	}
+	snapshot.Close()
+}
+
+func TestDeleteMissingKeyDoesNotPublishNewRevision(t *testing.T) {
+	tree := New(2)
+	tree.Put("alpha", []byte("one"))
+	before := tree.Stats()
+
+	old, deleted := tree.Delete("missing")
+	if deleted {
+		t.Fatalf("Delete reported deleting missing key with old value %q", old)
+	}
+	after := tree.Stats()
+	if after.Revision != before.Revision {
+		t.Fatalf("Revision after missing delete = %d, want %d", after.Revision, before.Revision)
+	}
+	if after.Root != before.Root {
+		t.Fatalf("Root after missing delete = %d, want %d", after.Root, before.Root)
+	}
+}
+
+func TestDeleteCollapsesTreeAfterRemovingAllKeys(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 30; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	for i := 0; i < 30; i++ {
+		if _, deleted := tree.Delete(fmt.Sprintf("key-%02d", i)); !deleted {
+			t.Fatalf("Delete missed key-%02d", i)
+		}
+	}
+
+	if tree.Len() != 0 {
+		t.Fatalf("Len after deleting all keys = %d, want 0", tree.Len())
+	}
+	if tree.Stats().Root != 0 {
+		t.Fatalf("Root after deleting all keys = %d, want 0", tree.Stats().Root)
+	}
+	if _, ok := tree.Get("key-00"); ok {
+		t.Fatalf("Get found key after deleting all keys")
+	}
+}
+
+func TestDeleteRetiresOverflowPagesAfterReadersClose(t *testing.T) {
+	tree := New(2)
+	large := bytes.Repeat([]byte("x"), PageSize*2+99)
+	tree.Put("large", large)
+	snapshot := tree.Snapshot()
+
+	old, deleted := tree.Delete("large")
+	if !deleted {
+		t.Fatalf("Delete did not report deleting large key")
+	}
+	if !bytes.Equal(old, large) {
+		t.Fatalf("Delete large old value mismatch: got len %d, want len %d", len(old), len(large))
+	}
+	if _, ok := tree.Get("large"); ok {
+		t.Fatalf("current tree still contains deleted large key")
+	}
+	withReader := tree.Stats()
+	if withReader.RetiredPages == 0 {
+		t.Fatalf("RetiredPages = 0 with reader open after deleting overflow value")
+	}
+	if withReader.FreePages != 0 {
+		t.Fatalf("FreePages = %d with reader open, want 0", withReader.FreePages)
+	}
+	if got, ok := snapshot.Get("large"); !ok || !bytes.Equal(got, large) {
+		t.Fatalf("snapshot large value mismatch after delete: len %d, ok %v", len(got), ok)
+	}
+	snapshot.Close()
+	if tree.Stats().FreePages == 0 {
+		t.Fatalf("FreePages = 0 after closing snapshot, want deleted overflow pages reusable")
+	}
+}
+
 func TestRangeReturnsSortedKeysFromPages(t *testing.T) {
 	tree := New(2)
 	for _, key := range []string{"delta", "alpha", "charlie", "bravo"} {

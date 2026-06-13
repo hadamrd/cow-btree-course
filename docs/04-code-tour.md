@@ -89,3 +89,4 @@ Read this package after the pointer-based `btree` package. The important files a
 - `pagebtree/overflow.go` for overflow references and chained large-value pages.
 - `pagebtree/tree.go` for `Put`, `Get`, snapshots, and root page publication.
 - `pagebtree/insert.go` for copy-before-descend insertion and leaf/branch splits.
+- `pagebtree/delete.go` for copy-before-descend deletion, empty-child cleanup, and root collapse.

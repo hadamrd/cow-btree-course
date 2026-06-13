@@ -42,6 +42,7 @@ pagebtree/
   overflow.go   Overflow references and chained large-value pages
   tree.go       Root page publication
   insert.go     Page-copying insertion and B+tree-style splitting
+  delete.go     Page-copying deletion and root collapse
   snapshot.go   Read-only historical root page ids
   freelist.go   Reader-pinned retired pages and reusable page IDs
   mmap.go       Mmap-backed page arena and dual metadata pages

@@ -73,6 +73,44 @@ func TestMmapTreePersistsLargeOverflowValueAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMmapTreePersistsDeleteAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	old, deleted := tree.Delete("key-17")
+	if !deleted {
+		t.Fatalf("Delete did not report deleting key-17")
+	}
+	if string(old) != "value-17" {
+		t.Fatalf("Delete old value = %q, want value-17", old)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	if _, ok := reopened.Get("key-17"); ok {
+		t.Fatalf("reopened tree found deleted key-17")
+	}
+	if reopened.Len() != 39 {
+		t.Fatalf("reopened Len = %d, want 39", reopened.Len())
+	}
+	if got, ok := reopened.Get("key-18"); !ok || string(got) != "value-18" {
+		t.Fatalf("reopened Get(key-18) = %q, %v; want value-18, true", got, ok)
+	}
+}
+
 func TestMmapTreeStoresSlottedPageBytesInFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
