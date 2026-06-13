@@ -11,6 +11,8 @@ type Tree struct {
 	retired       []retiredPage
 	free          []PageID
 	reusedPages   int
+	arena         *mmapArena
+	closed        bool
 }
 
 func New(degree int) *Tree {
@@ -30,6 +32,9 @@ func (t *Tree) Revision() uint64 {
 }
 
 func (t *Tree) Get(key string) ([]byte, bool) {
+	if t.closed {
+		return nil, false
+	}
 	return searchPage(t.pages, t.root, key)
 }
 
@@ -38,12 +43,18 @@ func (t *Tree) Get(key string) ([]byte, bool) {
 // Pages are never changed through an old page id. Before Put changes a page, it
 // first allocates a new page id and copies the old page contents there.
 func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
+	if t.closed {
+		return nil, false
+	}
 	if t.root == 0 {
 		id := t.allocPage()
-		t.pages[id] = newLeaf(id, key, value)
+		leaf := t.newPage(id, flagLeaf)
+		mustWriteLeafEntries(leaf, []leafEntry{{key: key, value: cloneBytes(value)}})
+		t.pages[id] = leaf
 		t.root = id
 		t.length = 1
 		t.revision++
+		t.persistMeta()
 		return nil, false
 	}
 
@@ -51,7 +62,7 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 	old, replaced, split := t.insert(rootID, key, value)
 	if split != nil {
 		newRootID := t.allocPage()
-		newRoot := newPage(newRootID, flagBranch)
+		newRoot := t.newPage(newRootID, flagBranch)
 		t.pages[newRootID] = newRoot
 		mustWriteBranchParts(newRoot, []string{split.separator}, []PageID{rootID, split.right})
 		rootID = newRootID
@@ -63,10 +74,14 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 	}
 	t.revision++
 	t.reclaimRetiredPages()
+	t.persistMeta()
 	return old, replaced
 }
 
 func (t *Tree) Range(visit func(string, []byte) bool) {
+	if t.closed {
+		return
+	}
 	rangePage(t.pages, t.root, visit)
 }
 
@@ -102,7 +117,43 @@ func (t *Tree) allocPage() PageID {
 
 func (t *Tree) copyPage(id PageID) PageID {
 	newID := t.allocPage()
-	t.pages[newID] = t.pages[id].clone(newID)
+	dst := t.newPage(newID, t.pages[id].flags())
+	copy(dst.data, t.pages[id].data)
+	t.pages[newID] = dst
 	t.retirePage(id)
 	return newID
+}
+
+func (t *Tree) newPage(id PageID, flags uint16) *page {
+	if t.arena == nil {
+		return newPage(id, flags)
+	}
+
+	data, err := t.arena.pageBytes(id)
+	if err != nil {
+		panic(err)
+	}
+	p := &page{id: id, data: data}
+	p.reset(flags)
+	return p
+}
+
+func (t *Tree) Sync() error {
+	t.persistMeta()
+	if t.arena == nil {
+		return nil
+	}
+	return t.arena.sync()
+}
+
+func (t *Tree) Close() error {
+	if t == nil || t.closed {
+		return nil
+	}
+	t.closed = true
+	t.persistMeta()
+	if t.arena == nil {
+		return nil
+	}
+	return t.arena.close()
 }

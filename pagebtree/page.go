@@ -30,7 +30,7 @@ type slot struct {
 
 type page struct {
 	id   PageID
-	data [PageSize]byte
+	data []byte
 }
 
 func newLeaf(id PageID, key string, value []byte) *page {
@@ -40,7 +40,7 @@ func newLeaf(id PageID, key string, value []byte) *page {
 }
 
 func newPage(id PageID, flags uint16) *page {
-	p := &page{id: id}
+	p := &page{id: id, data: make([]byte, PageSize)}
 	p.setFlags(flags)
 	p.setSlotCount(0)
 	p.setFreeUpper(PageSize)
@@ -48,7 +48,7 @@ func newPage(id PageID, flags uint16) *page {
 }
 
 func (p *page) clone(id PageID) *page {
-	out := &page{id: id}
+	out := newPage(id, p.flags())
 	copy(out.data[:], p.data[:])
 	return out
 }
@@ -151,7 +151,7 @@ func (p *page) appendCell(key string, value []byte) bool {
 }
 
 func (p *page) reset(flags uint16) {
-	p.data = [PageSize]byte{}
+	clear(p.data)
 	p.setFlags(flags)
 	p.setSlotCount(0)
 	p.setFreeUpper(PageSize)

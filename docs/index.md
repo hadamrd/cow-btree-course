@@ -22,6 +22,7 @@ flowchart TD
     D --> E["05. Exercises"]
     D --> F["06. Page-backed CoW"]
     F --> G["07. Freelist and readers"]
+    G --> H["08. Mmap-backed pages"]
 ```
 
 ## Repository Layout
@@ -42,9 +43,11 @@ pagebtree/
   insert.go     Page-copying insertion and B+tree-style splitting
   snapshot.go   Read-only historical root page ids
   freelist.go   Reader-pinned retired pages and reusable page IDs
+  mmap.go       Mmap-backed page arena and metadata page
 
 cmd/cowbtree/        Logical B-tree demonstration
 cmd/pagebtree-demo/  Page-backed CoW demonstration
+cmd/mmapbtree-demo/  Mmap persistence demonstration
 docs/           Course chapters
 ```
 
@@ -56,4 +59,5 @@ docs/           Course chapters
 4. Step through `Tree.Set` in `btree/tree.go`.
 5. Run `go run ./cmd/pagebtree-demo` to see page root ids change across writes.
 6. Read `docs/07-freelist-and-readers.md` to understand why old readers delay page reuse.
-7. Change the degree in the demos and observe how `Stats` changes.
+7. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
+8. Change the degree in the demos and observe how `Stats` changes.

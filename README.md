@@ -19,6 +19,7 @@ The project is intentionally small, heavily commented, and organized as a course
 go test ./...
 go run ./cmd/cowbtree
 go run ./cmd/pagebtree-demo
+go run ./cmd/mmapbtree-demo
 ```
 
 ```go
@@ -52,10 +53,11 @@ Start with [`docs/index.md`](docs/index.md), then read in order:
 5. [`docs/05-exercises.md`](docs/05-exercises.md)
 6. [`docs/06-page-backed-cow.md`](docs/06-page-backed-cow.md)
 7. [`docs/07-freelist-and-readers.md`](docs/07-freelist-and-readers.md)
+8. [`docs/08-mmap-backed-pages.md`](docs/08-mmap-backed-pages.md)
 
 ## Deliberate Scope
 
-This is a teaching implementation, not a storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, leaf key/value records, reader-pinned retired pages, and a reusable freelist. Deletion, write-ahead logging, and disk persistence are left as guided exercises.
+This is a teaching implementation, not a production storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, leaf key/value records, reader-pinned retired pages, a reusable freelist, and an optional mmap-backed page file. Deletion, crash-safe commit, write-ahead logging, and full durability hardening are left as guided exercises.
 
 ## License
 

@@ -78,7 +78,7 @@ sequenceDiagram
 
 The old pages remain in the page map. A snapshot keeps its old root id and can still read the old path.
 
-Page IDs from copied old pages are not immediately reusable if a reader can still reach them. The next chapter covers reader-pinned recycling.
+Page IDs from copied old pages are not immediately reusable if a reader can still reach them. The next chapter covers reader-pinned recycling. The chapter after that moves the same page bytes into an mmap-backed file.
 
 ## Snapshot Proof
 

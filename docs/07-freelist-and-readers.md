@@ -65,3 +65,5 @@ This repository is still in memory, so `AllocatedPages` is a map size rather tha
 - `AllocatedPages`: number of page IDs currently represented in the in-memory page table.
 
 The tests in `pagebtree/freelist_test.go` prove that active readers prevent reuse and that closing readers releases retired pages to the freelist.
+
+The next chapter maps the same page IDs into a real file with mmap.

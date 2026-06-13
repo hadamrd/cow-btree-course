@@ -42,7 +42,7 @@ func (t *Tree) insertLeaf(pageID PageID, key string, value []byte) ([]byte, bool
 
 	mid := len(entries) / 2
 	rightID := t.allocPage()
-	right := newPage(rightID, flagLeaf)
+	right := t.newPage(rightID, flagLeaf)
 	t.pages[rightID] = right
 	mustWriteLeafEntries(p, entries[:mid])
 	mustWriteLeafEntries(right, entries[mid:])
@@ -79,7 +79,7 @@ func (t *Tree) insertBranch(pageID PageID, key string, value []byte) ([]byte, bo
 	leftChildren := append([]PageID(nil), children[:mid+1]...)
 
 	rightID := t.allocPage()
-	right := newPage(rightID, flagBranch)
+	right := t.newPage(rightID, flagBranch)
 	t.pages[rightID] = right
 
 	mustWriteBranchParts(p, leftKeys, leftChildren)

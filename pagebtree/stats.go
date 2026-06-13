@@ -14,6 +14,7 @@ type Stats struct {
 	FreePages      int
 	ActiveReaders  int
 	ReusedPages    int
+	Storage        string
 }
 
 func statsFor(t *Tree) Stats {
@@ -23,6 +24,10 @@ func statsFor(t *Tree) Stats {
 	stats.FreePages = len(t.free)
 	stats.ActiveReaders = t.activeReaderCount()
 	stats.ReusedPages = t.reusedPages
+	stats.Storage = "memory"
+	if t.arena != nil {
+		stats.Storage = "mmap"
+	}
 	return stats
 }
 
