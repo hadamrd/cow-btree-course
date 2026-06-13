@@ -27,7 +27,8 @@
 // and it rejects branch routing that points to missing children, duplicates
 // children, or has separators that no longer match right-child first keys.
 // Persisted leaf next pointers must match the branch-order leaf sequence.
-// Overflow chains must contain exactly the referenced number of payload bytes.
+// Overflow chains must exist, must not loop, and must contain exactly the
+// referenced number of payload bytes.
 // Reopen also rejects metadata whose stored length does not match the reachable
 // leaf-key count, plus persisted freelist IDs that exceed metadata capacity,
 // are out of range, duplicated, or still reachable.

@@ -1757,6 +1757,40 @@ func TestMmapTreeRejectsCorruptReachableOverflowPage(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsMissingReachableOverflowPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	value := bytes.Repeat([]byte("o"), PageSize*2+17)
+	tree.Put("large", value)
+	root := tree.pages[tree.root]
+	if _, ok := root.overflowRef("large"); !ok {
+		t.Fatalf("large value was not stored as an overflow reference")
+	}
+	missing := tree.nextPage
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	corruptLeafOverflowRefFirst(t, path, root.id, "large", missing)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with missing reachable overflow page")
+	}
+	if !errors.Is(err, ErrOverflowInvariant) {
+		t.Fatalf("OpenMmap missing overflow error = %v, want ErrOverflowInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("OpenMmap missing overflow error = %v, want missing detail", err)
+	}
+}
+
 func TestMmapTreeRejectsOverflowChainLongerThanReference(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -2152,6 +2186,22 @@ func corruptBranchSlotKey(t *testing.T, path string, id PageID, slotIndex int, k
 func corruptLeafOverflowRefLength(t *testing.T, path string, id PageID, key string, length int) {
 	t.Helper()
 
+	corruptLeafOverflowRef(t, path, id, key, func(ref *overflowRef) {
+		ref.length = length
+	})
+}
+
+func corruptLeafOverflowRefFirst(t *testing.T, path string, id PageID, key string, first PageID) {
+	t.Helper()
+
+	corruptLeafOverflowRef(t, path, id, key, func(ref *overflowRef) {
+		ref.first = first
+	})
+}
+
+func corruptLeafOverflowRef(t *testing.T, path string, id PageID, key string, rewrite func(*overflowRef)) {
+	t.Helper()
+
 	mutatePage(t, path, id, func(p *page) {
 		index, found := p.searchSlot(key)
 		if !found {
@@ -2163,7 +2213,7 @@ func corruptLeafOverflowRefLength(t *testing.T, path string, id PageID, key stri
 		if !ok {
 			t.Fatalf("key %q is not an overflow reference", key)
 		}
-		ref.length = length
+		rewrite(&ref)
 		valueStart := int(slot.offset) + int(slot.keyLen)
 		copy(p.data[valueStart:valueStart+overflowRefSize], encodeOverflowRef(ref))
 		p.updateChecksum()

@@ -1087,12 +1087,12 @@ func (t *Tree) validateOverflowValue(raw []byte, flags uint16, seen map[PageID]b
 	var length int
 	for id := ref.first; id != 0; {
 		if seen[id] {
-			return fmt.Errorf("overflow chain loops through page %d", id)
+			return fmt.Errorf("%w: overflow chain loops through page %d", ErrOverflowInvariant, id)
 		}
 		seen[id] = true
 		p := t.pages[id]
 		if p == nil {
-			return fmt.Errorf("reachable overflow page %d is missing", id)
+			return fmt.Errorf("%w: reachable overflow page %d is missing", ErrOverflowInvariant, id)
 		}
 		if !p.validChecksum() {
 			return fmt.Errorf("%w: page %d", ErrPageChecksum, id)
