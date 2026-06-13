@@ -81,9 +81,10 @@
 // coexist with a writer while pinning old copy-on-write pages. MmapReaderStats
 // reports live and stale reader-table slots, and CleanStaleMmapReaders clears
 // slots owned by dead processes. Existing malformed reader-table sidecars and live slots with
-// impossible future revisions return ErrReaderTable instead of being reset,
-// because resetting them could forget active reader watermarks; writer reclaim
-// treats reader-table scan errors as a conservative pin on all retired pages.
+// impossible future revisions or zero claim tokens return ErrReaderTable instead
+// of being reset, because resetting them could forget active reader watermarks;
+// writer reclaim treats reader-table scan errors as a conservative pin on all
+// retired pages.
 // Writable mmap handles can close while external reader-table slots still pin
 // retired pages because those pending retired records are published in metadata;
 // Close still returns ErrActiveReaders while in-process snapshots are active

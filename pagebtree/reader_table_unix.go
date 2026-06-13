@@ -242,6 +242,9 @@ func (r *readerTable) scan(maxRevision uint64, cleanStale bool) (MmapReaderStats
 }
 
 func validateReaderSlotRevision(slot int, current readerSlot, maxRevision uint64) error {
+	if current.token == 0 {
+		return fmt.Errorf("%w: reader slot %d has zero token", ErrReaderTable, slot)
+	}
 	if current.revision > maxRevision {
 		return fmt.Errorf("%w: reader slot %d revision %d beyond tree revision %d", ErrReaderTable, slot, current.revision, maxRevision)
 	}
@@ -345,9 +348,13 @@ func (r *readerTable) writeSlotActiveLocked(slot int, active bool) error {
 }
 
 func nextReaderToken() uint64 {
-	return uint64(os.Getpid())<<32 ^
+	token := uint64(os.Getpid())<<32 ^
 		uint64(time.Now().UnixNano()) ^
 		atomic.AddUint64(&readerTokenCounter, 1)
+	if token == 0 {
+		return 1
+	}
+	return token
 }
 
 func pidAlive(pid int) bool {

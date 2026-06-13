@@ -3649,6 +3649,49 @@ func TestMmapReaderTableFutureRevisionPinsRetiredPagesFailClosed(t *testing.T) {
 	}
 }
 
+func TestMmapReaderTableZeroTokenPinsRetiredPagesFailClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	defer writer.Close()
+	writer.Put("alpha", []byte("one"))
+
+	table, err := openReaderTable(path)
+	if err != nil {
+		t.Fatalf("openReaderTable: %v", err)
+	}
+	if err := table.withLock(func() error {
+		return table.writeSlotLocked(0, readerSlot{
+			active:   true,
+			pid:      os.Getpid(),
+			revision: writer.Revision(),
+			token:    0,
+		})
+	}); err != nil {
+		table.close()
+		t.Fatalf("write zero-token reader slot: %v", err)
+	}
+	if err := table.close(); err != nil {
+		t.Fatalf("close injected reader table: %v", err)
+	}
+
+	if stats, err := writer.MmapReaderStats(); !errors.Is(err, ErrReaderTable) {
+		t.Fatalf("MmapReaderStats with zero-token slot = %+v, %v; want ErrReaderTable", stats, err)
+	}
+
+	writer.Put("alpha", []byte("two"))
+	stats := writer.Stats()
+	if stats.RetiredPages == 0 {
+		t.Fatalf("RetiredPages after zero-token reader-table slot = 0, want fail-closed pinning")
+	}
+	if stats.FreePages != 0 {
+		t.Fatalf("FreePages after zero-token reader-table slot = %d, want no recycling", stats.FreePages)
+	}
+}
+
 func TestMmapWriterRejectsFutureReaderTableRevisionAfterMetadataLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
