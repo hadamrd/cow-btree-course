@@ -76,6 +76,7 @@ type mmapArena struct {
 	dirSyncObserver    func(path string)
 	adviceObserver     func(pattern MmapAccessPattern, start, end PageID)
 	fileAdviceObserver func(pattern MmapAccessPattern, start, end PageID)
+	faultInjector      func(mmapFaultPoint) error
 }
 
 type MmapAccessPattern int
@@ -88,6 +89,10 @@ const (
 	MmapAccessNormal
 	mmapAccessDontNeed
 )
+
+type mmapFaultPoint string
+
+const mmapFaultAfterMetaWrite mmapFaultPoint = "after-meta-write"
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	writerLock, err := openWriterLock(path)
@@ -1380,11 +1385,22 @@ func (t *Tree) publishMeta() error {
 		copy(metaPage, previous)
 		return err
 	}
+	if err := t.arena.injectFault(mmapFaultAfterMetaWrite); err != nil {
+		copy(metaPage, previous)
+		return err
+	}
 	if err := t.arena.syncMetaPage(index); err != nil {
 		copy(metaPage, previous)
 		return err
 	}
 	return nil
+}
+
+func (a *mmapArena) injectFault(point mmapFaultPoint) error {
+	if a == nil || a.faultInjector == nil {
+		return nil
+	}
+	return a.faultInjector(point)
 }
 
 func (t *Tree) Advise(pattern MmapAccessPattern) error {

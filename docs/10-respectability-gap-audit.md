@@ -29,7 +29,7 @@ storage-engine artifact.
 
 | Gap | Why it matters | Current state | Next useful slice |
 | --- | --- | --- | --- |
-| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | There are many targeted corruption and failure tests, but not a systematic power-fail matrix. | Add an internal fault-injection harness around data sync, metadata write, metadata sync, file-size sync, directory sync, and remap. |
+| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the first internal fault point covers the after-metadata-write/before-metadata-sync boundary. A full power-fail matrix is still missing. | Extend the internal fault-injection harness around data sync, metadata sync, file-size sync, directory sync, and remap. |
 | Transaction batching | Real engines commit a unit of work, not one implicit root publish per call. | `Put` and `Delete` mutate the live in-process root immediately; `Sync` is the durability boundary only for mmap. | Add an explicit write batch that stages multiple operations and publishes one revision. |
 | Cursor API | Real B+tree users need `seek`/`next` control, not only callback scans. | Closed in this pass with snapshot-backed forward cursors. | Extend cursors with bounded end keys, reverse traversal, and delete-through-cursor experiments. |
 | Comparator and key model | Production B+trees cannot be hardwired to Go string ordering. | Page cells store strings and compare byte-by-byte through string order. | Introduce byte-key APIs and an explicit comparator boundary before adding prefix compression. |
@@ -87,8 +87,9 @@ Code to read:
 
 ## Recommended Next Grind
 
-The next most valuable slice is crash fault injection. The project already has
-many one-off recovery tests; the respectable step is a small internal harness
-that can fail exactly after each durability phase and then reopen the database
-to prove either the old root or the new root survives with no unsafe freelist or
-reclaim state.
+The next most valuable slice is extending crash fault injection. The project now
+has an internal after-metadata-write fault point that proves a failed publish
+rolls back mapped metadata bytes and reopens on the old durable root. The next
+respectable step is to add adjacent fault points for data sync, metadata sync,
+file-size sync, directory sync, and remap, then run them through a table-driven
+old-root/new-root recovery matrix.

@@ -1745,6 +1745,63 @@ func TestMmapSyncRestoresMetaPageWhenMetaFlushFails(t *testing.T) {
 	}
 }
 
+func TestMmapSyncFaultAfterMetaWriteRollsBackAndReopensOldRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	forced := errors.New("forced after meta write fault")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+
+	tree.Put("bravo", []byte("two"))
+	metaIndex := int(tree.Revision() % metaPageCount)
+	metaPage := tree.arena.data[metaIndex*PageSize : (metaIndex+1)*PageSize]
+	before := cloneBytes(metaPage)
+	var points []mmapFaultPoint
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		points = append(points, point)
+		if point == mmapFaultAfterMetaWrite {
+			return forced
+		}
+		return nil
+	}
+
+	err = tree.Sync()
+	if !errors.Is(err, forced) {
+		t.Fatalf("Sync fault error = %v, want forced fault", err)
+	}
+	if !slices.Equal(points, []mmapFaultPoint{mmapFaultAfterMetaWrite}) {
+		t.Fatalf("fault points = %v, want after-meta-write", points)
+	}
+	if !bytes.Equal(metaPage, before) {
+		t.Fatalf("metadata page changed after after-meta-write fault")
+	}
+	if record, ok := readMetaPage(metaPage); ok && record.revision == tree.Revision() {
+		t.Fatalf("after-meta-write fault left revision %d readable in mapped metadata page", record.revision)
+	}
+	if err := tree.arena.close(); err != nil {
+		t.Fatalf("forced crash close arena: %v", err)
+	}
+	tree.closed = true
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after injected crash: %v", err)
+	}
+	defer reopened.Close()
+	if got, ok := reopened.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("reopened Get(alpha) = %q, %v; want one, true", got, ok)
+	}
+	if got, ok := reopened.Get("bravo"); ok {
+		t.Fatalf("reopened Get(bravo) = %q, true; want missing old root", got)
+	}
+}
+
 func TestMmapSyncSpillsFreelistTooLargeForMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
