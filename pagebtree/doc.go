@@ -23,5 +23,7 @@
 // callers can pass random, sequential, or will-need access-pattern hints to the
 // kernel page cache without adding a second Go heap page cache. MmapCacheStats
 // uses mincore on Unix to show how many mapped OS pages are resident in that
-// kernel cache.
+// kernel cache. Current-tree Get also keeps a small checksum-keyed cache of
+// decoded branch routing metadata; Stats exposes its entries, hits, misses, and
+// invalidations.
 package pagebtree

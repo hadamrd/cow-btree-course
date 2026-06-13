@@ -5,6 +5,10 @@ import "slices"
 const rangePrefetchLeafWindow = 2
 
 func searchPage(pages map[PageID]*page, root PageID, key string) ([]byte, bool) {
+	return searchPageWithCache(pages, root, key, nil)
+}
+
+func searchPageWithCache(pages map[PageID]*page, root PageID, key string, cache *pageCache) ([]byte, bool) {
 	for root != 0 {
 		p := pages[root]
 		if p.isLeaf() {
@@ -15,7 +19,11 @@ func searchPage(pages map[PageID]*page, root PageID, key string) ([]byte, bool) 
 			return resolveLeafValue(pages, raw, flags), true
 		}
 
-		root = p.searchBranchChild(key)
+		if cache != nil {
+			root = cache.searchBranchChild(p, key)
+		} else {
+			root = p.searchBranchChild(key)
+		}
 	}
 	return nil, false
 }

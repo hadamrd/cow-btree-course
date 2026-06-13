@@ -74,6 +74,8 @@ The important caching point is that mmap already uses the kernel page cache. Add
 
 These are hints, not contracts. The kernel can ignore them or combine them with its own readahead heuristics. Correctness comes from the page checksums, copy-on-write roots, and metadata validation, not from prefetch behavior.
 
+The project also has a small user-space page cache, but it deliberately does not cache raw page bytes. Raw bytes stay in the mmap region and the kernel page cache. The Go cache stores derived branch-routing metadata: decoded separator keys and child page IDs for branch pages reached by current-tree `Get`. Each entry is keyed by page ID plus the page checksum. If a page ID is later reused with different bytes, the checksum changes and the cache refreshes the decoded routing entry. `Stats` exposes `PageCacheEntries`, `PageCacheHits`, `PageCacheMisses`, and `PageCacheInvalidations` so this behavior is visible.
+
 `Range`, `RangeFrom(start)`, and `RangeBetween(start, end)` now use the B+tree's leaf links to make smaller hints than a whole-file sequential policy. `RangeFrom` first walks the branch pages to the leaf that can contain `start`, so it avoids scanning the left side of the tree before the lower bound. `RangeBetween` also stops before the exclusive `end` key and does not prefetch a next leaf if that leaf's first key is already outside the requested interval. When no active reader has deferred leaf-link repair, the scan walks leaf-to-leaf and asks the kernel to prefetch a small window of exact next leaf pages with `MADV_WILLNEED`. It does not ask Linux to guess far ahead across the whole mapping. If readers are active and current leaf links may be stale, the scan falls back to the recursive branch walk and skips leaf prefetch.
 
 ```mermaid
@@ -103,7 +105,8 @@ That lets learners see the distinction between the project's 4096-byte database 
 flowchart TD
     G["Get(key)"] --> A["Advise random access"]
     A --> R["root page"]
-    R --> B["branch page"]
+    R --> D["branch route cache<br/>decoded keys + child ids"]
+    D --> B["branch page"]
     B --> L["leaf page"]
     L --> V["value or overflow chain"]
 

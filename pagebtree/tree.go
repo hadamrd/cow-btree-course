@@ -16,6 +16,7 @@ type Tree struct {
 	arena         *mmapArena
 	closed        bool
 	readOnly      bool
+	pageCache     pageCache
 }
 
 func New(degree int) *Tree {
@@ -38,7 +39,7 @@ func (t *Tree) Get(key string) ([]byte, bool) {
 	if t.closed {
 		return nil, false
 	}
-	return searchPage(t.pages, t.root, key)
+	return searchPageWithCache(t.pages, t.root, key, &t.pageCache)
 }
 
 // Put inserts or replaces a key in the current root version.

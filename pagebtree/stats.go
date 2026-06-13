@@ -1,20 +1,24 @@
 package pagebtree
 
 type Stats struct {
-	Root           PageID
-	Len            int
-	Revision       uint64
-	Degree         int
-	Height         int
-	Pages          int
-	Keys           int
-	Separators     int
-	AllocatedPages int
-	RetiredPages   int
-	FreePages      int
-	ActiveReaders  int
-	ReusedPages    int
-	Storage        string
+	Root                   PageID
+	Len                    int
+	Revision               uint64
+	Degree                 int
+	Height                 int
+	Pages                  int
+	Keys                   int
+	Separators             int
+	AllocatedPages         int
+	RetiredPages           int
+	FreePages              int
+	ActiveReaders          int
+	ReusedPages            int
+	Storage                string
+	PageCacheEntries       int
+	PageCacheHits          int
+	PageCacheMisses        int
+	PageCacheInvalidations int
 }
 
 func statsFor(t *Tree) Stats {
@@ -28,6 +32,11 @@ func statsFor(t *Tree) Stats {
 	if t.arena != nil {
 		stats.Storage = "mmap"
 	}
+	cacheStats := t.pageCache.snapshot()
+	stats.PageCacheEntries = cacheStats.Entries
+	stats.PageCacheHits = cacheStats.Hits
+	stats.PageCacheMisses = cacheStats.Misses
+	stats.PageCacheInvalidations = cacheStats.Invalidations
 	return stats
 }
 

@@ -39,6 +39,7 @@ btree/
 
 pagebtree/
   page.go       Slotted page header, slots, and cells
+  page_cache.go Derived branch-routing cache keyed by page checksum
   search.go     Point lookup, lower-bound/bounded range, recursive fallback range, and linked-leaf scans
   leaf_links.go Leaf sibling links for current root pages
   overflow.go   Overflow references and chained large-value pages
@@ -64,5 +65,5 @@ docs/           Course chapters
 5. Run `go run ./cmd/pagebtree-demo` to see page root ids change across writes.
 6. Read `docs/07-freelist-and-readers.md` to understand why old readers delay page reuse.
 7. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
-8. Read `docs/08-mmap-backed-pages.md` for kernel page-cache behavior, access-pattern advice, and residency stats.
+8. Read `docs/08-mmap-backed-pages.md` for kernel page-cache behavior, derived branch-routing cache behavior, access-pattern advice, and residency stats.
 9. Change the degree in the demos and observe how `Stats` changes.

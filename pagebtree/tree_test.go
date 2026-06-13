@@ -603,6 +603,62 @@ func TestBranchSlotSearchChoosesChildPageID(t *testing.T) {
 	}
 }
 
+func TestGetCachesBranchRoutingMetadata(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if tree.Stats().Height < 2 {
+		t.Fatalf("Height = %d, want a tree with branch pages", tree.Stats().Height)
+	}
+
+	if _, ok := tree.Get("key-17"); !ok {
+		t.Fatalf("first Get(key-17) missed")
+	}
+	afterFirst := tree.Stats()
+	if afterFirst.PageCacheEntries == 0 {
+		t.Fatalf("PageCacheEntries = 0, want cached branch routing metadata")
+	}
+	if afterFirst.PageCacheMisses == 0 {
+		t.Fatalf("PageCacheMisses = 0, want first lookup to decode branch routing")
+	}
+
+	if _, ok := tree.Get("key-17"); !ok {
+		t.Fatalf("second Get(key-17) missed")
+	}
+	afterSecond := tree.Stats()
+	if afterSecond.PageCacheHits <= afterFirst.PageCacheHits {
+		t.Fatalf("PageCacheHits did not increase: before %d after %d", afterFirst.PageCacheHits, afterSecond.PageCacheHits)
+	}
+	if afterSecond.PageCacheMisses != afterFirst.PageCacheMisses {
+		t.Fatalf("PageCacheMisses changed on cached lookup: before %d after %d", afterFirst.PageCacheMisses, afterSecond.PageCacheMisses)
+	}
+}
+
+func TestPageCacheRefreshesBranchRoutingWhenChecksumChanges(t *testing.T) {
+	cache := pageCache{}
+	branch := newPage(9, flagBranch)
+	mustWriteBranchParts(branch, []string{"bravo", "delta"}, []PageID{10, 20, 30})
+
+	if got := cache.searchBranchChild(branch, "charlie"); got != 20 {
+		t.Fatalf("first cached child = %d, want 20", got)
+	}
+	if got := cache.searchBranchChild(branch, "charlie"); got != 20 {
+		t.Fatalf("second cached child = %d, want 20", got)
+	}
+	if cache.stats.Hits == 0 {
+		t.Fatalf("cache hits = 0, want repeated lookup to hit")
+	}
+
+	mustWriteBranchParts(branch, []string{"bravo", "delta"}, []PageID{10, 200, 30})
+	if got := cache.searchBranchChild(branch, "charlie"); got != 200 {
+		t.Fatalf("refreshed cached child = %d, want 200", got)
+	}
+	if cache.stats.Invalidations == 0 {
+		t.Fatalf("cache invalidations = 0, want checksum change to refresh entry")
+	}
+}
+
 func TestRangeBetweenStopsBeforeReadingOutOfBoundBranchChildValue(t *testing.T) {
 	left := newPage(10, flagLeaf)
 	mustWriteLeafEntries(left, []leafEntry{{key: "alpha", value: []byte("one")}})
