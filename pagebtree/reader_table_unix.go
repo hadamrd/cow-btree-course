@@ -190,6 +190,11 @@ func (r *readerTable) cleanStale(maxRevision uint64) (int, error) {
 	return cleared, err
 }
 
+func (r *readerTable) validate(maxRevision uint64) error {
+	_, _, err := r.scan(maxRevision, false)
+	return err
+}
+
 func (r *readerTable) close() error {
 	if r == nil {
 		return nil

@@ -39,6 +39,10 @@ func (r *readerTable) cleanStale(maxRevision uint64) (int, error) {
 	return 0, nil
 }
 
+func (r *readerTable) validate(maxRevision uint64) error {
+	return nil
+}
+
 type mmapArena struct {
 	readerTable   *readerTable
 	maxPages      int
