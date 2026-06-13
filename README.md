@@ -70,6 +70,8 @@ fmt.Println(profile.SlottedPages)     // true
 fmt.Println(profile.ReaderTable)      // true
 fmt.Println(profile.KernelPageCache)  // true
 fmt.Println(profile.RawHeapPageCache) // false
+fmt.Println(profile.DerivedBranchRoutingCacheCapacity)
+fmt.Println(profile.DerivedBranchRoutingCacheHits)
 ```
 
 ## Research Map

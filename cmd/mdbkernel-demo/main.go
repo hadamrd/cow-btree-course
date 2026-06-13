@@ -46,6 +46,7 @@ func main() {
 
 	readerValue, readerOK := reader.Get("uid=03")
 	writerValue, writerOK := writer.Get("uid=03")
+	writerValue, writerOK = writer.Get("uid=03")
 	deletedValue, deletedOK := reader.Get("uid=07")
 	readerStats, err := writer.MmapReaderStats()
 	if err != nil {

@@ -77,6 +77,8 @@ fmt.Println(profile.ReaderTable)             // true
 fmt.Println(profile.KernelPageCache)         // true
 fmt.Println(profile.RawHeapPageCache)        // false
 fmt.Println(profile.DerivedBranchRoutingCache)
+fmt.Println(profile.DerivedBranchRoutingCacheCapacity)
+fmt.Println(profile.DerivedBranchRoutingCacheHits)
 ```
 
 The demo in `cmd/mdbkernel-demo` opens a mapped database, writes keys, opens a read-only reader, mutates through the writer, and prints the profile plus reader-table state.

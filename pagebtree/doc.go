@@ -9,6 +9,9 @@
 // including whether the tree is mmap-backed, uses checked dual metadata pages,
 // owns the serialized writer path, has a reader table, relies on the kernel
 // page cache for raw bytes, and only caches derived branch-routing metadata.
+// The profile also reports that derived cache's capacity and live counters, so
+// experiments can distinguish kernel page-cache behavior from Go-side routing
+// reuse.
 // Put and Delete publish new roots through copy-on-write, while snapshots keep
 // reading their older roots. Leaf sibling-link repair is deferred while a
 // snapshot is active, because rewriting those headers in place would mutate

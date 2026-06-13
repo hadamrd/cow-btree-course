@@ -36,6 +36,13 @@ type MDBKernelProfile struct {
 	KernelPageCache           bool
 	RawHeapPageCache          bool
 	DerivedBranchRoutingCache bool
+
+	DerivedBranchRoutingCacheCapacity      int
+	DerivedBranchRoutingCacheEntries       int
+	DerivedBranchRoutingCacheHits          int
+	DerivedBranchRoutingCacheMisses        int
+	DerivedBranchRoutingCacheInvalidations int
+	DerivedBranchRoutingCacheEvictions     int
 }
 
 // MDBKernelProfile returns a compact research profile for the current tree.
@@ -68,7 +75,14 @@ func (t *Tree) MDBKernelProfile() MDBKernelProfile {
 	profile.ReusablePages = len(t.free)
 	profile.RetiredPages = len(t.retired)
 	profile.ActiveReaders = t.activeReaderCount()
-	profile.DerivedBranchRoutingCache = t.pageCache.snapshot().Capacity > 0
+	cacheStats := t.pageCache.snapshot()
+	profile.DerivedBranchRoutingCache = cacheStats.Capacity > 0
+	profile.DerivedBranchRoutingCacheCapacity = cacheStats.Capacity
+	profile.DerivedBranchRoutingCacheEntries = cacheStats.Entries
+	profile.DerivedBranchRoutingCacheHits = cacheStats.Hits
+	profile.DerivedBranchRoutingCacheMisses = cacheStats.Misses
+	profile.DerivedBranchRoutingCacheInvalidations = cacheStats.Invalidations
+	profile.DerivedBranchRoutingCacheEvictions = cacheStats.Evictions
 
 	if t.arena == nil {
 		return profile

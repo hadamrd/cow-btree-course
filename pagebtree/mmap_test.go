@@ -66,6 +66,12 @@ func TestMDBKernelProfileDescribesOpenLDAPStyleMmapCore(t *testing.T) {
 	for i := 0; i < 16; i++ {
 		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
 	}
+	for i := 0; i < 2; i++ {
+		got, ok := tree.Get("key-11")
+		if !ok || string(got) != "value-11" {
+			t.Fatalf("Get(key-11) = %q, %v; want value-11, true", got, ok)
+		}
+	}
 
 	profile := tree.MDBKernelProfile()
 	if profile.Name != "openldap-mdb-inspired" {
@@ -97,6 +103,18 @@ func TestMDBKernelProfileDescribesOpenLDAPStyleMmapCore(t *testing.T) {
 	}
 	if !profile.DerivedBranchRoutingCache {
 		t.Fatalf("DerivedBranchRoutingCache = false, want true")
+	}
+	if profile.DerivedBranchRoutingCacheCapacity != 8 {
+		t.Fatalf("DerivedBranchRoutingCacheCapacity = %d, want 8", profile.DerivedBranchRoutingCacheCapacity)
+	}
+	if profile.DerivedBranchRoutingCacheEntries == 0 {
+		t.Fatalf("DerivedBranchRoutingCacheEntries = 0, want cached branch routing")
+	}
+	if profile.DerivedBranchRoutingCacheHits == 0 {
+		t.Fatalf("DerivedBranchRoutingCacheHits = 0, want repeated lookup cache hit")
+	}
+	if profile.DerivedBranchRoutingCacheMisses == 0 {
+		t.Fatalf("DerivedBranchRoutingCacheMisses = 0, want first lookup cache miss")
 	}
 	if profile.Revision != tree.Revision() || profile.Root == 0 || profile.Keys != tree.Len() {
 		t.Fatalf("profile root/revision/keys = root:%d rev:%d keys:%d; want live tree values", profile.Root, profile.Revision, profile.Keys)
