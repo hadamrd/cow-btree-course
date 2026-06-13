@@ -590,6 +590,9 @@ Serious pieces in this repository:
   integrity-check operation streams.
 - An mmap sorted-map model/fuzz target that injects sync/close/reopen cycles
   and overflow-heavy values.
+- A malformed mmap-image fuzz target that mutates metadata, page headers,
+  checksums, truncation, and tree/overflow-bearing pages, then requires any
+  accepted image to pass `Tree.Check`.
 
 Still research or incomplete compared with a production engine:
 
@@ -600,7 +603,8 @@ Still research or incomplete compared with a production engine:
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with power-fail fault injection.
 - No byte-balanced deletion across variable-size records.
-- No malformed-page fuzz generator yet.
+- No production-grade malformed-page corpus minimization or semantic repair
+  oracle yet.
 - No multi-database catalog, duplicate keys, cursors, or comparator plugins.
 - No portability story beyond the Unix mmap path and non-Unix stubs.
 
