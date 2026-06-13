@@ -154,6 +154,9 @@ func normalizeRangePrefetchLeafWindow(window int) int {
 }
 
 func (t *Tree) Snapshot() *Snapshot {
+	if t == nil || t.closed {
+		return &Snapshot{closed: true}
+	}
 	t.beginRead(t.revision)
 	return &Snapshot{
 		tree:     t,

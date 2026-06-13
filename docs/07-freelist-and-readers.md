@@ -40,7 +40,7 @@ Because snapshots pin old page IDs, production-style code should close them as s
 
 `Tree.copyPage` is the retirement point. It allocates a new page ID, copies the old page bytes, then retires the old page ID. `reclaimRetiredPages` moves safe retired pages to the freelist. `allocPage` prefers the freelist before increasing `nextPage`.
 
-For mmap-backed trees, an open snapshot also pins the file mapping itself. Snapshot pages are slices into the mapped file, so `Tree.Close` returns `ErrActiveReaders` instead of unmapping while a snapshot is active. Close the snapshots first, then close the tree handle.
+For mmap-backed trees, an open snapshot also pins the file mapping itself. Snapshot pages are slices into the mapped file, so `Tree.Close` returns `ErrActiveReaders` instead of unmapping while a snapshot is active. Close the snapshots first, then close the tree handle. A `Snapshot` requested after `Tree.Close` is inert: it registers no reader and returns no keys.
 
 ## Why the Freelist Alone Still Grows
 

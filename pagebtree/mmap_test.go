@@ -216,6 +216,56 @@ func TestMmapCloseWaitsForActiveSnapshots(t *testing.T) {
 	}
 }
 
+func TestMmapSnapshotAfterCloseIsInert(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 32})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	if _, replaced := tree.Put("alpha", []byte("one")); replaced {
+		t.Fatalf("first Put replaced existing key")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	snapshot := tree.Snapshot()
+	if snapshot == nil {
+		t.Fatalf("Snapshot after Close returned nil, want inert snapshot")
+	}
+	if !snapshot.closed {
+		t.Fatalf("Snapshot after Close is open, want inert closed snapshot")
+	}
+	if snapshot.tree != nil {
+		t.Fatalf("Snapshot after Close kept tree pointer, want no tree")
+	}
+	if tree.activeReaderCount() != 0 {
+		t.Fatalf("activeReaderCount after post-close Snapshot = %d, want 0", tree.activeReaderCount())
+	}
+	if snapshot.Len() != 0 {
+		t.Fatalf("post-close snapshot Len = %d, want 0", snapshot.Len())
+	}
+	if got, ok := snapshot.Get("alpha"); ok || got != nil {
+		t.Fatalf("post-close snapshot Get = %q, %v; want nil, false", got, ok)
+	}
+	visited := false
+	snapshot.Range(func(string, []byte) bool {
+		visited = true
+		return true
+	})
+	if visited {
+		t.Fatalf("post-close snapshot Range visited keys")
+	}
+	if stats := snapshot.Stats(); stats != (Stats{}) {
+		t.Fatalf("post-close snapshot Stats = %+v, want zero value", stats)
+	}
+	snapshot.Close()
+	if tree.activeReaderCount() != 0 {
+		t.Fatalf("activeReaderCount after inert snapshot Close = %d, want 0", tree.activeReaderCount())
+	}
+}
+
 func TestMmapTreeGrowsMappingWhenPageCapacityIsExceeded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

@@ -53,7 +53,7 @@ func (s *Snapshot) RangeBetween(start, end string, visit func(string, []byte) bo
 }
 
 func (s *Snapshot) Stats() Stats {
-	if s == nil {
+	if s == nil || s.closed {
 		return Stats{}
 	}
 	return statsForSnapshot(s.pages, s.root, s.length, s.revision, s.degree)

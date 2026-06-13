@@ -22,6 +22,7 @@
 // mapped capacity and a suffix of already-free page ids when no snapshot is
 // active. Close returns ErrActiveReaders for mmap-backed trees while snapshots
 // are active, because those snapshots still read slices backed by the mapping.
+// A Snapshot requested after Close is inert and does not register a reader.
 // Reopen validation checks metadata format, version, database page size,
 // persisted degree, and bounds against the mapped file and declared capacity,
 // page checksums, and slotted-page structure before decoding reachable cells,
