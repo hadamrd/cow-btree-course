@@ -384,6 +384,7 @@ func (t *Tree) compactMmapTail() error {
 		restoreState()
 		return err
 	}
+	t.reclaimObsoleteMetaFreelistPages()
 	if newMaxPages >= oldMaxPages {
 		return nil
 	}
@@ -999,6 +1000,7 @@ func (t *Tree) syncMmap() error {
 		restoreFreelistPages()
 		return err
 	}
+	t.reclaimObsoleteMetaFreelistPages()
 	return nil
 }
 
@@ -1054,6 +1056,51 @@ func (t *Tree) prepareMetaFreelistPages() (func(), error) {
 	t.metaFreelistRoot = ids[0]
 	t.metaFreelistPages = ids
 	return restore, nil
+}
+
+func (t *Tree) reclaimObsoleteMetaFreelistPages() {
+	if t.arena == nil {
+		return
+	}
+	referenced := map[PageID]bool{}
+	for index := 0; index < metaPageCount; index++ {
+		record, ok, err := readMetaPageChecked(t.arena.data[index*PageSize : (index+1)*PageSize])
+		if err != nil || !ok || record.freeRoot == 0 {
+			continue
+		}
+		t.collectFreelistChainLenient(record.freeRoot, referenced)
+	}
+	for _, id := range t.metaFreelistPages {
+		referenced[id] = true
+	}
+
+	freeSet := map[PageID]bool{}
+	for _, id := range t.free {
+		freeSet[id] = true
+	}
+	for id, p := range t.pages {
+		if id < firstTreePageID || p == nil || p.flags() != flagFreelist || referenced[id] || freeSet[id] {
+			continue
+		}
+		t.free = append(t.free, id)
+		freeSet[id] = true
+	}
+}
+
+func (t *Tree) collectFreelistChainLenient(root PageID, out map[PageID]bool) {
+	seen := map[PageID]bool{}
+	for id := root; id != 0; {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		out[id] = true
+		p := t.pages[id]
+		if p == nil || p.flags() != flagFreelist || !p.validChecksum() || p.validateLayout() != nil {
+			return
+		}
+		id = p.freelistNext()
+	}
 }
 
 func (t *Tree) publishMeta() error {

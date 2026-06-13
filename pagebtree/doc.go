@@ -46,7 +46,8 @@
 // leaf-key count, plus persisted freelist IDs that exceed metadata capacity,
 // are out of range, duplicated, or still reachable. Small freelists are stored
 // inline in metadata; larger freelists spill to checked freelist pages that are
-// synced before metadata points at them.
+// synced before metadata points at them. Old freelist-page generations become
+// reusable only after neither checked metadata page still names their chain.
 // OpenMmapReadOnly opens mmap files with a shared read lock and rejects
 // mutations through the returned tree handle. Mmap-backed trees default to
 // random-access kernel advice, and expose Advise so callers can pass random,
