@@ -7,10 +7,11 @@ import "errors"
 var ErrDatabaseLocked = errors.New("mmap tree database is already locked")
 
 type MmapOptions struct {
-	Degree            int
-	MaxPages          int
-	AccessPattern     MmapAccessPattern
-	PageCacheCapacity int
+	Degree                  int
+	MaxPages                int
+	AccessPattern           MmapAccessPattern
+	PageCacheCapacity       int
+	RangePrefetchLeafWindow int
 }
 
 type MmapAccessPattern int

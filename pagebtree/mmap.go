@@ -41,10 +41,11 @@ const firstTreePageID = PageID(metaPageCount)
 const maxMetaFreePages = (PageSize - metaFreeListOff) / 8
 
 type MmapOptions struct {
-	Degree            int
-	MaxPages          int
-	AccessPattern     MmapAccessPattern
-	PageCacheCapacity int
+	Degree                  int
+	MaxPages                int
+	AccessPattern           MmapAccessPattern
+	PageCacheCapacity       int
+	RangePrefetchLeafWindow int
 }
 
 type mmapArena struct {
@@ -128,11 +129,12 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	}
 
 	tree := &Tree{
-		pages:     map[PageID]*page{},
-		nextPage:  firstTreePageID,
-		degree:    normalizeDegree(options.Degree),
-		arena:     arena,
-		pageCache: newPageCache(options.PageCacheCapacity),
+		pages:                   map[PageID]*page{},
+		nextPage:                firstTreePageID,
+		degree:                  normalizeDegree(options.Degree),
+		arena:                   arena,
+		pageCache:               newPageCache(options.PageCacheCapacity),
+		rangePrefetchLeafWindow: normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
 	}
 
 	if arena.initialized() {
@@ -187,11 +189,12 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 		readOnly: true,
 	}
 	tree := &Tree{
-		pages:     map[PageID]*page{},
-		nextPage:  firstTreePageID,
-		arena:     arena,
-		readOnly:  true,
-		pageCache: newPageCache(DefaultPageCacheCapacity),
+		pages:                   map[PageID]*page{},
+		nextPage:                firstTreePageID,
+		arena:                   arena,
+		readOnly:                true,
+		pageCache:               newPageCache(DefaultPageCacheCapacity),
+		rangePrefetchLeafWindow: DefaultRangePrefetchLeafWindow,
 	}
 	if err := tree.loadMeta(); err != nil {
 		arena.close()

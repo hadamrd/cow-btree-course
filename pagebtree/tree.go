@@ -3,24 +3,27 @@ package pagebtree
 import "errors"
 
 type Tree struct {
-	pages         map[PageID]*page
-	root          PageID
-	nextPage      PageID
-	length        int
-	revision      uint64
-	degree        int
-	activeReaders map[uint64]int
-	retired       []retiredPage
-	free          []PageID
-	reusedPages   int
-	arena         *mmapArena
-	closed        bool
-	readOnly      bool
-	pageCache     pageCache
+	pages                   map[PageID]*page
+	root                    PageID
+	nextPage                PageID
+	length                  int
+	revision                uint64
+	degree                  int
+	activeReaders           map[uint64]int
+	retired                 []retiredPage
+	free                    []PageID
+	reusedPages             int
+	arena                   *mmapArena
+	closed                  bool
+	readOnly                bool
+	pageCache               pageCache
+	rangePrefetchLeafWindow int
+	rangePrefetchHints      int
 }
 
 type Options struct {
-	PageCacheCapacity int
+	PageCacheCapacity       int
+	RangePrefetchLeafWindow int
 }
 
 func New(degree int) *Tree {
@@ -29,10 +32,11 @@ func New(degree int) *Tree {
 
 func NewWithOptions(degree int, options Options) *Tree {
 	return &Tree{
-		pages:     map[PageID]*page{},
-		nextPage:  1,
-		degree:    normalizeDegree(degree),
-		pageCache: newPageCache(options.PageCacheCapacity),
+		pages:                   map[PageID]*page{},
+		nextPage:                1,
+		degree:                  normalizeDegree(degree),
+		pageCache:               newPageCache(options.PageCacheCapacity),
+		rangePrefetchLeafWindow: normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
 	}
 }
 
@@ -95,7 +99,7 @@ func (t *Tree) Range(visit func(string, []byte) bool) {
 	if t.closed {
 		return
 	}
-	if t.activeReaderCount() == 0 && rangeLinkedLeaves(t.pages, t.root, t.rangePrefetcher(), visit) {
+	if t.activeReaderCount() == 0 && rangeLinkedLeaves(t.pages, t.root, t.rangePrefetchLeafWindow, t.rangePrefetcher(), visit) {
 		return
 	}
 	rangePage(t.pages, t.root, visit)
@@ -106,7 +110,7 @@ func (t *Tree) RangeFrom(start string, visit func(string, []byte) bool) {
 	if t.closed {
 		return
 	}
-	if t.activeReaderCount() == 0 && rangeLinkedLeavesFrom(t.pages, t.root, start, t.rangePrefetcher(), visit) {
+	if t.activeReaderCount() == 0 && rangeLinkedLeavesFrom(t.pages, t.root, start, t.rangePrefetchLeafWindow, t.rangePrefetcher(), visit) {
 		return
 	}
 	rangePageFrom(t.pages, t.root, start, visit)
@@ -117,14 +121,14 @@ func (t *Tree) RangeBetween(start, end string, visit func(string, []byte) bool) 
 	if t.closed {
 		return
 	}
-	if t.activeReaderCount() == 0 && rangeLinkedLeavesBetween(t.pages, t.root, start, end, t.rangePrefetcher(), visit) {
+	if t.activeReaderCount() == 0 && rangeLinkedLeavesBetween(t.pages, t.root, start, end, t.rangePrefetchLeafWindow, t.rangePrefetcher(), visit) {
 		return
 	}
 	rangePageBetween(t.pages, t.root, start, end, visit)
 }
 
 func (t *Tree) rangePrefetcher() func(PageID) {
-	if t.arena == nil {
+	if t.arena == nil || t.rangePrefetchLeafWindow <= 0 {
 		return nil
 	}
 	advised := map[PageID]bool{}
@@ -133,8 +137,20 @@ func (t *Tree) rangePrefetcher() func(PageID) {
 			return
 		}
 		advised[id] = true
-		_ = t.arena.advisePageRange(id, id+1, MmapAccessWillNeed)
+		if err := t.arena.advisePageRange(id, id+1, MmapAccessWillNeed); err == nil {
+			t.rangePrefetchHints++
+		}
 	}
+}
+
+func normalizeRangePrefetchLeafWindow(window int) int {
+	if window < 0 {
+		return 0
+	}
+	if window == 0 {
+		return DefaultRangePrefetchLeafWindow
+	}
+	return window
 }
 
 func (t *Tree) Snapshot() *Snapshot {

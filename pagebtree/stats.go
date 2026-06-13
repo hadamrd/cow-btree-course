@@ -1,26 +1,28 @@
 package pagebtree
 
 type Stats struct {
-	Root                   PageID
-	Len                    int
-	Revision               uint64
-	Degree                 int
-	Height                 int
-	Pages                  int
-	Keys                   int
-	Separators             int
-	AllocatedPages         int
-	RetiredPages           int
-	FreePages              int
-	ActiveReaders          int
-	ReusedPages            int
-	Storage                string
-	PageCacheEntries       int
-	PageCacheCapacity      int
-	PageCacheHits          int
-	PageCacheMisses        int
-	PageCacheInvalidations int
-	PageCacheEvictions     int
+	Root                    PageID
+	Len                     int
+	Revision                uint64
+	Degree                  int
+	Height                  int
+	Pages                   int
+	Keys                    int
+	Separators              int
+	AllocatedPages          int
+	RetiredPages            int
+	FreePages               int
+	ActiveReaders           int
+	ReusedPages             int
+	Storage                 string
+	PageCacheEntries        int
+	PageCacheCapacity       int
+	PageCacheHits           int
+	PageCacheMisses         int
+	PageCacheInvalidations  int
+	PageCacheEvictions      int
+	RangePrefetchLeafWindow int
+	RangePrefetchHints      int
 }
 
 func statsFor(t *Tree) Stats {
@@ -41,6 +43,8 @@ func statsFor(t *Tree) Stats {
 	stats.PageCacheMisses = cacheStats.Misses
 	stats.PageCacheInvalidations = cacheStats.Invalidations
 	stats.PageCacheEvictions = cacheStats.Evictions
+	stats.RangePrefetchLeafWindow = t.rangePrefetchLeafWindow
+	stats.RangePrefetchHints = t.rangePrefetchHints
 	return stats
 }
 

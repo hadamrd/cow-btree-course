@@ -2,7 +2,7 @@ package pagebtree
 
 import "slices"
 
-const rangePrefetchLeafWindow = 2
+const DefaultRangePrefetchLeafWindow = 2
 
 func searchPage(pages map[PageID]*page, root PageID, key string) ([]byte, bool) {
 	return searchPageWithCache(pages, root, key, nil)
@@ -89,7 +89,7 @@ func rangePageBetween(pages map[PageID]*page, root PageID, start, end string, vi
 	return true
 }
 
-func rangeLinkedLeaves(pages map[PageID]*page, root PageID, prefetch func(PageID), visit func(string, []byte) bool) bool {
+func rangeLinkedLeaves(pages map[PageID]*page, root PageID, prefetchWindow int, prefetch func(PageID), visit func(string, []byte) bool) bool {
 	leaf := leftmostLeaf(pages, root)
 	seen := map[PageID]bool{}
 	for leaf != 0 {
@@ -102,7 +102,7 @@ func rangeLinkedLeaves(pages map[PageID]*page, root PageID, prefetch func(PageID
 		if p == nil || !p.isLeaf() {
 			return false
 		}
-		prefetchNextLeaves(pages, p.nextLeaf(), rangePrefetchLeafWindow, prefetch)
+		prefetchNextLeaves(pages, p.nextLeaf(), prefetchWindow, prefetch)
 		if !rangeLeafSlots(pages, p, 0, "", false, visit) {
 			return true
 		}
@@ -111,7 +111,7 @@ func rangeLinkedLeaves(pages map[PageID]*page, root PageID, prefetch func(PageID
 	return true
 }
 
-func rangeLinkedLeavesFrom(pages map[PageID]*page, root PageID, start string, prefetch func(PageID), visit func(string, []byte) bool) bool {
+func rangeLinkedLeavesFrom(pages map[PageID]*page, root PageID, start string, prefetchWindow int, prefetch func(PageID), visit func(string, []byte) bool) bool {
 	leaf := leafForKey(pages, root, start)
 	seen := map[PageID]bool{}
 	firstLeaf := true
@@ -125,7 +125,7 @@ func rangeLinkedLeavesFrom(pages map[PageID]*page, root PageID, start string, pr
 		if p == nil || !p.isLeaf() {
 			return false
 		}
-		prefetchNextLeaves(pages, p.nextLeaf(), rangePrefetchLeafWindow, prefetch)
+		prefetchNextLeaves(pages, p.nextLeaf(), prefetchWindow, prefetch)
 
 		index := 0
 		if firstLeaf {
@@ -140,7 +140,7 @@ func rangeLinkedLeavesFrom(pages map[PageID]*page, root PageID, start string, pr
 	return true
 }
 
-func rangeLinkedLeavesBetween(pages map[PageID]*page, root PageID, start, end string, prefetch func(PageID), visit func(string, []byte) bool) bool {
+func rangeLinkedLeavesBetween(pages map[PageID]*page, root PageID, start, end string, prefetchWindow int, prefetch func(PageID), visit func(string, []byte) bool) bool {
 	if compareStrings(start, end) >= 0 {
 		return true
 	}
@@ -160,7 +160,7 @@ func rangeLinkedLeavesBetween(pages map[PageID]*page, root PageID, start, end st
 		if first, ok := firstLeafKey(p); ok && compareStrings(first, end) >= 0 {
 			return true
 		}
-		prefetchNextLeavesBefore(pages, p.nextLeaf(), rangePrefetchLeafWindow, end, prefetch)
+		prefetchNextLeavesBefore(pages, p.nextLeaf(), prefetchWindow, end, prefetch)
 
 		index := 0
 		if firstLeaf {

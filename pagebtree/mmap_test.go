@@ -400,6 +400,78 @@ func TestMmapRangeFromStartsAtLowerBoundAndPrefetchesNextLeaves(t *testing.T) {
 	}
 }
 
+func TestMmapRangePrefetchWindowCanBeSized(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, RangePrefetchLeafWindow: 1})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var advised []PageID
+	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == MmapAccessWillNeed {
+			advised = append(advised, start)
+		}
+	}
+
+	tree.RangeFrom("key-17", func(key string, value []byte) bool {
+		return false
+	})
+
+	if len(advised) != 1 {
+		t.Fatalf("advised pages = %v, want exactly 1 page from configured range prefetch window", advised)
+	}
+	stats := tree.Stats()
+	if stats.RangePrefetchLeafWindow != 1 {
+		t.Fatalf("RangePrefetchLeafWindow = %d, want 1", stats.RangePrefetchLeafWindow)
+	}
+	if stats.RangePrefetchHints != 1 {
+		t.Fatalf("RangePrefetchHints = %d, want 1", stats.RangePrefetchHints)
+	}
+}
+
+func TestMmapRangePrefetchCanBeDisabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, RangePrefetchLeafWindow: -1})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var advised []PageID
+	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == MmapAccessWillNeed {
+			advised = append(advised, start)
+		}
+	}
+
+	tree.RangeFrom("key-17", func(key string, value []byte) bool {
+		return true
+	})
+
+	if len(advised) != 0 {
+		t.Fatalf("advised pages = %v, want no leaf prefetch hints when disabled", advised)
+	}
+	stats := tree.Stats()
+	if stats.RangePrefetchLeafWindow != 0 {
+		t.Fatalf("RangePrefetchLeafWindow = %d, want disabled window 0", stats.RangePrefetchLeafWindow)
+	}
+	if stats.RangePrefetchHints != 0 {
+		t.Fatalf("RangePrefetchHints = %d, want no prefetch hints when disabled", stats.RangePrefetchHints)
+	}
+}
+
 func TestMmapRangeBetweenStopsBeforeEndAndBoundsPrefetch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

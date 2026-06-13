@@ -12,8 +12,9 @@
 // RangeBetween use those leaf links when no active reader can make them stale,
 // and range scans compare slot keys before reading child ids or values so
 // bounded scans do not decode cells outside the requested key range.
-// Mmap-backed ranges prefetch a small bounded window of exact next leaf pages
-// with MADV_WILLNEED.
+// Mmap-backed ranges prefetch a configurable bounded window of exact next leaf
+// pages with MADV_WILLNEED; the window can be disabled when the caller wants to
+// avoid even exact linked-leaf hints.
 // Mmap-backed trees track dirty copied pages so Sync can flush changed data
 // pages before publishing metadata, and they can grow the mapped file when
 // allocation reaches the current capacity. Compact can trim unused mapped
@@ -35,6 +36,6 @@
 // kernel cache. Current-tree Get also keeps a small checksum-keyed cache of
 // decoded branch routing metadata. That derived cache is bounded by
 // least-recently-used eviction and can be sized through Options or MmapOptions;
-// Stats exposes its capacity, entries, hits, misses, invalidations, and
-// evictions.
+// Stats exposes its capacity, entries, hits, misses, invalidations, evictions,
+// range-prefetch window, and range-prefetch hint count.
 package pagebtree
