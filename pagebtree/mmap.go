@@ -387,12 +387,14 @@ func (t *Tree) shrinkMmap(newMaxPages int) error {
 	if err := t.arena.syncFileSize(); err != nil {
 		return err
 	}
-	if err := munmapBytes(t.arena.data); err != nil {
-		return err
-	}
 
 	data, err := mmapBytes(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
+		return err
+	}
+	oldData := t.arena.data
+	if err := munmapBytes(oldData); err != nil {
+		_ = munmapBytes(data)
 		return err
 	}
 	t.arena.data = data
