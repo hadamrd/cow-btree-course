@@ -11,25 +11,29 @@ import "slices"
 // rebuilds branch separators and collapses a one-child root. It deliberately
 // stops short of byte-balanced redistribution.
 func (t *Tree) Delete(key string) ([]byte, bool) {
-	if t.closed || t.readOnly || t.root == 0 {
-		return nil, false
+	old, deleted, changed := t.deleteStaged(key)
+	if changed {
+		t.publishStagedMutation()
 	}
+	return old, deleted
+}
 
+func (t *Tree) deleteStaged(key string) ([]byte, bool, bool) {
+	if t.closed || t.readOnly || t.root == 0 {
+		return nil, false, false
+	}
 	old, found := t.Get(key)
 	if !found {
-		return nil, false
+		return nil, false, false
 	}
 
 	rootID := t.copyPage(t.root)
 	if !t.deleteFrom(rootID, key) {
-		return nil, false
+		return nil, false, false
 	}
 	t.root = t.collapseRoot(rootID)
 	t.length--
-	t.revision++
-	t.reclaimRetiredPages()
-	t.relinkLeaves()
-	return old, true
+	return old, true, true
 }
 
 func (t *Tree) deleteFrom(pageID PageID, key string) bool {

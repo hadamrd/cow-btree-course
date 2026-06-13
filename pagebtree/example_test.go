@@ -33,6 +33,25 @@ func ExampleTree_Snapshot() {
 	// green
 }
 
+func ExampleTree_Batch() {
+	tree := pagebtree.New(2)
+	tree.Put("alpha", []byte("one"))
+	before := tree.Revision()
+
+	batch := tree.Batch()
+	batch.Put("alpha", []byte("two"))
+	batch.Put("bravo", []byte("three"))
+	batch.Commit()
+
+	alpha, _ := tree.Get("alpha")
+	bravo, _ := tree.Get("bravo")
+	fmt.Println(string(alpha), string(bravo))
+	fmt.Println(tree.Revision() - before)
+	// Output:
+	// two three
+	// 1
+}
+
 func ExampleTree_RangeFrom() {
 	tree := pagebtree.New(2)
 	for _, key := range []string{"alpha", "bravo", "charlie", "delta"} {

@@ -585,11 +585,13 @@ Serious pieces in this repository:
 - Layout and invariant validation.
 - Kernel page-cache hints and cache-residency stats.
 - Bounded derived branch-routing cache.
+- Explicit point write batches that publish one revision.
 
 Still research or incomplete compared with a production engine:
 
 - No concurrency-heavy lock manager.
-- No full transaction API with commit/abort batches.
+- No full ACID transaction API; point write batches exist, but richer
+  transaction ergonomics and failure rollback remain research work.
 - No sparse-file hole punching.
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with power-fail fault injection.

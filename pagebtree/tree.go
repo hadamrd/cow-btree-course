@@ -65,8 +65,16 @@ func (t *Tree) Get(key string) ([]byte, bool) {
 // Pages are never changed through an old page id. Before Put changes a page, it
 // first allocates a new page id and copies the old page contents there.
 func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
+	old, replaced, changed := t.putStaged(key, value)
+	if changed {
+		t.publishStagedMutation()
+	}
+	return old, replaced
+}
+
+func (t *Tree) putStaged(key string, value []byte) ([]byte, bool, bool) {
 	if t.closed || t.readOnly {
-		return nil, false
+		return nil, false, false
 	}
 	if t.root == 0 {
 		id := t.allocPage()
@@ -75,9 +83,7 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 		t.pages[id] = leaf
 		t.root = id
 		t.length = 1
-		t.revision++
-		t.relinkLeaves()
-		return nil, false
+		return nil, false, true
 	}
 
 	rootID := t.copyPage(t.root)
@@ -94,10 +100,13 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 	if !replaced {
 		t.length++
 	}
+	return old, replaced, true
+}
+
+func (t *Tree) publishStagedMutation() {
 	t.revision++
 	t.reclaimRetiredPages()
 	t.relinkLeaves()
-	return old, replaced
 }
 
 func (t *Tree) Range(visit func(string, []byte) bool) {
