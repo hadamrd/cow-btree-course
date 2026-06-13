@@ -381,6 +381,7 @@ func (t *Tree) removeFreePagesAtOrAbove(limit PageID) {
 
 func (t *Tree) shrinkMmap(newMaxPages int) error {
 	newSize := int64((newMaxPages + metaPageCount) * PageSize)
+	oldSize := int64(len(t.arena.data))
 	if err := t.arena.file.Truncate(newSize); err != nil {
 		return err
 	}
@@ -390,6 +391,12 @@ func (t *Tree) shrinkMmap(newMaxPages int) error {
 
 	data, err := mmapBytes(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
+		if restoreErr := t.arena.file.Truncate(oldSize); restoreErr != nil {
+			return errors.Join(err, restoreErr)
+		}
+		if syncErr := t.arena.syncFileSize(); syncErr != nil {
+			return errors.Join(err, syncErr)
+		}
 		return err
 	}
 	oldData := t.arena.data

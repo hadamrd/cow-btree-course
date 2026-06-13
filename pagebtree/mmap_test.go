@@ -471,6 +471,7 @@ func TestMmapShrinkMapsReplacementBeforeUnmappingOldMapping(t *testing.T) {
 	}
 	oldData := tree.arena.data
 	oldMaxPages := tree.arena.maxPages
+	oldSize := fileSize(t, path)
 
 	originalMmap := mmapBytes
 	originalMunmap := munmapBytes
@@ -501,6 +502,9 @@ func TestMmapShrinkMapsReplacementBeforeUnmappingOldMapping(t *testing.T) {
 	}
 	if tree.arena.maxPages != oldMaxPages {
 		t.Fatalf("maxPages after failed shrink = %d, want %d", tree.arena.maxPages, oldMaxPages)
+	}
+	if got := fileSize(t, path); got != oldSize {
+		t.Fatalf("file size after failed shrink = %d, want restored size %d", got, oldSize)
 	}
 	if got, ok := tree.Get("alpha"); !ok || string(got) != "one" {
 		t.Fatalf("Get after failed shrink = %q, %v; want one, true", got, ok)
