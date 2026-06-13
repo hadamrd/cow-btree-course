@@ -7,7 +7,7 @@ The project is intentionally small, heavily commented, and organized as a course
 ## What You Get
 
 - A clean generic B-tree package in [`btree/`](btree/)
-- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/)
+- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages
 - Copy-on-write writes with stable read-only snapshots
 - Runnable demos in [`cmd/cowbtree`](cmd/cowbtree/) and [`cmd/pagebtree-demo`](cmd/pagebtree-demo/)
 - Tests that document the behavior and invariants
@@ -54,7 +54,7 @@ Start with [`docs/index.md`](docs/index.md), then read in order:
 
 ## Deliberate Scope
 
-This is a teaching implementation, not a storage engine. It keeps nodes and pages in memory, stores values directly in B-tree nodes/pages, and implements insertion, lookup, range scans, snapshots, and structure stats. Deletion, byte-level page encoding, write-ahead logging, and disk persistence are left as guided exercises.
+This is a teaching implementation, not a storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, and leaf key/value records. Deletion, write-ahead logging, and disk persistence are left as guided exercises.
 
 ## License
 

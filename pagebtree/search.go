@@ -5,14 +5,19 @@ import "slices"
 func searchPage(pages map[PageID]*page, root PageID, key string) ([]byte, bool) {
 	for root != 0 {
 		p := pages[root]
-		index, found := slices.BinarySearch(p.keys, key)
-		if found {
-			return cloneBytes(p.values[index]), true
-		}
-		if p.leaf {
+		if p.isLeaf() {
+			entries := p.leafEntries()
+			index, found := slices.BinarySearchFunc(entries, key, func(entry leafEntry, key string) int {
+				return compareStrings(entry.key, key)
+			})
+			if found {
+				return cloneBytes(entries[index].value), true
+			}
 			return nil, false
 		}
-		root = p.children[index]
+
+		keys, children := p.branchParts()
+		root = children[childIndex(keys, key)]
 	}
 	return nil, false
 }
@@ -23,17 +28,41 @@ func rangePage(pages map[PageID]*page, root PageID, visit func(string, []byte) b
 	}
 
 	p := pages[root]
-	for i, key := range p.keys {
-		if !p.leaf && !rangePage(pages, p.children[i], visit) {
-			return false
+	if p.isLeaf() {
+		for _, entry := range p.leafEntries() {
+			if !visit(entry.key, cloneBytes(entry.value)) {
+				return false
+			}
 		}
-		if !visit(key, cloneBytes(p.values[i])) {
-			return false
-		}
+		return true
 	}
 
-	if !p.leaf {
-		return rangePage(pages, p.children[len(p.keys)], visit)
+	keys, children := p.branchParts()
+	for i, key := range keys {
+		if !rangePage(pages, children[i], visit) {
+			return false
+		}
+		_ = key
 	}
-	return true
+
+	return rangePage(pages, children[len(children)-1], visit)
+}
+
+func childIndex(keys []string, key string) int {
+	index, found := slices.BinarySearch(keys, key)
+	if found {
+		return index + 1
+	}
+	return index
+}
+
+func compareStrings(left, right string) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
 }

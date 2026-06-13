@@ -132,6 +132,12 @@ func TestStatsExposePageBackedStructure(t *testing.T) {
 	if stats.Len != 40 {
 		t.Fatalf("Len = %d, want 40", stats.Len)
 	}
+	if stats.Keys != 40 {
+		t.Fatalf("Keys = %d, want 40 leaf records", stats.Keys)
+	}
+	if stats.Separators == 0 {
+		t.Fatalf("Separators = 0, want branch separators after splits")
+	}
 	if stats.Height < 2 {
 		t.Fatalf("Height = %d, want at least 2", stats.Height)
 	}
@@ -146,6 +152,68 @@ func TestStatsExposePageBackedStructure(t *testing.T) {
 	}
 }
 
+func TestLeafPagesUseSlottedLayout(t *testing.T) {
+	tree := New(4)
+	tree.Put("alpha", []byte("one"))
+	tree.Put("bravo", []byte("two"))
+	tree.Put("charlie", []byte("three"))
+
+	root := tree.pages[tree.root]
+	if !root.isLeaf() {
+		t.Fatalf("root should still be a leaf for three keys")
+	}
+	if got := root.slotCount(); got != 3 {
+		t.Fatalf("slot count = %d, want 3", got)
+	}
+
+	first := root.readSlot(0)
+	second := root.readSlot(1)
+	third := root.readSlot(2)
+	if int(first.offset) < pageHeaderSize+3*slotSize {
+		t.Fatalf("first cell offset %d overlaps header+slots", first.offset)
+	}
+	if second.offset >= first.offset {
+		t.Fatalf("cells should grow left from page end: second offset %d, first offset %d", second.offset, first.offset)
+	}
+	if third.offset >= second.offset {
+		t.Fatalf("cells should keep growing left: third offset %d, second offset %d", third.offset, second.offset)
+	}
+	if root.freeUpper() != third.offset {
+		t.Fatalf("freeUpper = %d, want newest cell offset %d", root.freeUpper(), third.offset)
+	}
+
+	key, value := root.readCell(0)
+	if key != "alpha" || string(value) != "one" {
+		t.Fatalf("slot 0 cell = %q/%q, want alpha/one", key, value)
+	}
+}
+
+func TestBranchPagesUseSlottedSeparatorsAndChildPageIDs(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 20; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	root := tree.pages[tree.root]
+	if !root.isBranch() {
+		t.Fatalf("root should be a branch after enough inserts")
+	}
+	if root.leftmostChild() == 0 {
+		t.Fatalf("branch root leftmost child page id is zero")
+	}
+	if root.slotCount() == 0 {
+		t.Fatalf("branch root has no separator slots")
+	}
+
+	key, encodedChild := root.readCell(0)
+	if key == "" {
+		t.Fatalf("branch separator key is empty")
+	}
+	if got := decodePageID(encodedChild); got == 0 {
+		t.Fatalf("branch separator child page id decoded to zero")
+	}
+}
+
 func sharesAtLeastOnePage(leftRoot, rightRoot PageID, pages map[PageID]*page) bool {
 	seen := map[PageID]bool{}
 	collectPageIDs(leftRoot, pages, seen)
@@ -157,7 +225,7 @@ func collectPageIDs(root PageID, pages map[PageID]*page, seen map[PageID]bool) {
 		return
 	}
 	seen[root] = true
-	for _, child := range pages[root].children {
+	for _, child := range pages[root].childIDs() {
 		collectPageIDs(child, pages, seen)
 	}
 }
@@ -169,7 +237,7 @@ func hasSeenPageID(root PageID, pages map[PageID]*page, seen map[PageID]bool) bo
 	if seen[root] {
 		return true
 	}
-	for _, child := range pages[root].children {
+	for _, child := range pages[root].childIDs() {
 		if hasSeenPageID(child, pages, seen) {
 			return true
 		}

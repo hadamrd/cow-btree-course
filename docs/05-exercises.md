@@ -45,9 +45,9 @@ flowchart TD
 
 Keep the copy-on-write rule: clone any node before changing it.
 
-## Exercise 4: Convert to a B+tree
+## Exercise 4: Convert `btree` to a B+tree
 
-A B+tree stores all values in leaves and uses internal keys only as separators.
+The `pagebtree` package already uses the B+tree-style rule: branch pages store separator keys and child page IDs, while leaf pages store key/value records. Try applying that same idea to the pointer-based `btree` package.
 
 Benefits:
 

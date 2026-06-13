@@ -1,6 +1,6 @@
 # 06. Page-backed Copy-on-Write Tree
 
-The first package, `btree`, teaches the logical B-tree algorithm. The second package, `pagebtree`, makes the storage-engine idea more explicit: nodes are pages, pages have stable ids, writes allocate copied pages, and the current tree is published by changing the root page id.
+The first package, `btree`, teaches the logical B-tree algorithm. The second package, `pagebtree`, makes the storage-engine idea more explicit: nodes are fixed-size slotted pages, pages have stable ids, writes allocate copied pages, and the current tree is published by changing the root page id.
 
 ## Why Add Pages?
 
@@ -23,6 +23,17 @@ type Tree struct {
     nextPage PageID
 }
 ```
+
+Each page uses the classic slotted-page shape:
+
+```mermaid
+flowchart LR
+    H["header<br/>flags, slot count, freeUpper, leftmost child"] --> S["slot directory<br/>offset, keyLen, valueLen"]
+    S --> F["free space"]
+    C["cells<br/>key bytes + value bytes"] --> F
+```
+
+The header and slots grow from the front of the page. Cells are copied from the end of the page backward. Leaf cells store key/value records. Branch cells store separator keys, and their value bytes encode the child page id to the right of that separator.
 
 ## Put and Get
 
@@ -49,9 +60,10 @@ On every write:
 
 1. Copy the root page to a new page id.
 2. Descend toward the key.
-3. Before descending into a child, copy that child to a new page id.
-4. Split copied full pages as needed.
-5. Publish the copied root id as the new root.
+3. On branch pages, binary-search separator keys and follow the selected child page id.
+4. Before descending into a child, copy that child to a new page id.
+5. Split copied full pages as needed.
+6. Publish the copied root id as the new root.
 
 ```mermaid
 sequenceDiagram
@@ -86,11 +98,12 @@ The test `TestSnapshotKeepsOldRootAfterCopyOnWritePuts` proves this behavior:
 
 ## What Is Still Simplified?
 
-The page package models page identity and root publication, but it is still intentionally readable:
+The page package models page identity, root publication, and slotted cell storage, but it is still intentionally readable:
 
-- Page contents are Go slices, not encoded byte arrays.
-- `PageSize` is a teaching constant, not an enforced allocator limit.
-- Values live in internal pages too, so this is a B-tree rather than a B+tree.
+- Pages are kept in an in-memory map rather than written to disk.
+- The implementation rewrites a copied page from decoded entries during insertion; it does not do in-place cell compaction.
+- `PageSize` is enforced by the slotted writer, but the examples use tiny degree values so page overflow is not the main teaching problem.
+- Branch pages contain separator keys and child page ids; values live in leaves.
 - There is no deletion or disk persistence yet.
 
 Those are good next exercises once the page-id copy-on-write mechanics are clear.

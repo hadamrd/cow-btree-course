@@ -36,9 +36,9 @@ btree/
   tree.go       Public Tree API
 
 pagebtree/
-  page.go       Page ids and page copies
+  page.go       Slotted page header, slots, and cells
   tree.go       Root page publication
-  insert.go     Page-copying insertion and splitting
+  insert.go     Page-copying insertion and B+tree-style splitting
   snapshot.go   Read-only historical root page ids
 
 cmd/cowbtree/        Logical B-tree demonstration

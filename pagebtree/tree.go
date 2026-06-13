@@ -44,18 +44,15 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 	}
 
 	rootID := t.copyPage(t.root)
-	if t.pages[rootID].full(t.degree) {
+	old, replaced, split := t.insert(rootID, key, value)
+	if split != nil {
 		newRootID := t.allocPage()
-		t.pages[newRootID] = &page{
-			id:       newRootID,
-			leaf:     false,
-			children: []PageID{rootID},
-		}
-		t.splitChild(newRootID, 0)
+		newRoot := newPage(newRootID, flagBranch)
+		t.pages[newRootID] = newRoot
+		mustWriteBranchParts(newRoot, []string{split.separator}, []PageID{rootID, split.right})
 		rootID = newRootID
 	}
 
-	old, replaced := t.insertNonFull(rootID, key, value)
 	t.root = rootID
 	if !replaced {
 		t.length++

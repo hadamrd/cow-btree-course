@@ -74,7 +74,7 @@ If you add new write operations, keep that discipline. Any helper that mutates a
 
 ## Page-backed Tree
 
-`pagebtree/` is the second implementation. It keeps the same learner-friendly B-tree algorithm, but replaces direct child pointers with page ids.
+`pagebtree/` is the second implementation. It keeps the learner-friendly search shape, but replaces direct child pointers with page ids and stores page contents in a slotted byte layout.
 
 ```mermaid
 flowchart LR
@@ -85,6 +85,6 @@ flowchart LR
 
 Read this package after the pointer-based `btree` package. The important files are:
 
-- `pagebtree/page.go` for page ids and page copies.
+- `pagebtree/page.go` for the slotted page header, slot directory, and cells.
 - `pagebtree/tree.go` for `Put`, `Get`, snapshots, and root page publication.
-- `pagebtree/insert.go` for copy-before-descend insertion.
+- `pagebtree/insert.go` for copy-before-descend insertion and leaf/branch splits.
