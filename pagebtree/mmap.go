@@ -95,10 +95,10 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	existingSize := info.Size()
 	maxPages := options.MaxPages
 	if existingSize > 0 {
-		if existingSize%PageSize != 0 {
+		if err := validateExistingMmapFileSize(existingSize); err != nil {
 			unlockFile(file)
 			file.Close()
-			return nil, fmt.Errorf("mmap tree file size %d is not page aligned", existingSize)
+			return nil, err
 		}
 		maxPages = int(existingSize/PageSize) - metaPageCount
 	} else if maxPages < minMmapPageCount {
@@ -175,10 +175,10 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 		file.Close()
 		return nil, err
 	}
-	if info.Size() == 0 || info.Size()%PageSize != 0 {
+	if err := validateExistingMmapFileSize(info.Size()); err != nil {
 		unlockFile(file)
 		file.Close()
-		return nil, fmt.Errorf("mmap tree file size %d is not page aligned", info.Size())
+		return nil, err
 	}
 
 	size := int(info.Size())
@@ -223,6 +223,17 @@ func (a *mmapArena) initialized() bool {
 		}
 	}
 	return false
+}
+
+func validateExistingMmapFileSize(size int64) error {
+	if size%PageSize != 0 {
+		return fmt.Errorf("mmap tree file size %d is not page aligned", size)
+	}
+	minSize := int64((metaPageCount + minMmapPageCount) * PageSize)
+	if size < minSize {
+		return fmt.Errorf("%w: mmap tree file size %d below minimum %d", ErrMetaInvariant, size, minSize)
+	}
+	return nil
 }
 
 func (a *mmapArena) pageBytes(id PageID) ([]byte, error) {

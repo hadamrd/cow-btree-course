@@ -77,6 +77,40 @@ func TestMmapReopenDoesNotExpandExistingFileFromMaxPagesHint(t *testing.T) {
 	}
 }
 
+func TestMmapRejectsExistingFileBelowMinimumSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	createSparseFile(t, path, PageSize)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with undersized existing file")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap undersized file error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "below minimum") {
+		t.Fatalf("OpenMmap undersized file error = %v, want minimum-size detail", err)
+	}
+}
+
+func TestMmapReadOnlyRejectsExistingFileBelowMinimumSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	createSparseFile(t, path, PageSize)
+
+	reader, err := OpenMmapReadOnly(path)
+	if err == nil {
+		reader.Close()
+		t.Fatalf("OpenMmapReadOnly succeeded with undersized existing file")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmapReadOnly undersized file error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "below minimum") {
+		t.Fatalf("OpenMmapReadOnly undersized file error = %v, want minimum-size detail", err)
+	}
+}
+
 func TestMmapTreePersistsLargeOverflowValueAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 	large := bytes.Repeat([]byte("z"), PageSize*2+321)
@@ -2434,6 +2468,22 @@ func fileSize(t *testing.T, path string) int64 {
 		t.Fatalf("Stat(%s): %v", path, err)
 	}
 	return info.Size()
+}
+
+func createSparseFile(t *testing.T, path string, size int64) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile create sparse file: %v", err)
+	}
+	if err := file.Truncate(size); err != nil {
+		file.Close()
+		t.Fatalf("Truncate sparse file to %d: %v", size, err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close sparse file: %v", err)
+	}
 }
 
 func mutatePage(t *testing.T, path string, id PageID, mutate func(*page)) {
