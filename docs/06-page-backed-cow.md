@@ -163,7 +163,7 @@ flowchart LR
 
 The leaf slot carries an overflow flag. When that flag is set, the cell value is a small `OVF1` reference containing the first overflow page id and the logical value length. When the flag is not set, the cell value is ordinary user bytes, even if those bytes happen to start with `OVF1`. Each overflow page stores a payload chunk and the next overflow page id. `Get` follows that chain and returns a fresh byte slice to the caller.
 
-On mmap reopen, the overflow reference and chain must agree exactly. A chain that contains fewer payload bytes than the reference length is truncated/corrupt. A chain that contains more payload bytes than the reference length is also suspicious: recovery would otherwise silently ignore bytes that are still reachable through the chain. The validator therefore requires the summed overflow payload length to equal the `OVF1` reference length.
+On mmap reopen, the overflow reference and chain must agree exactly. Every referenced page in the chain must be an overflow page, not merely a valid checksummed leaf or branch page. A chain that contains fewer payload bytes than the reference length is truncated/corrupt. A chain that contains more payload bytes than the reference length is also suspicious: recovery would otherwise silently ignore bytes that are still reachable through the chain. The validator therefore requires the summed overflow payload length to equal the `OVF1` reference length.
 
 Overflow pages are immutable once published. When a large value is replaced, the old overflow chain is retired with the same reader-pinned freelist rules as copied tree pages, so older snapshots can still read the old bytes until they close.
 

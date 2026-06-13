@@ -1114,6 +1114,9 @@ func (t *Tree) validateOverflowValue(raw []byte, flags uint16, seen map[PageID]b
 		if err := p.validateLayout(); err != nil {
 			return err
 		}
+		if !p.isOverflow() {
+			return fmt.Errorf("%w: page %d in overflow chain is not an overflow page", ErrOverflowInvariant, id)
+		}
 		length += p.overflowPayloadLen()
 		id = p.overflowNext()
 	}

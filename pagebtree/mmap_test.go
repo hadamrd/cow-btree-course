@@ -1842,6 +1842,40 @@ func TestMmapTreeRejectsMissingReachableOverflowPage(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsOverflowReferenceToNonOverflowPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	value := bytes.Repeat([]byte("o"), PageSize*2+17)
+	tree.Put("large", value)
+	root := tree.pages[tree.root]
+	if _, ok := root.overflowRef("large"); !ok {
+		t.Fatalf("large value was not stored as an overflow reference")
+	}
+	spareLeaf := appendFreeTailPage(t, tree)
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	corruptLeafOverflowRefFirst(t, path, root.id, "large", spareLeaf)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with overflow reference to non-overflow page")
+	}
+	if !errors.Is(err, ErrOverflowInvariant) {
+		t.Fatalf("OpenMmap non-overflow page error = %v, want ErrOverflowInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "not an overflow page") {
+		t.Fatalf("OpenMmap non-overflow page error = %v, want page-kind detail", err)
+	}
+}
+
 func TestMmapTreeRejectsOverflowChainLongerThanReference(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
