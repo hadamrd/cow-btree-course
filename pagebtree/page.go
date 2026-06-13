@@ -171,6 +171,13 @@ func (p *page) readCell(index int) (string, []byte) {
 	return string(p.data[keyStart:keyEnd]), value
 }
 
+func (p *page) readCellKey(index int) string {
+	slot := p.readSlot(index)
+	keyStart := int(slot.offset)
+	keyEnd := keyStart + int(slot.keyLen)
+	return string(p.data[keyStart:keyEnd])
+}
+
 func (p *page) readCellValue(index int) []byte {
 	slot := p.readSlot(index)
 	valueStart := int(slot.offset) + int(slot.keyLen)

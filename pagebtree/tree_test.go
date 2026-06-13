@@ -540,6 +540,48 @@ func TestLeafSlotSearchReadsOnlySelectedCellValue(t *testing.T) {
 	}
 }
 
+func TestRangeBetweenStopsBeforeReadingOutOfBoundLeafCellValue(t *testing.T) {
+	leaf := newPage(1, flagLeaf)
+	mustWriteLeafEntries(leaf, []leafEntry{
+		{key: "alpha", value: []byte("one")},
+		{key: "bravo", value: []byte("two")},
+		{key: "charlie", value: []byte("three")},
+	})
+	corruptSlotValueLen(leaf, 2, PageSize)
+
+	var got []string
+	rangePageBetween(map[PageID]*page{1: leaf}, 1, "alpha", "charlie", func(key string, value []byte) bool {
+		got = append(got, fmt.Sprintf("%s=%s", key, value))
+		return true
+	})
+
+	want := []string{"alpha=one", "bravo=two"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rangePageBetween(alpha,charlie) = %v, want %v", got, want)
+	}
+}
+
+func TestRangeFromStartsBeforeReadingLowerLeafCellValue(t *testing.T) {
+	leaf := newPage(1, flagLeaf)
+	mustWriteLeafEntries(leaf, []leafEntry{
+		{key: "alpha", value: []byte("one")},
+		{key: "bravo", value: []byte("two")},
+		{key: "charlie", value: []byte("three")},
+	})
+	corruptSlotValueLen(leaf, 0, PageSize)
+
+	var got []string
+	rangePageFrom(map[PageID]*page{1: leaf}, 1, "bravo", func(key string, value []byte) bool {
+		got = append(got, fmt.Sprintf("%s=%s", key, value))
+		return true
+	})
+
+	want := []string{"bravo=two", "charlie=three"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rangePageFrom(bravo) = %v, want %v", got, want)
+	}
+}
+
 func TestBranchSlotSearchChoosesChildPageID(t *testing.T) {
 	branch := newPage(9, flagBranch)
 	mustWriteBranchParts(branch, []string{"bravo", "delta"}, []PageID{10, 20, 30})
@@ -720,4 +762,11 @@ func sequentialKeys(count int) []string {
 		keys = append(keys, fmt.Sprintf("key-%02d", i))
 	}
 	return keys
+}
+
+func corruptSlotValueLen(p *page, index int, valueLen int) {
+	slot := p.readSlot(index)
+	slot.valueLen = uint16(valueLen)
+	p.writeSlot(index, slot)
+	p.updateChecksum()
 }
