@@ -157,11 +157,73 @@ func (r *readerTable) oldest() (uint64, bool, error) {
 	return oldest, found, err
 }
 
+func (r *readerTable) stats() (MmapReaderStats, error) {
+	stats, _, err := r.scan(false)
+	return stats, err
+}
+
+func (r *readerTable) cleanStale() (int, error) {
+	_, cleared, err := r.scan(true)
+	return cleared, err
+}
+
 func (r *readerTable) close() error {
 	if r == nil {
 		return nil
 	}
 	return errors.Join(r.release(), r.file.Close())
+}
+
+func (r *readerTable) scan(cleanStale bool) (MmapReaderStats, int, error) {
+	stats := MmapReaderStats{Slots: readerTableSlotCount}
+	cleared := 0
+	if r == nil {
+		return MmapReaderStats{}, 0, nil
+	}
+	err := r.withLock(func() error {
+		for slot := 0; slot < readerTableSlotCount; slot++ {
+			current, err := r.readSlotLocked(slot)
+			if err != nil {
+				return err
+			}
+			if !current.active {
+				continue
+			}
+			if !pidAlive(current.pid) {
+				stats.StaleSlots++
+				if cleanStale {
+					if err := r.writeSlotActiveLocked(slot, false); err != nil {
+						return err
+					}
+					cleared++
+				}
+				continue
+			}
+			stats.ActiveSlots++
+			if !stats.HasOldestRevision || current.revision < stats.OldestRevision {
+				stats.OldestRevision = current.revision
+				stats.HasOldestRevision = true
+			}
+		}
+		return nil
+	})
+	return stats, cleared, err
+}
+
+// MmapReaderStats reports the current mmap reader-table slots for this tree.
+func (t *Tree) MmapReaderStats() (MmapReaderStats, error) {
+	if t == nil || t.closed || t.arena == nil || t.arena.readerTable == nil {
+		return MmapReaderStats{}, nil
+	}
+	return t.arena.readerTable.stats()
+}
+
+// CleanStaleMmapReaders clears reader-table slots owned by dead processes.
+func (t *Tree) CleanStaleMmapReaders() (int, error) {
+	if t == nil || t.closed || t.arena == nil || t.arena.readerTable == nil {
+		return 0, nil
+	}
+	return t.arena.readerTable.cleanStale()
 }
 
 func (r *readerTable) ensureFileLocked() error {

@@ -2860,6 +2860,128 @@ func TestMmapReadOnlyCoexistsWithWriterAndPinsRecycling(t *testing.T) {
 	}
 }
 
+func TestMmapReaderStatsReportsActiveReadOnlySlot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	writer, err = OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		reader.Close()
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+
+	stats, err := writer.MmapReaderStats()
+	if err != nil {
+		writer.Close()
+		reader.Close()
+		t.Fatalf("MmapReaderStats: %v", err)
+	}
+	if stats.Slots != readerTableSlotCount {
+		writer.Close()
+		reader.Close()
+		t.Fatalf("reader table slots = %d, want %d", stats.Slots, readerTableSlotCount)
+	}
+	if stats.ActiveSlots != 1 || stats.StaleSlots != 0 || !stats.HasOldestRevision || stats.OldestRevision != reader.Revision() {
+		writer.Close()
+		reader.Close()
+		t.Fatalf("reader stats with active reader = %+v, want one active slot at revision %d", stats, reader.Revision())
+	}
+
+	if err := reader.Close(); err != nil {
+		writer.Close()
+		t.Fatalf("Close reader: %v", err)
+	}
+	stats, err = writer.MmapReaderStats()
+	if err != nil {
+		writer.Close()
+		t.Fatalf("MmapReaderStats after reader close: %v", err)
+	}
+	if stats.ActiveSlots != 0 || stats.StaleSlots != 0 || stats.HasOldestRevision {
+		writer.Close()
+		t.Fatalf("reader stats after reader close = %+v, want no active/stale slots", stats)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+}
+
+func TestCleanStaleMmapReadersClearsDeadSlots(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+
+	table, err := openReaderTable(path)
+	if err != nil {
+		writer.Close()
+		t.Fatalf("openReaderTable: %v", err)
+	}
+	if err := table.withLock(func() error {
+		return table.writeSlotLocked(0, readerSlot{
+			active:   true,
+			pid:      -1,
+			revision: writer.Revision(),
+			token:    99,
+		})
+	}); err != nil {
+		table.close()
+		writer.Close()
+		t.Fatalf("write stale reader slot: %v", err)
+	}
+	if err := table.close(); err != nil {
+		writer.Close()
+		t.Fatalf("close injected reader table: %v", err)
+	}
+
+	stats, err := writer.MmapReaderStats()
+	if err != nil {
+		writer.Close()
+		t.Fatalf("MmapReaderStats before cleanup: %v", err)
+	}
+	if stats.ActiveSlots != 0 || stats.StaleSlots != 1 {
+		writer.Close()
+		t.Fatalf("reader stats before cleanup = %+v, want one stale slot", stats)
+	}
+
+	cleared, err := writer.CleanStaleMmapReaders()
+	if err != nil {
+		writer.Close()
+		t.Fatalf("CleanStaleMmapReaders: %v", err)
+	}
+	if cleared != 1 {
+		writer.Close()
+		t.Fatalf("CleanStaleMmapReaders cleared %d slots, want 1", cleared)
+	}
+
+	stats, err = writer.MmapReaderStats()
+	if err != nil {
+		writer.Close()
+		t.Fatalf("MmapReaderStats after cleanup: %v", err)
+	}
+	if stats.ActiveSlots != 0 || stats.StaleSlots != 0 || stats.HasOldestRevision {
+		writer.Close()
+		t.Fatalf("reader stats after cleanup = %+v, want no active/stale slots", stats)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+}
+
 func TestMmapReadOnlyRejectsMutations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

@@ -57,11 +57,12 @@ The `pagebtree` package now implements the core kernel of that strategy in Go:
 - persisted freelist metadata, including checked freelist spill pages
 - reader-pinned recycling for in-process snapshots
 - mmap read-only handles that claim sidecar reader-table slots
+- `MmapReaderStats` and `CleanStaleMmapReaders` for reader-table hygiene
 - one sidecar writer mutex, so one writer can coexist with read-only mmap readers
 - conservative compaction that refuses to shrink while a reader-table slot is active
 - `madvise`, Linux `posix_fadvise`, exact linked-leaf prefetch, explicit warm-up, explicit cache drop, and `mincore` residency stats
 
-The new reader-table code lives in `pagebtree/reader_table_unix.go`. The writer sees it through `oldestReaderRevision` in `pagebtree/freelist.go`; that function combines local snapshots and mmap reader-table slots before retired pages move into the reusable free list. `OpenMmapReadOnly` claims a slot after metadata recovery chooses a root, then clears that slot on `Close`.
+The reader-table code lives in `pagebtree/reader_table_unix.go`. The writer sees it through `oldestReaderRevision` in `pagebtree/freelist.go`; that function combines local snapshots and mmap reader-table slots before retired pages move into the reusable free list. `OpenMmapReadOnly` claims a slot after metadata recovery chooses a root, then clears that slot on `Close`. `MmapReaderStats` reports live and stale slots, and `CleanStaleMmapReaders` clears slots whose process ID no longer exists.
 
 ```mermaid
 sequenceDiagram
@@ -72,6 +73,7 @@ sequenceDiagram
 
     Reader->>Table: claim slot at revision N
     Writer->>Free: retire old page P at revision N
+    Writer->>Table: MmapReaderStats observes reader
     Writer->>Table: scan oldest reader
     Table-->>Writer: oldest = N
     Writer->>Free: keep P retired
@@ -120,7 +122,7 @@ This repository already takes that middle path in small form: raw bytes are not 
 Future research tracks:
 
 - replace the simple sidecar reader table with a cache-line-aligned mmap lock region
-- add stale-reader inspection APIs similar in spirit to LMDB reader checks
+- add reader-table generation/version hardening for rolling format upgrades
 - model multi-database catalogs inside one mapped file
 - make deletion byte-balanced, not only key-count balanced
 - add a formal crash-order test harness for metadata, freelist, and growth/shrink ordering

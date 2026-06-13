@@ -31,6 +31,14 @@ func (r *readerTable) oldest() (uint64, bool, error) {
 	return 0, false, nil
 }
 
+func (r *readerTable) stats() (MmapReaderStats, error) {
+	return MmapReaderStats{}, nil
+}
+
+func (r *readerTable) cleanStale() (int, error) {
+	return 0, nil
+}
+
 type mmapArena struct {
 	readerTable *readerTable
 }
@@ -75,6 +83,14 @@ func (t *Tree) DropMmapCache() error {
 
 func (t *Tree) MmapCacheStats() (MmapCacheStats, error) {
 	return MmapCacheStats{}, nil
+}
+
+func (t *Tree) MmapReaderStats() (MmapReaderStats, error) {
+	return MmapReaderStats{}, nil
+}
+
+func (t *Tree) CleanStaleMmapReaders() (int, error) {
+	return 0, nil
 }
 
 func (a *mmapArena) close() error {

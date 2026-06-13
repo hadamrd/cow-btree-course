@@ -35,7 +35,8 @@
 // while the sync error is returned.
 // A Snapshot requested after Close is inert and does not register a reader.
 // Post-close inspection and maintenance calls such as Stats, Sync, Advise,
-// DropMmapCache, and MmapCacheStats do not touch the released mapping.
+// DropMmapCache, MmapCacheStats, MmapReaderStats, and
+// CleanStaleMmapReaders do not touch the released mapping.
 // Reopen validation checks metadata format, version, database page size,
 // persisted degree, and bounds against the mapped file and declared capacity,
 // page checksums, and slotted-page structure before decoding reachable cells.
@@ -60,12 +61,14 @@
 // reader-table slot for the recovered revision, and rejects mutations through
 // the returned tree handle. Writers combine those reader slots with in-process
 // snapshots before recycling retired pages, so read-only mmap handles can
-// coexist with a writer while pinning old copy-on-write pages. Mmap-backed trees
-// default to random-access kernel advice, and expose Advise so callers can pass
-// random, sequential, will-need, or normal-policy access-pattern hints to the
-// mmap mapping and, on Linux, the backing file's readahead policy without adding
-// a second Go heap page cache. WarmMmapTree follows the current root and overflow
-// references, then asks the kernel to prefetch only those reachable page ranges.
+// coexist with a writer while pinning old copy-on-write pages. MmapReaderStats
+// reports live and stale reader-table slots, and CleanStaleMmapReaders clears
+// slots owned by dead processes. Mmap-backed trees default to random-access
+// kernel advice, and expose Advise so callers can pass random, sequential,
+// will-need, or normal-policy access-pattern hints to the mmap mapping and, on
+// Linux, the backing file's readahead policy without adding a second Go heap page
+// cache. WarmMmapTree follows the current root and overflow references, then
+// asks the kernel to prefetch only those reachable page ranges.
 // DropMmapCache syncs writable mmap trees before asking the kernel to evict
 // clean mapped tree pages with MADV_DONTNEED and Linux file-level DONTNEED
 // advice. MmapCacheStats uses mincore on Unix to show how many mapped OS pages

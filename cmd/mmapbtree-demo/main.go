@@ -12,6 +12,8 @@ import (
 func main() {
 	path := filepath.Join(os.TempDir(), "cow-btree-course-demo.db")
 	_ = os.Remove(path)
+	_ = os.Remove(path + ".readers")
+	_ = os.Remove(path + ".writer")
 
 	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{
 		Degree:   2,
@@ -63,6 +65,22 @@ func main() {
 	if err := reopened.Check(); err != nil {
 		log.Fatal(err)
 	}
+	reader, err := pagebtree.OpenMmapReadOnly(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	readerStats, err := reopened.MmapReaderStats()
+	if err != nil {
+		reader.Close()
+		log.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		log.Fatal(err)
+	}
+	readerStatsAfterClose, err := reopened.MmapReaderStats()
+	if err != nil {
+		log.Fatal(err)
+	}
 	afterCompact, err := os.Stat(path)
 	if err != nil {
 		log.Fatal(err)
@@ -85,6 +103,8 @@ func main() {
 	fmt.Printf("file size after compact:  %d bytes\n", afterCompact.Size())
 	fmt.Printf("key-17: %s\n", value)
 	fmt.Println("key-05: deleted")
+	fmt.Printf("reader table with read-only handle: %+v\n", readerStats)
+	fmt.Printf("reader table after close:       %+v\n", readerStatsAfterClose)
 	fmt.Printf("warmup: %d hint calls over %d reachable pages\n", warmStats.MmapWarmupHints, warmStats.MmapWarmupPages)
 	fmt.Printf("stats: %+v\n", reopened.Stats())
 	fmt.Printf("cache before drop: %+v\n", cacheStats)
