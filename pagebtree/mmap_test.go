@@ -2860,6 +2860,61 @@ func TestMmapReadOnlyCoexistsWithWriterAndPinsRecycling(t *testing.T) {
 	}
 }
 
+func TestMmapWriterCloseRefusesExternallyPinnedRetiredPages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	for i := 0; i < 24; i++ {
+		writer.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	writer, err = OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		reader.Close()
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+	for i := 0; i < 12; i++ {
+		if _, ok := writer.Delete(fmt.Sprintf("key-%02d", i)); !ok {
+			writer.Close()
+			reader.Close()
+			t.Fatalf("Delete key-%02d = false, want true", i)
+		}
+	}
+	if stats := writer.Stats(); stats.RetiredPages == 0 {
+		writer.Close()
+		reader.Close()
+		t.Fatalf("RetiredPages = 0, want externally pinned retired pages")
+	}
+
+	err = writer.Close()
+	if !errors.Is(err, ErrActiveReaders) {
+		reader.Close()
+		t.Fatalf("Close writer with external reader error = %v, want ErrActiveReaders", err)
+	}
+	if writer.closed {
+		reader.Close()
+		t.Fatalf("writer marked closed after refused close")
+	}
+
+	if err := reader.Close(); err != nil {
+		writer.Close()
+		t.Fatalf("Close reader: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer after reader close: %v", err)
+	}
+}
+
 func TestMmapReadOnlyPinsReaderTableBeforeLoadingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

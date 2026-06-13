@@ -63,7 +63,7 @@ The `pagebtree` package now implements the core kernel of that strategy in Go:
 - conservative compaction that refuses to shrink while a reader-table slot is active
 - `madvise`, Linux `posix_fadvise`, exact linked-leaf prefetch, explicit warm-up, explicit cache drop, and `mincore` residency stats
 
-The reader-table code lives in `pagebtree/reader_table_unix.go`. The writer sees it through `oldestReaderRevision` in `pagebtree/freelist.go`; that function combines local snapshots and mmap reader-table slots before retired pages move into the reusable free list. `OpenMmapReadOnly` claims a provisional revision-0 slot before metadata recovery, then updates that slot to the recovered root revision and clears it on `Close`. The revision-0 pin closes the race where a writer might otherwise recycle pages between a reader choosing a root and registering its watermark. `MmapReaderStats` reports live and stale slots, and `CleanStaleMmapReaders` clears slots whose process ID no longer exists. Existing malformed reader-table sidecars return `ErrReaderTable` rather than being silently reinitialized, because resetting them could forget active reader watermarks.
+The reader-table code lives in `pagebtree/reader_table_unix.go`. The writer sees it through `oldestReaderRevision` in `pagebtree/freelist.go`; that function combines local snapshots and mmap reader-table slots before retired pages move into the reusable free list. `OpenMmapReadOnly` claims a provisional revision-0 slot before metadata recovery, then updates that slot to the recovered root revision and clears it on `Close`. The revision-0 pin closes the race where a writer might otherwise recycle pages between a reader choosing a root and registering its watermark. `MmapReaderStats` reports live and stale slots, and `CleanStaleMmapReaders` clears slots whose process ID no longer exists. Existing malformed reader-table sidecars return `ErrReaderTable` rather than being silently reinitialized, because resetting them could forget active reader watermarks. Until the lab persists pending-retired pages by retirement revision, writable mmap handles refuse `Close` while external reader slots still pin retired pages; that prevents normal shutdown from losing the in-memory pending-retired list.
 
 ```mermaid
 sequenceDiagram
@@ -125,6 +125,7 @@ Future research tracks:
 
 - replace the simple sidecar reader table with a cache-line-aligned mmap lock region
 - add reader-table migration tooling for future incompatible sidecar formats
+- persist pending-retired page IDs by retirement revision, LMDB-style, so writers can close even while external readers still pin old pages
 - model multi-database catalogs inside one mapped file
 - make deletion byte-balanced, not only key-count balanced
 - add a formal crash-order test harness for metadata, freelist, and growth/shrink ordering
