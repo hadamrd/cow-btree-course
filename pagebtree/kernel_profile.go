@@ -12,6 +12,7 @@ type MDBKernelProfile struct {
 	PageSize       int
 	MaxMappedPages int
 	AccessPattern  MmapAccessPattern
+	KeyOrder       KeyOrder
 	ReadOnly       bool
 	Closed         bool
 
@@ -55,6 +56,7 @@ func (t *Tree) MDBKernelProfile() MDBKernelProfile {
 		Name:                  "openldap-mdb-inspired",
 		Storage:               "memory",
 		PageSize:              PageSize,
+		KeyOrder:              KeyOrderBytewise,
 		SlottedPages:          true,
 		BPlusTreePages:        true,
 		CopyOnWrite:           true,
@@ -67,6 +69,7 @@ func (t *Tree) MDBKernelProfile() MDBKernelProfile {
 
 	profile.ReadOnly = t.readOnly
 	profile.Closed = t.closed
+	profile.KeyOrder = normalizeKeyOrder(t.keyOrder)
 	profile.Root = t.root
 	profile.Revision = t.revision
 	profile.Keys = t.length

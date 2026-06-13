@@ -49,6 +49,9 @@ func TestMDBKernelProfileDescribesMemoryCoreWithoutMmapMechanics(t *testing.T) {
 	if profile.Storage != "memory" {
 		t.Fatalf("Storage = %q, want memory", profile.Storage)
 	}
+	if profile.KeyOrder != KeyOrderBytewise {
+		t.Fatalf("KeyOrder = %d, want bytewise", profile.KeyOrder)
+	}
 	if !profile.SlottedPages || !profile.BPlusTreePages || !profile.CopyOnWrite {
 		t.Fatalf("page flags = slotted:%v bplus:%v cow:%v; want all true", profile.SlottedPages, profile.BPlusTreePages, profile.CopyOnWrite)
 	}

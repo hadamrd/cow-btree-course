@@ -129,6 +129,9 @@ func TestMDBKernelProfileDescribesOpenLDAPStyleMmapCore(t *testing.T) {
 	if profile.AccessPattern != MmapAccessRandom {
 		t.Fatalf("AccessPattern = %d, want random", profile.AccessPattern)
 	}
+	if profile.KeyOrder != KeyOrderBytewise {
+		t.Fatalf("KeyOrder = %d, want bytewise", profile.KeyOrder)
+	}
 	if !profile.SlottedPages || !profile.CopyOnWrite || !profile.BPlusTreePages {
 		t.Fatalf("page kernel flags = slotted:%v cow:%v bplus:%v; want all true", profile.SlottedPages, profile.CopyOnWrite, profile.BPlusTreePages)
 	}
@@ -4888,6 +4891,92 @@ func TestMmapTreeRejectsOverflowPageAsTreeRoot(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not a tree page") {
 		t.Fatalf("OpenMmap overflow root error = %v, want tree-page detail", err)
+	}
+}
+
+func TestMmapTreePersistsBytewiseKeyOrderAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128, KeyOrder: KeyOrderBytewise})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.PutBytes([]byte{0x00, 0xff}, []byte("high"))
+	tree.PutBytes([]byte{0x00, 0x10}, []byte("low"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	_, record := newestMetaPage(t, path)
+	if record.keyOrder != KeyOrderBytewise {
+		t.Fatalf("metadata key order = %d, want bytewise", record.keyOrder)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen default key order: %v", err)
+	}
+	if got, ok := reopened.GetBytes([]byte{0x00, 0xff}); !ok || string(got) != "high" {
+		t.Fatalf("default reopen GetBytes(00ff) = %q, %v; want high, true", got, ok)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("Close default reopen: %v", err)
+	}
+
+	explicit, err := OpenMmap(path, MmapOptions{KeyOrder: KeyOrderBytewise})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen explicit bytewise key order: %v", err)
+	}
+	if got, ok := explicit.GetBytes([]byte{0x00, 0x10}); !ok || string(got) != "low" {
+		t.Fatalf("explicit reopen GetBytes(0010) = %q, %v; want low, true", got, ok)
+	}
+	if err := explicit.Close(); err != nil {
+		t.Fatalf("Close explicit reopen: %v", err)
+	}
+}
+
+func TestOpenMmapRejectsUnsupportedKeyOrderOption(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, KeyOrder: KeyOrder(99)})
+	if err == nil {
+		tree.Close()
+		t.Fatalf("OpenMmap succeeded with unsupported key order option")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap unsupported key order error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "key order") {
+		t.Fatalf("OpenMmap unsupported key order error = %v, want key-order detail", err)
+	}
+}
+
+func TestMmapTreeRejectsUnknownPersistedKeyOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.PutBytes([]byte{0x01}, []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	replaceNewestMetaBytes(t, path, func(data []byte) {
+		binary.LittleEndian.PutUint32(data[metaKeyOrderOff:], 99)
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with unknown persisted key order")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap unknown persisted key order error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "key order") {
+		t.Fatalf("OpenMmap unknown persisted key order error = %v, want key-order detail", err)
 	}
 }
 

@@ -43,6 +43,7 @@ const (
 	metaDegreeOff    = 56
 	metaMaxPagesOff  = 64
 	metaChecksumOff  = 72
+	metaKeyOrderOff  = 76
 	metaFreeCountOff = 80
 	metaFreeListOff  = 88
 	metaPageCount    = 2
@@ -55,6 +56,7 @@ const maxMetaFreePages = (PageSize - metaFreeListOff) / 8
 type MmapOptions struct {
 	Degree                  int
 	MaxPages                int
+	KeyOrder                KeyOrder
 	AccessPattern           MmapAccessPattern
 	PageCacheCapacity       int
 	RangePrefetchLeafWindow int
@@ -102,6 +104,10 @@ const (
 )
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
+	keyOrder, err := validateMmapKeyOrder(options.KeyOrder)
+	if err != nil {
+		return nil, err
+	}
 	writerLock, err := openWriterLock(path)
 	if err != nil {
 		return nil, err
@@ -181,6 +187,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		pages:                   map[PageID]*page{},
 		nextPage:                firstTreePageID,
 		degree:                  normalizeDegree(options.Degree),
+		keyOrder:                keyOrder,
 		arena:                   arena,
 		pageCache:               newPageCache(options.PageCacheCapacity),
 		rangePrefetchLeafWindow: normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
@@ -249,6 +256,7 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 	tree := &Tree{
 		pages:                   map[PageID]*page{},
 		nextPage:                firstTreePageID,
+		keyOrder:                KeyOrderBytewise,
 		arena:                   arena,
 		readOnly:                true,
 		pageCache:               newPageCache(DefaultPageCacheCapacity),
@@ -901,6 +909,7 @@ type metaRecord struct {
 	length        int
 	revision      uint64
 	degree        int
+	keyOrder      KeyOrder
 	maxPages      int
 	free          []PageID
 	retired       []retiredPage
@@ -926,6 +935,10 @@ func (t *Tree) loadMeta() error {
 			continue
 		}
 		if err := validateMetaSlot(record, index); err != nil {
+			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaErrorForRevision(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, record.revision)
+			continue
+		}
+		if err := t.validateMetaKeyOrder(record); err != nil {
 			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaErrorForRevision(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, record.revision)
 			continue
 		}
@@ -1071,6 +1084,7 @@ func (t *Tree) applyMetaRecord(record metaRecord) {
 	t.length = record.length
 	t.revision = record.revision
 	t.degree = normalizeDegree(record.degree)
+	t.keyOrder = record.keyOrder
 	t.free = nil
 	t.retired = nil
 	t.metaFreelistRoot = 0
@@ -1078,6 +1092,21 @@ func (t *Tree) applyMetaRecord(record metaRecord) {
 	if t.nextPage < firstTreePageID {
 		t.nextPage = firstTreePageID
 	}
+}
+
+func (t *Tree) validateMetaKeyOrder(record metaRecord) error {
+	if record.keyOrder != t.keyOrder {
+		return fmt.Errorf("%w: metadata key order %d does not match requested key order %d", ErrMetaInvariant, record.keyOrder, t.keyOrder)
+	}
+	return nil
+}
+
+func validateMmapKeyOrder(order KeyOrder) (KeyOrder, error) {
+	order = normalizeKeyOrder(order)
+	if order != KeyOrderBytewise {
+		return 0, fmt.Errorf("%w: key order %d unsupported", ErrMetaInvariant, order)
+	}
+	return order, nil
 }
 
 func clonePageSet(values map[PageID]bool) map[PageID]bool {
@@ -1225,6 +1254,7 @@ func (t *Tree) persistMeta() error {
 		length:   t.length,
 		revision: t.revision,
 		degree:   t.degree,
+		keyOrder: t.keyOrder,
 		maxPages: t.arena.maxPages,
 		free:     t.free,
 		retired:  t.retired,
@@ -1512,6 +1542,10 @@ func readMetaPageChecked(data []byte) (metaRecord, bool, error) {
 	if got != want {
 		return metaRecord{}, false, fmt.Errorf("%w: metadata checksum mismatch", ErrMetaInvariant)
 	}
+	keyOrder, err := validateMmapKeyOrder(KeyOrder(binary.LittleEndian.Uint32(data[metaKeyOrderOff:])))
+	if err != nil {
+		return metaRecord{}, false, err
+	}
 	freeCount := int(binary.LittleEndian.Uint64(data[metaFreeCountOff:]))
 	if version == 1 && freeCount > maxMetaFreePages {
 		return metaRecord{}, false, fmt.Errorf("%w: metadata free count %d exceeds %d", ErrMetaInvariant, freeCount, maxMetaFreePages)
@@ -1546,6 +1580,7 @@ func readMetaPageChecked(data []byte) (metaRecord, bool, error) {
 		length:    int(binary.LittleEndian.Uint64(data[metaLengthOff:])),
 		revision:  binary.LittleEndian.Uint64(data[metaRevisionOff:]),
 		degree:    int(binary.LittleEndian.Uint64(data[metaDegreeOff:])),
+		keyOrder:  keyOrder,
 		maxPages:  int(binary.LittleEndian.Uint64(data[metaMaxPagesOff:])),
 		free:      free,
 		freeCount: freeCount,
@@ -1583,6 +1618,10 @@ func writeMetaPage(data []byte, record metaRecord) error {
 	if record.freeRoot != 0 && reclaimCount == 0 {
 		return fmt.Errorf("%w: metadata reclaim root without records", ErrMetaInvariant)
 	}
+	keyOrder, err := validateMmapKeyOrder(record.keyOrder)
+	if err != nil {
+		return err
+	}
 
 	clear(data)
 	copy(data[metaMagicOffset:], metaMagic)
@@ -1594,6 +1633,7 @@ func writeMetaPage(data []byte, record metaRecord) error {
 	binary.LittleEndian.PutUint64(data[metaRevisionOff:], record.revision)
 	binary.LittleEndian.PutUint64(data[metaDegreeOff:], uint64(record.degree))
 	binary.LittleEndian.PutUint64(data[metaMaxPagesOff:], uint64(record.maxPages))
+	binary.LittleEndian.PutUint32(data[metaKeyOrderOff:], uint32(keyOrder))
 	binary.LittleEndian.PutUint64(data[metaFreeCountOff:], uint64(reclaimCount))
 	if record.freeRoot != 0 {
 		binary.LittleEndian.PutUint64(data[metaFreeListOff:], uint64(record.freeRoot))

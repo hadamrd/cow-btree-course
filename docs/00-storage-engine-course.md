@@ -574,6 +574,8 @@ Serious pieces in this repository:
 
 - Real fixed-size slotted pages.
 - String-key and opaque byte-key APIs ordered by bytewise page-key comparison.
+- mmap metadata that persists the bytewise key-order identity and rejects
+  unsupported ordering semantics on reopen.
 - Direct slot binary search for point lookup.
 - Branch child page IDs stored in page bytes.
 - Copy-on-write root publication.
@@ -611,11 +613,11 @@ Still research or incomplete compared with a production engine:
   sync publication, mmap growth, compact shrink, large-freelist spill, and
   large-reclaim spill have process-exit probes.
 - No pluggable comparator or locale/collation layer; byte-key APIs use the
-  current bytewise page order.
+  persisted bytewise page order.
 - No byte-balanced deletion across variable-size records.
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.
-- No multi-database catalog, duplicate keys, cursors, or comparator plugins.
+- No multi-database catalog, duplicate keys, or comparator plugins.
 - No portability story beyond the Unix mmap path and non-Unix stubs.
 
 The value is that the core mechanisms are visible. You can read the code without

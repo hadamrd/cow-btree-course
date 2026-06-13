@@ -9,6 +9,7 @@ type Tree struct {
 	length                  int
 	revision                uint64
 	degree                  int
+	keyOrder                KeyOrder
 	activeReaders           map[uint64]int
 	retired                 []retiredPage
 	free                    []PageID
@@ -40,6 +41,7 @@ func NewWithOptions(degree int, options Options) *Tree {
 		pages:                   map[PageID]*page{},
 		nextPage:                1,
 		degree:                  normalizeDegree(degree),
+		keyOrder:                KeyOrderBytewise,
 		pageCache:               newPageCache(options.PageCacheCapacity),
 		rangePrefetchLeafWindow: normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
 	}
