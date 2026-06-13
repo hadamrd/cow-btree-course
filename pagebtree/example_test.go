@@ -16,6 +16,20 @@ func ExampleTree_Put() {
 	// true world
 }
 
+func ExampleTree_PutBytes() {
+	tree := pagebtree.New(2)
+	tree.PutBytes([]byte{0x00, 0xff}, []byte("high"))
+	tree.PutBytes([]byte{0x00, 0x10}, []byte("low"))
+
+	tree.RangeBytes(func(key []byte, value []byte) bool {
+		fmt.Printf("%x %s\n", key, value)
+		return true
+	})
+	// Output:
+	// 0010 low
+	// 00ff high
+}
+
 func ExampleTree_Snapshot() {
 	tree := pagebtree.New(2)
 	tree.Put("color", []byte("blue"))
