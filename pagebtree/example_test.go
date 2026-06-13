@@ -47,3 +47,18 @@ func ExampleTree_RangeFrom() {
 	// charlie charlie-value
 	// delta delta-value
 }
+
+func ExampleTree_RangeBetween() {
+	tree := pagebtree.New(2)
+	for _, key := range []string{"alpha", "bravo", "charlie", "delta"} {
+		tree.Put(key, []byte(key+"-value"))
+	}
+
+	tree.RangeBetween("bravo", "delta", func(key string, value []byte) bool {
+		fmt.Println(key, string(value))
+		return true
+	})
+	// Output:
+	// bravo bravo-value
+	// charlie charlie-value
+}

@@ -102,6 +102,17 @@ func (t *Tree) RangeFrom(start string, visit func(string, []byte) bool) {
 	rangePageFrom(t.pages, t.root, start, visit)
 }
 
+// RangeBetween visits keys greater than or equal to start and less than end.
+func (t *Tree) RangeBetween(start, end string, visit func(string, []byte) bool) {
+	if t.closed {
+		return
+	}
+	if t.activeReaderCount() == 0 && rangeLinkedLeavesBetween(t.pages, t.root, start, end, t.rangePrefetcher(), visit) {
+		return
+	}
+	rangePageBetween(t.pages, t.root, start, end, visit)
+}
+
 func (t *Tree) rangePrefetcher() func(PageID) {
 	if t.arena == nil {
 		return nil

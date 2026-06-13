@@ -45,6 +45,13 @@ func (s *Snapshot) RangeFrom(start string, visit func(string, []byte) bool) {
 	rangePageFrom(s.pages, s.root, start, visit)
 }
 
+func (s *Snapshot) RangeBetween(start, end string, visit func(string, []byte) bool) {
+	if s == nil || s.closed {
+		return
+	}
+	rangePageBetween(s.pages, s.root, start, end, visit)
+}
+
 func (s *Snapshot) Stats() Stats {
 	if s == nil {
 		return Stats{}

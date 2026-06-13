@@ -54,7 +54,10 @@ tree.Put("k01", []byte("value-01"))
 value, ok := tree.Get("k01")
 old, deleted := tree.Delete("k01")
 tree.RangeFrom("k10", func(key string, value []byte) bool {
-    return true
+	return true
+})
+tree.RangeBetween("k10", "k20", func(key string, value []byte) bool {
+	return true
 })
 ```
 
@@ -139,7 +142,7 @@ Copy-on-write makes leaf links more subtle than they first look. A copied leaf m
 
 The implementation therefore relinks leaves reachable from the current root only when no readers are active. If a `Put` or `Delete` happens while a snapshot is open, the current root is still published immediately, but leaf-link repair is deferred. When the last snapshot closes, `Snapshot.Close` releases the reader pin and repairs the current leaf chain, marking changed mmap pages dirty.
 
-Current-tree `Range` uses the leaf chain when no active reader can make those links stale. `RangeFrom(start)` first descends the tree to the leaf that can contain `start`, then scans forward through linked leaves and skips entries below the lower bound. If a reader is active, both methods fall back to the recursive branch walk so they still return the current keys even while link repair is deferred. Snapshot ranges also keep the recursive walk because they are teaching the old-root view directly.
+Current-tree `Range` uses the leaf chain when no active reader can make those links stale. `RangeFrom(start)` first descends the tree to the leaf that can contain `start`, then scans forward through linked leaves and skips entries below the lower bound. `RangeBetween(start, end)` uses the same lower-bound leaf descent, stops before the exclusive `end` key, and avoids prefetching linked leaves whose first key is already outside the bound. If a reader is active, these methods fall back to the recursive branch walk so they still return the current keys even while link repair is deferred. Snapshot ranges also keep the recursive walk because they are teaching the old-root view directly.
 
 ## Overflow Values
 
@@ -183,7 +186,7 @@ The page package models page identity, root publication, and slotted cell storag
 - Pages are kept in an in-memory map rather than written to disk.
 - The implementation rewrites a copied page from decoded entries during insertion and deletion; it does not do in-place cell compaction.
 - `Get` searches slots directly, but insertion still decodes page contents before rewriting the copied page.
-- Current-tree `Range` and `RangeFrom` use next-leaf links only when no active reader can make them stale; snapshot ranges still use a recursive tree walk.
+- Current-tree `Range`, `RangeFrom`, and `RangeBetween` use next-leaf links only when no active reader can make them stale; snapshot ranges still use a recursive tree walk.
 - Byte-full leaf rewrites spill inline cells to overflow pages, but the tree still does not do byte-balanced redistribution between sibling leaves.
 - `Delete` removes records, retires overflow pages, removes empty children, and collapses a one-child root; it does not yet implement full sibling borrow/merge rebalancing.
 - Branch pages contain separator keys and child page ids; values live in leaves.

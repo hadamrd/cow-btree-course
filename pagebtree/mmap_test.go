@@ -368,6 +368,50 @@ func TestMmapRangeFromStartsAtLowerBoundAndPrefetchesNextLeaves(t *testing.T) {
 	}
 }
 
+func TestMmapRangeBetweenStopsBeforeEndAndBoundsPrefetch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, AccessPattern: MmapAccessRandom})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var advised []PageID
+	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == MmapAccessWillNeed {
+			if end != start+1 {
+				t.Fatalf("advised range = [%d,%d), want single page", start, end)
+			}
+			advised = append(advised, start)
+		}
+	}
+
+	var got []string
+	tree.RangeBetween("key-17", "key-23", func(key string, value []byte) bool {
+		got = append(got, key)
+		return true
+	})
+
+	want := sequentialKeys(40)[17:23]
+	if !slices.Equal(got, want) {
+		t.Fatalf("RangeBetween(key-17,key-23) = %v, want %v", got, want)
+	}
+	for _, id := range advised {
+		first, ok := firstLeafKey(tree.pages[id])
+		if !ok {
+			t.Fatalf("advised page %d is not a non-empty leaf", id)
+		}
+		if first >= "key-23" {
+			t.Fatalf("advised leaf page %d starts at %s, want prefetch strictly before end key-23", id, first)
+		}
+	}
+}
+
 func TestMmapSyncFlushesDataPagesBeforePublishingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

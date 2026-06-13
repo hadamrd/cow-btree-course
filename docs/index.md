@@ -39,7 +39,7 @@ btree/
 
 pagebtree/
   page.go       Slotted page header, slots, and cells
-  search.go     Point lookup, lower-bound range, recursive fallback range, and linked-leaf scans
+  search.go     Point lookup, lower-bound/bounded range, recursive fallback range, and linked-leaf scans
   leaf_links.go Leaf sibling links for current root pages
   overflow.go   Overflow references and chained large-value pages
   tree.go       Root page publication

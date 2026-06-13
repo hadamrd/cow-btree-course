@@ -210,6 +210,41 @@ func TestRangeFromUsesLowerBoundWhenKeyIsAbsent(t *testing.T) {
 	}
 }
 
+func TestRangeBetweenVisitsExclusiveUpperBound(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var got []string
+	tree.RangeBetween("key-17", "key-23", func(key string, value []byte) bool {
+		got = append(got, key)
+		return true
+	})
+
+	want := sequentialKeys(40)[17:23]
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RangeBetween(key-17,key-23) = %v, want %v", got, want)
+	}
+}
+
+func TestRangeBetweenEmptyWhenStartReachesEnd(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 10; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var got []string
+	tree.RangeBetween("key-07", "key-07", func(key string, value []byte) bool {
+		got = append(got, key)
+		return true
+	})
+
+	if len(got) != 0 {
+		t.Fatalf("RangeBetween with empty bounds visited %v, want none", got)
+	}
+}
+
 func TestSnapshotRangeFromReadsOldRootLowerBound(t *testing.T) {
 	tree := New(2)
 	for i := 0; i < 30; i++ {
@@ -237,6 +272,35 @@ func TestSnapshotRangeFromReadsOldRootLowerBound(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("snapshot RangeFrom(key-25) = %v, want %v", got, want)
+	}
+}
+
+func TestSnapshotRangeBetweenReadsOldRootBounds(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 30; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("before-%02d", i)))
+	}
+	snapshot := tree.Snapshot()
+	defer snapshot.Close()
+
+	for i := 20; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("after-%02d", i)))
+	}
+
+	var got []string
+	snapshot.RangeBetween("key-24", "key-28", func(key string, value []byte) bool {
+		got = append(got, fmt.Sprintf("%s=%s", key, value))
+		return true
+	})
+
+	want := []string{
+		"key-24=before-24",
+		"key-25=before-25",
+		"key-26=before-26",
+		"key-27=before-27",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("snapshot RangeBetween(key-24,key-28) = %v, want %v", got, want)
 	}
 }
 
