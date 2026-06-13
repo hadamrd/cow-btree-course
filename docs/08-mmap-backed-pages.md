@@ -166,7 +166,7 @@ flowchart TD
 
 `OpenMmap` takes a non-blocking exclusive advisory lock on a sidecar writer-mutex file. A second writer attempting to open the same path receives `ErrDatabaseLocked` until the first writer closes. The database file itself is mapped with a shared advisory lock so read-only handles can coexist with the writer.
 
-`OpenMmapReadOnly` opens the database file with a shared advisory lock and a read-only mapping. After metadata recovery chooses a root, the handle claims a slot in a sidecar reader table. The slot records the process ID and the recovered revision. When a writer reclaims retired pages, it combines in-process snapshots with the oldest live revision found in that reader table. If any active reader can still see a retired page, the writer allocates new pages instead of recycling that page ID. When the read-only handle closes, it clears its slot; the writer can reclaim those pages on the next write or reclaim pass.
+`OpenMmapReadOnly` opens the database file with a shared advisory lock and a read-only mapping, then claims a sidecar reader-table slot with revision `0` before metadata recovery reads a root. Revision `0` is a conservative provisional pin: writers that scan the table during that short window must keep all retired pages unavailable for reuse. After metadata recovery chooses a root, the reader updates its slot to the recovered revision. The slot records the process ID and revision. When a writer reclaims retired pages, it combines in-process snapshots with the oldest live revision found in that reader table. If any active reader can still see a retired page, the writer allocates new pages instead of recycling that page ID. When the read-only handle closes, it clears its slot; the writer can reclaim those pages on the next write or reclaim pass.
 
 `MmapReaderStats()` exposes the table shape: total slots, live active slots, stale slots whose process no longer exists, and the oldest live reader revision. `CleanStaleMmapReaders()` clears stale slots explicitly. Writers also clean dead-PID slots when scanning the oldest reader, but the public maintenance call makes reader-table hygiene visible in tests, demos, and operational experiments.
 
@@ -184,7 +184,9 @@ sequenceDiagram
     participant T as reader table
     A->>L: OpenMmap + exclusive writer mutex
     R->>F: OpenMmapReadOnly + read-only mapping
-    R->>T: claim slot at revision N
+    R->>T: claim provisional slot at revision 0
+    R->>F: recover metadata root at revision N
+    R->>T: update slot to revision N
     A->>T: scan oldest reader before recycling
     A->>F: delete key, retire copied pages
     A->>F: allocate fresh pages while N pins retired pages

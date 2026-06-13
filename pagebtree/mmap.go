@@ -27,6 +27,8 @@ var (
 
 var syncDirectoryPath = syncDirectoryPathOS
 
+var readOnlyBeforeLoadMeta func(*Tree)
+
 const (
 	metaMagic        = "COWBTREE"
 	metaVersion      = uint64(2)
@@ -236,6 +238,19 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 		pageCache:               newPageCache(DefaultPageCacheCapacity),
 		rangePrefetchLeafWindow: DefaultRangePrefetchLeafWindow,
 	}
+	readerTable, err := openReaderTable(path)
+	if err != nil {
+		arena.close()
+		return nil, err
+	}
+	arena.readerTable = readerTable
+	if err := readerTable.claim(0); err != nil {
+		arena.close()
+		return nil, err
+	}
+	if readOnlyBeforeLoadMeta != nil {
+		readOnlyBeforeLoadMeta(tree)
+	}
 	if err := arena.advise(MmapAccessDefault); err != nil {
 		arena.close()
 		return nil, err
@@ -244,13 +259,7 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 		arena.close()
 		return nil, err
 	}
-	readerTable, err := openReaderTable(path)
-	if err != nil {
-		arena.close()
-		return nil, err
-	}
-	arena.readerTable = readerTable
-	if err := readerTable.claim(tree.revision); err != nil {
+	if err := readerTable.updateRevision(tree.revision); err != nil {
 		arena.close()
 		return nil, err
 	}

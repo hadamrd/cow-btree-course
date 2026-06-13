@@ -2860,6 +2860,55 @@ func TestMmapReadOnlyCoexistsWithWriterAndPinsRecycling(t *testing.T) {
 	}
 }
 
+func TestMmapReadOnlyPinsReaderTableBeforeLoadingMeta(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	var observed MmapReaderStats
+	readOnlyBeforeLoadMeta = func(tree *Tree) {
+		stats, err := tree.MmapReaderStats()
+		if err != nil {
+			t.Fatalf("MmapReaderStats before loadMeta: %v", err)
+		}
+		observed = stats
+	}
+	defer func() {
+		readOnlyBeforeLoadMeta = nil
+	}()
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	defer reader.Close()
+
+	if observed.ActiveSlots != 1 || observed.StaleSlots != 0 || !observed.HasOldestRevision || observed.OldestRevision != 0 {
+		t.Fatalf("reader stats before loadMeta = %+v, want one active revision-0 pin", observed)
+	}
+
+	writer, err = OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+	defer writer.Close()
+
+	afterLoad, err := writer.MmapReaderStats()
+	if err != nil {
+		t.Fatalf("MmapReaderStats after loadMeta: %v", err)
+	}
+	if !afterLoad.HasOldestRevision || afterLoad.OldestRevision != reader.Revision() {
+		t.Fatalf("reader stats after loadMeta = %+v, want reader revision %d", afterLoad, reader.Revision())
+	}
+}
+
 func TestMmapReaderStatsReportsActiveReadOnlySlot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

@@ -127,6 +127,25 @@ func (r *readerTable) release() error {
 	})
 }
 
+func (r *readerTable) updateRevision(revision uint64) error {
+	if r == nil || r.slot < 0 {
+		return nil
+	}
+	slot := r.slot
+	token := r.token
+	return r.withLock(func() error {
+		current, err := r.readSlotLocked(slot)
+		if err != nil {
+			return err
+		}
+		if current.active && current.token == token && current.pid == os.Getpid() {
+			current.revision = revision
+			return r.writeSlotLocked(slot, current)
+		}
+		return ErrActiveReaders
+	})
+}
+
 func (r *readerTable) oldest() (uint64, bool, error) {
 	if r == nil {
 		return 0, false, nil

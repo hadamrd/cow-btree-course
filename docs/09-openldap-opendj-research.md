@@ -63,7 +63,7 @@ The `pagebtree` package now implements the core kernel of that strategy in Go:
 - conservative compaction that refuses to shrink while a reader-table slot is active
 - `madvise`, Linux `posix_fadvise`, exact linked-leaf prefetch, explicit warm-up, explicit cache drop, and `mincore` residency stats
 
-The reader-table code lives in `pagebtree/reader_table_unix.go`. The writer sees it through `oldestReaderRevision` in `pagebtree/freelist.go`; that function combines local snapshots and mmap reader-table slots before retired pages move into the reusable free list. `OpenMmapReadOnly` claims a slot after metadata recovery chooses a root, then clears that slot on `Close`. `MmapReaderStats` reports live and stale slots, and `CleanStaleMmapReaders` clears slots whose process ID no longer exists. Existing malformed reader-table sidecars return `ErrReaderTable` rather than being silently reinitialized, because resetting them could forget active reader watermarks.
+The reader-table code lives in `pagebtree/reader_table_unix.go`. The writer sees it through `oldestReaderRevision` in `pagebtree/freelist.go`; that function combines local snapshots and mmap reader-table slots before retired pages move into the reusable free list. `OpenMmapReadOnly` claims a provisional revision-0 slot before metadata recovery, then updates that slot to the recovered root revision and clears it on `Close`. The revision-0 pin closes the race where a writer might otherwise recycle pages between a reader choosing a root and registering its watermark. `MmapReaderStats` reports live and stale slots, and `CleanStaleMmapReaders` clears slots whose process ID no longer exists. Existing malformed reader-table sidecars return `ErrReaderTable` rather than being silently reinitialized, because resetting them could forget active reader watermarks.
 
 ```mermaid
 sequenceDiagram
@@ -72,7 +72,8 @@ sequenceDiagram
     participant Writer as OpenMmap writer
     participant Free as retired/free pages
 
-    Reader->>Table: claim slot at revision N
+    Reader->>Table: claim slot at revision 0
+    Reader->>Table: update slot to revision N
     Writer->>Free: retire old page P at revision N
     Writer->>Table: MmapReaderStats observes reader
     Writer->>Table: scan oldest reader
