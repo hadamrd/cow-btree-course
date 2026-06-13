@@ -71,3 +71,20 @@ If you add new write operations, keep that discipline. Any helper that mutates a
 ## Stats
 
 `btree/stats.go` is not needed for the data structure itself. It exists so learners can observe height and node count while experimenting.
+
+## Page-backed Tree
+
+`pagebtree/` is the second implementation. It keeps the same learner-friendly B-tree algorithm, but replaces direct child pointers with page ids.
+
+```mermaid
+flowchart LR
+    Tree["Tree.root PageID"] --> Page["page"]
+    Page --> Child["child PageID"]
+    Child --> ChildPage["page"]
+```
+
+Read this package after the pointer-based `btree` package. The important files are:
+
+- `pagebtree/page.go` for page ids and page copies.
+- `pagebtree/tree.go` for `Put`, `Get`, snapshots, and root page publication.
+- `pagebtree/insert.go` for copy-before-descend insertion.

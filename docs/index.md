@@ -20,6 +20,7 @@ flowchart TD
     B --> C["03. Insertion algorithm"]
     C --> D["04. Code tour"]
     D --> E["05. Exercises"]
+    D --> F["06. Page-backed CoW"]
 ```
 
 ## Repository Layout
@@ -34,7 +35,14 @@ btree/
   stats.go      Small learning-oriented structure counters
   tree.go       Public Tree API
 
-cmd/cowbtree/   Runnable demonstration
+pagebtree/
+  page.go       Page ids and page copies
+  tree.go       Root page publication
+  insert.go     Page-copying insertion and splitting
+  snapshot.go   Read-only historical root page ids
+
+cmd/cowbtree/        Logical B-tree demonstration
+cmd/pagebtree-demo/  Page-backed CoW demonstration
 docs/           Course chapters
 ```
 
@@ -44,4 +52,5 @@ docs/           Course chapters
 2. Run `go test ./...` to see the behavior contract.
 3. Read `btree/tree_test.go`; it is the executable specification.
 4. Step through `Tree.Set` in `btree/tree.go`.
-5. Change the degree in `cmd/cowbtree/main.go` and observe how `Stats` changes.
+5. Run `go run ./cmd/pagebtree-demo` to see page root ids change across writes.
+6. Change the degree in the demos and observe how `Stats` changes.

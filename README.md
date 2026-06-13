@@ -7,8 +7,9 @@ The project is intentionally small, heavily commented, and organized as a course
 ## What You Get
 
 - A clean generic B-tree package in [`btree/`](btree/)
+- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/)
 - Copy-on-write writes with stable read-only snapshots
-- A runnable demo in [`cmd/cowbtree`](cmd/cowbtree/)
+- Runnable demos in [`cmd/cowbtree`](cmd/cowbtree/) and [`cmd/pagebtree-demo`](cmd/pagebtree-demo/)
 - Tests that document the behavior and invariants
 - A course-style documentation folder with Mermaid diagrams in [`docs/`](docs/)
 
@@ -17,6 +18,7 @@ The project is intentionally small, heavily commented, and organized as a course
 ```bash
 go test ./...
 go run ./cmd/cowbtree
+go run ./cmd/pagebtree-demo
 ```
 
 ```go
@@ -30,6 +32,15 @@ oldValue, _ := snapshot.Get(10) // "ten"
 newValue, _ := tree.Get(10)    // "TEN"
 ```
 
+Page-backed usage:
+
+```go
+tree := pagebtree.New(2)
+tree.Put("k01", []byte("value-01"))
+
+value, ok := tree.Get("k01")
+```
+
 ## Course Map
 
 Start with [`docs/index.md`](docs/index.md), then read in order:
@@ -39,10 +50,11 @@ Start with [`docs/index.md`](docs/index.md), then read in order:
 3. [`docs/03-insertion-algorithm.md`](docs/03-insertion-algorithm.md)
 4. [`docs/04-code-tour.md`](docs/04-code-tour.md)
 5. [`docs/05-exercises.md`](docs/05-exercises.md)
+6. [`docs/06-page-backed-cow.md`](docs/06-page-backed-cow.md)
 
 ## Deliberate Scope
 
-This is a teaching implementation, not a storage engine. It keeps nodes in memory, stores values directly in B-tree nodes, and implements insertion, lookup, range scans, snapshots, and structure stats. Deletion, page layout, write-ahead logging, and disk persistence are left as guided exercises.
+This is a teaching implementation, not a storage engine. It keeps nodes and pages in memory, stores values directly in B-tree nodes/pages, and implements insertion, lookup, range scans, snapshots, and structure stats. Deletion, byte-level page encoding, write-ahead logging, and disk persistence are left as guided exercises.
 
 ## License
 
