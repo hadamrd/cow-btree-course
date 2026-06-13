@@ -120,6 +120,43 @@ func TestMmapCompactShrinkProcessCrashMatrixClassifiesCompactedRoot(t *testing.T
 	}
 }
 
+func TestMmapLargeFreelistProcessCrashMatrixClassifiesRecoveryRoot(t *testing.T) {
+	if os.Getenv(mmapCrashChildEnv) == "1" {
+		runMmapLargeFreelistProcessCrashChild(t)
+		return
+	}
+
+	tests := []struct {
+		name         string
+		fault        mmapFaultPoint
+		wantFreelist bool
+	}{
+		{
+			name:         "before data sync",
+			fault:        mmapFaultBeforeDataSync,
+			wantFreelist: false,
+		},
+		{
+			name:         "after metadata write",
+			fault:        mmapFaultAfterMetaWrite,
+			wantFreelist: true,
+		},
+		{
+			name:         "before metadata sync",
+			fault:        mmapFaultBeforeMetaSync,
+			wantFreelist: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "course.db")
+			runMmapLargeFreelistProcessCrash(t, path, tt.fault)
+			assertMmapLargeFreelistProcessCrashRecovered(t, path, tt.fault, tt.wantFreelist)
+		})
+	}
+}
+
 func runMmapSyncProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
 	t.Helper()
 
@@ -136,6 +173,12 @@ func runMmapCompactShrinkProcessCrash(t *testing.T, path string, fault mmapFault
 	t.Helper()
 
 	runMmapProcessCrashChild(t, path, fault, "^TestMmapCompactShrinkProcessCrashMatrixClassifiesCompactedRoot$", "compact-shrink")
+}
+
+func runMmapLargeFreelistProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
+	t.Helper()
+
+	runMmapProcessCrashChild(t, path, fault, "^TestMmapLargeFreelistProcessCrashMatrixClassifiesRecoveryRoot$", "large-freelist")
 }
 
 func runMmapProcessCrashChild(t *testing.T, path string, fault mmapFaultPoint, testPattern string, label string) {
@@ -246,6 +289,42 @@ func runMmapCompactShrinkProcessCrashChild(t *testing.T) {
 	t.Fatalf("compact-shrink child Compact completed without hitting fault %s", fault)
 }
 
+func runMmapLargeFreelistProcessCrashChild(t *testing.T) {
+	t.Helper()
+
+	path := os.Getenv(mmapCrashPathEnv)
+	fault := mmapFaultPoint(os.Getenv(mmapCrashFaultEnv))
+	if path == "" || fault == "" {
+		t.Fatalf("missing large-freelist crash child env path=%q fault=%q", path, fault)
+	}
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 2048})
+	if err != nil {
+		t.Fatalf("OpenMmap large-freelist child create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial large-freelist child Sync: %v", err)
+	}
+	clear(tree.arena.dirtyPages)
+
+	freeCount := maxMetaFreePages + 17
+	tree.free = make([]PageID, freeCount)
+	for i := range tree.free {
+		tree.free[i] = firstTreePageID + 1 + PageID(i)
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(freeCount)
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			os.Exit(mmapCrashChildExitCode)
+		}
+		return nil
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("large-freelist child Sync before process crash: %v", err)
+	}
+	t.Fatalf("large-freelist child Sync completed without hitting fault %s", fault)
+}
+
 func assertMmapProcessCrashRecoveryRoot(t *testing.T, path string, fault mmapFaultPoint, wantNewRoot bool) {
 	t.Helper()
 
@@ -293,5 +372,41 @@ func assertMmapCompactShrinkProcessCrashRecovered(t *testing.T, path string, fau
 	}
 	if got, want := fileSize(t, path), int64(recovered.nextPage)*PageSize; got != want {
 		t.Fatalf("file size after compact-shrink process crash at %s = %d, want compacted %d", fault, got, want)
+	}
+}
+
+func assertMmapLargeFreelistProcessCrashRecovered(t *testing.T, path string, fault mmapFaultPoint, wantFreelist bool) {
+	t.Helper()
+
+	recovered, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after large-freelist process crash at %s: %v", fault, err)
+	}
+	defer recovered.Close()
+
+	if err := recovered.Check(); err != nil {
+		t.Fatalf("Check after large-freelist process crash at %s: %v", fault, err)
+	}
+	if got, ok := recovered.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("Get(alpha) after large-freelist process crash at %s = %q, %v; want one, true", fault, got, ok)
+	}
+	if !wantFreelist {
+		if got := recovered.Stats().FreePages; got != 0 {
+			t.Fatalf("FreePages after large-freelist process crash at %s = %d, want old metadata with none", fault, got)
+		}
+		return
+	}
+	freeCount := maxMetaFreePages + 17
+	if got := recovered.Stats().FreePages; got != freeCount {
+		t.Fatalf("FreePages after large-freelist process crash at %s = %d, want %d", fault, got, freeCount)
+	}
+	allocatedBeforeReuse := recovered.Stats().AllocatedPages
+	recovered.Put("bravo", []byte("two"))
+	afterReuse := recovered.Stats()
+	if afterReuse.ReusedPages == 0 {
+		t.Fatalf("ReusedPages after large-freelist process crash at %s = 0, want persisted freelist reuse", fault)
+	}
+	if afterReuse.AllocatedPages > allocatedBeforeReuse+1 {
+		t.Fatalf("AllocatedPages after large-freelist process crash at %s grew from %d to %d despite persisted freelist", fault, allocatedBeforeReuse, afterReuse.AllocatedPages)
 	}
 }
