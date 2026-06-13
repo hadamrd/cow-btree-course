@@ -13,8 +13,9 @@
 // and range scans compare slot keys before reading child ids or values so
 // bounded scans do not decode cells outside the requested key range. Check
 // validates the currently open tree's reachable pages, checksums, layout,
-// routing invariants, overflow chains, length, and freelist safety. It validates
-// leaf links only when no active reader is delaying leaf-link repair.
+// routing invariants, non-root leaf minimum fill, overflow chains, length, and
+// freelist safety. It validates leaf links only when no active reader is
+// delaying leaf-link repair.
 // Mmap-backed ranges prefetch a configurable bounded window of exact next leaf
 // page ranges with MADV_WILLNEED; adjacent page ids are coalesced into one
 // hint, and the window can be disabled when the caller wants to avoid even
@@ -42,7 +43,8 @@
 // reachability that points at non-tree pages, missing children, duplicate
 // children, or separators that no longer match right-child first keys. Reachable
 // child subtrees must also keep every key inside the half-open key interval
-// assigned by their parent branch.
+// assigned by their parent branch. Non-root leaves must contain at least
+// degree-1 keys.
 // Persisted leaf next pointers must match the branch-order leaf sequence.
 // Overflow references must name a first page. Overflow chains must exist, must
 // not loop, must contain only overflow pages, and must contain exactly the

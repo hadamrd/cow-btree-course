@@ -106,7 +106,7 @@ sequenceDiagram
     Delete->>Meta: publish new root page id
 ```
 
-The implementation is intentionally conservative. It now merges an underfull leaf with a leaf sibling when the combined records fit in one page, or redistributes records when a sibling can lend but the pair cannot fit in one page. That demonstrates the important deletion shape change while keeping the code readable. It still does not implement branch-level borrow/merge or byte-balanced sibling redistribution.
+The implementation is intentionally conservative. It now merges an underfull leaf with a leaf sibling when the combined records fit in one page, or redistributes records when a sibling can lend but the pair cannot fit in one page. `Tree.Check` and mmap recovery enforce the result by rejecting non-root leaves below `degree-1` keys. That demonstrates the important deletion shape change while keeping the code readable. It still does not implement branch-level borrow/merge or byte-balanced sibling redistribution.
 
 ## Walking Branch Pages
 

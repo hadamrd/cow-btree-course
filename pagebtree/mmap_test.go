@@ -282,6 +282,29 @@ func TestMmapTreePersistsLeafRedistributionAfterDelete(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsUnderfullNonRootLeaf(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 3, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	seedUnderfullLeafTree(tree)
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+	keepOnlyNewestMetaPage(t, path)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with underfull non-root leaf")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("OpenMmap underfull leaf error = %v, want ErrTreeInvariant", err)
+	}
+}
+
 func TestMmapCloseWaitsForActiveSnapshots(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

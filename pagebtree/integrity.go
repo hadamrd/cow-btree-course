@@ -120,6 +120,9 @@ func (t *Tree) validatePageBounds(id PageID, seen map[PageID]bool, lower string,
 		return err
 	}
 	if p.isLeaf() {
+		if id != t.root && int(p.slotCount()) < minKeys(t.degree) {
+			return fmt.Errorf("%w: leaf page %d has %d keys, want at least %d", ErrTreeInvariant, id, p.slotCount(), minKeys(t.degree))
+		}
 		for i := 0; i < int(p.slotCount()); i++ {
 			key := p.readCellKey(i)
 			if hasLower && compareStrings(key, lower) < 0 {

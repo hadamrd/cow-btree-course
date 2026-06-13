@@ -200,6 +200,33 @@ func seedLeafRedistributionTree(tree *Tree) {
 	tree.revision = 1
 }
 
+func seedUnderfullLeafTree(tree *Tree) {
+	leftID := tree.allocPage()
+	rightID := tree.allocPage()
+	rootID := tree.allocPage()
+	left := tree.newPage(leftID, flagLeaf)
+	right := tree.newPage(rightID, flagLeaf)
+	root := tree.newPage(rootID, flagBranch)
+	tree.pages[leftID] = left
+	tree.pages[rightID] = right
+	tree.pages[rootID] = root
+	tree.writeLeafEntries(left, []leafEntry{
+		{key: "key-00", value: []byte("value-00")},
+		{key: "key-01", value: []byte("value-01")},
+		{key: "key-02", value: []byte("value-02")},
+		{key: "key-03", value: []byte("value-03")},
+		{key: "key-04", value: []byte("value-04")},
+	})
+	tree.writeLeafEntries(right, []leafEntry{
+		{key: "key-05", value: []byte("value-05")},
+	})
+	left.setNextLeaf(rightID)
+	mustWriteBranchParts(root, []string{"key-05"}, []PageID{leftID, rightID})
+	tree.root = rootID
+	tree.length = 6
+	tree.revision = 1
+}
+
 func TestDeleteMissingKeyDoesNotPublishNewRevision(t *testing.T) {
 	tree := New(2)
 	tree.Put("alpha", []byte("one"))
@@ -601,6 +628,19 @@ func TestCheckRejectsOpenTreeWithMismatchedBranchSeparator(t *testing.T) {
 	}
 	if !errors.Is(err, ErrTreeInvariant) {
 		t.Fatalf("Check mismatched separator error = %v, want ErrTreeInvariant", err)
+	}
+}
+
+func TestCheckRejectsOpenTreeWithUnderfullNonRootLeaf(t *testing.T) {
+	tree := New(3)
+	seedUnderfullLeafTree(tree)
+
+	err := tree.Check()
+	if err == nil {
+		t.Fatalf("Check accepted underfull non-root leaf")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("Check underfull leaf error = %v, want ErrTreeInvariant", err)
 	}
 }
 
