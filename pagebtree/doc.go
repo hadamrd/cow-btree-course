@@ -17,12 +17,15 @@
 // hint, and the window can be disabled when the caller wants to avoid even
 // exact linked-leaf hints.
 // Mmap-backed trees track dirty copied pages so Sync can flush changed data
-// pages before publishing metadata, and they can grow the mapped file when
-// allocation reaches the current capacity. File-size changes from growth and
-// compaction sync the data file and parent directory. Compact can trim unused
-// mapped capacity and a suffix of already-free page ids when no snapshot is
-// active. Close returns ErrActiveReaders for mmap-backed trees while snapshots
-// are active, because those snapshots still read slices backed by the mapping.
+// pages before publishing metadata. If the final metadata flush fails, Sync
+// restores the previous mapped metadata bytes before returning the error. Mmap
+// trees can grow the mapped file when allocation reaches the current capacity.
+// File-size changes from growth and compaction sync the data file and parent
+// directory. Compact can trim unused mapped capacity and a suffix of already-free
+// page ids when no snapshot is active; if compacted metadata publication fails,
+// the temporary in-memory compaction state is restored. Close returns
+// ErrActiveReaders for mmap-backed trees while snapshots are active, because
+// those snapshots still read slices backed by the mapping.
 // A Snapshot requested after Close is inert and does not register a reader.
 // Post-close inspection and maintenance calls such as Stats, Sync, Advise,
 // DropMmapCache, and MmapCacheStats do not touch the released mapping.

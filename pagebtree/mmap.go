@@ -333,9 +333,24 @@ func (t *Tree) compactMmapTail() error {
 		return nil
 	}
 
+	oldNextPage := t.nextPage
+	oldFree := append([]PageID(nil), t.free...)
+	oldDirtyPages := cloneDirtyPages(t.arena.dirtyPages)
+	removedPages := map[PageID]*page{}
+	restoreState := func() {
+		t.nextPage = oldNextPage
+		t.free = oldFree
+		t.arena.maxPages = oldMaxPages
+		t.arena.dirtyPages = cloneDirtyPages(oldDirtyPages)
+		for id, p := range removedPages {
+			t.pages[id] = p
+		}
+	}
+
 	t.removeFreePagesAtOrAbove(trimmedNextPage)
 	for id := range t.pages {
 		if id >= trimmedNextPage {
+			removedPages[id] = t.pages[id]
 			delete(t.pages, id)
 		}
 	}
@@ -349,12 +364,11 @@ func (t *Tree) compactMmapTail() error {
 	t.arena.maxPages = newMaxPages
 
 	if err := t.arena.syncDataPages(t.nextPage); err != nil {
-		t.arena.maxPages = oldMaxPages
+		restoreState()
 		return err
 	}
-	t.persistMeta()
-	if err := t.arena.syncMetaPage(int(t.revision % metaPageCount)); err != nil {
-		t.arena.maxPages = oldMaxPages
+	if err := t.publishMeta(); err != nil {
+		restoreState()
 		return err
 	}
 	if newMaxPages >= oldMaxPages {
@@ -457,6 +471,17 @@ func (a *mmapArena) syncDataPages(nextPage PageID) error {
 	}
 	clear(a.dirtyPages)
 	return nil
+}
+
+func cloneDirtyPages(dirty map[PageID]bool) map[PageID]bool {
+	if dirty == nil {
+		return nil
+	}
+	clone := make(map[PageID]bool, len(dirty))
+	for id, value := range dirty {
+		clone[id] = value
+	}
+	return clone
 }
 
 func (a *mmapArena) syncDataPageRange(startPage, endPage PageID) error {
@@ -841,8 +866,22 @@ func (t *Tree) syncMmap() error {
 	if err := t.arena.syncDataPages(t.nextPage); err != nil {
 		return err
 	}
+	return t.publishMeta()
+}
+
+func (t *Tree) publishMeta() error {
+	if t.arena == nil || t.arena.readOnly {
+		return nil
+	}
+	index := int(t.revision % metaPageCount)
+	metaPage := t.arena.data[index*PageSize : (index+1)*PageSize]
+	previous := cloneBytes(metaPage)
 	t.persistMeta()
-	return t.arena.syncMetaPage(int(t.revision % metaPageCount))
+	if err := t.arena.syncMetaPage(index); err != nil {
+		copy(metaPage, previous)
+		return err
+	}
+	return nil
 }
 
 func (t *Tree) Advise(pattern MmapAccessPattern) error {

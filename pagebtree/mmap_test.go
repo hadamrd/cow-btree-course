@@ -1065,6 +1065,53 @@ func TestMmapCompactTruncatesTrailingFreePagesAndPersistsNextPage(t *testing.T) 
 	}
 }
 
+func TestMmapCompactRestoresStateWhenMetaFlushFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 32})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	firstTail := appendFreeTailPage(t, tree)
+	appendFreeTailPage(t, tree)
+	beforeNext := tree.nextPage
+	beforeMaxPages := tree.arena.maxPages
+	beforeFree := append([]PageID(nil), tree.free...)
+	clear(tree.arena.dirtyPages)
+
+	metaIndex := int(tree.Revision() % metaPageCount)
+	metaPage := tree.arena.data[metaIndex*PageSize : (metaIndex+1)*PageSize]
+	beforeMeta := cloneBytes(metaPage)
+
+	if err := tree.arena.file.Close(); err != nil {
+		t.Fatalf("Close backing file before forced compact meta sync failure: %v", err)
+	}
+
+	if err := tree.Compact(); err == nil {
+		t.Fatalf("Compact succeeded with closed backing file")
+	}
+	if !bytes.Equal(metaPage, beforeMeta) {
+		t.Fatalf("metadata page changed after failed compact metadata sync")
+	}
+	if tree.nextPage != beforeNext {
+		t.Fatalf("nextPage after failed Compact = %d, want restored %d", tree.nextPage, beforeNext)
+	}
+	if tree.arena.maxPages != beforeMaxPages {
+		t.Fatalf("maxPages after failed Compact = %d, want restored %d", tree.arena.maxPages, beforeMaxPages)
+	}
+	if !slices.Equal(tree.free, beforeFree) {
+		t.Fatalf("free list after failed Compact = %v, want restored %v", tree.free, beforeFree)
+	}
+	if tree.pages[firstTail] == nil {
+		t.Fatalf("tail page %d removed from page map after failed Compact", firstTail)
+	}
+}
+
 func TestMmapCompactTruncatesUnusedMappedCapacity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -1179,6 +1226,41 @@ func TestMmapSyncFlushesDataPagesBeforePublishingMeta(t *testing.T) {
 	}
 	if record.revision != tree.Revision() {
 		t.Fatalf("metadata revision after Sync = %d, want %d", record.revision, tree.Revision())
+	}
+}
+
+func TestMmapSyncRestoresMetaPageWhenMetaFlushFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+
+	tree.Put("bravo", []byte("two"))
+	clear(tree.arena.dirtyPages)
+	metaIndex := int(tree.Revision() % metaPageCount)
+	metaPage := tree.arena.data[metaIndex*PageSize : (metaIndex+1)*PageSize]
+	before := cloneBytes(metaPage)
+
+	if err := tree.arena.file.Close(); err != nil {
+		t.Fatalf("Close backing file before forced meta sync failure: %v", err)
+	}
+
+	if err := tree.Sync(); err == nil {
+		t.Fatalf("Sync succeeded with closed backing file")
+	}
+	if !bytes.Equal(metaPage, before) {
+		t.Fatalf("metadata page changed after failed metadata sync")
+	}
+	if record, ok := readMetaPage(metaPage); ok && record.revision == tree.Revision() {
+		t.Fatalf("failed metadata sync left revision %d readable in mapped metadata page", record.revision)
 	}
 }
 
