@@ -179,6 +179,43 @@ func TestMmapTreeFallsBackToOlderValidMetaPage(t *testing.T) {
 	}
 }
 
+func TestMmapTreeFallsBackWhenNewestRootPageIsCorrupt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	olderRoot := tree.Stats().Root
+	tree.Put("bravo", []byte("two"))
+	newestRoot := tree.Stats().Root
+	if newestRoot == olderRoot {
+		t.Fatalf("newest root reused older root %d; want copy-on-write root", olderRoot)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	corruptPagePayload(t, path, newestRoot)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen after corrupt newest root page: %v", err)
+	}
+	defer reopened.Close()
+
+	if got, ok := reopened.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("alpha after root-page fallback = %q, %v; want one, true", got, ok)
+	}
+	if got, ok := reopened.Get("bravo"); ok {
+		t.Fatalf("bravo should be absent after falling back to older root, got %q", got)
+	}
+	if reopened.Revision() != 1 {
+		t.Fatalf("fallback revision = %d, want 1", reopened.Revision())
+	}
+}
+
 func TestMmapTreeUsesNewestValidMetaPage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -300,6 +337,7 @@ func TestMmapTreeRejectsCorruptReachableDataPage(t *testing.T) {
 		t.Fatalf("Close create: %v", err)
 	}
 
+	corruptMetaPage(t, path, 0)
 	corruptPagePayload(t, path, root)
 
 	reopened, err := OpenMmap(path, MmapOptions{})
@@ -360,6 +398,7 @@ func TestMmapTreeRejectsCorruptReachableOverflowPage(t *testing.T) {
 		t.Fatalf("Close create: %v", err)
 	}
 
+	corruptMetaPage(t, path, 0)
 	corruptPagePayload(t, path, ref.first)
 
 	reopened, err := OpenMmap(path, MmapOptions{})

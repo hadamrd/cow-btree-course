@@ -37,7 +37,7 @@ Pages `0` and `1` are alternating metadata pages:
 - reusable page IDs
 - CRC32 checksum
 
-Each commit writes the metadata page selected by `revision % 2`. On reopen, the tree validates both checksums and chooses the newest valid metadata page. If the newest metadata page is torn or corrupted, the older valid page still points to a previous root.
+Each commit writes the metadata page selected by `revision % 2`. On reopen, the tree validates both metadata checksums, then tries candidate records from newest to oldest. A candidate is usable only if the root and every reachable tree or overflow page also pass validation. If the newest metadata page is torn, corrupted, or points at a torn root page, the older valid page can still point to a previous root.
 
 The reusable page IDs are stored directly in the metadata page for now. That keeps the lesson compact and makes close/reopen freelist behavior visible. A larger database would usually store freelist records in normal pages and have metadata point to the freelist root.
 
@@ -48,7 +48,7 @@ offset = pageID * PageSize
 size   = PageSize
 ```
 
-Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from the chosen root, including overflow chains referenced by leaf values, and rejects corruption before serving reads.
+Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from each metadata candidate root, including overflow chains referenced by leaf values, and rejects corruption before serving reads. If an older metadata candidate is still reachable and valid, it can be used as the recovery point.
 
 ## Why Mmap Helps
 
@@ -84,7 +84,7 @@ This keeps the teaching engine honest: the mmap implementation has one writer at
 This chapter makes the project more serious, but it is still not a production database:
 
 - freelist state is persisted in the metadata page, but only with a bounded educational encoding
-- writes call `msync`, but there is no complete crash-safe write-order protocol
+- writes call `msync`, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed, but there is no page-level repair
 - file locking is exclusive-writer only; there is no shared-reader lock table
 - overflow pages are linear chains, not a compact extent/tree structure

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"os"
+	"slices"
 
 	"golang.org/x/sys/unix"
 )
@@ -200,40 +201,73 @@ type metaRecord struct {
 }
 
 func (t *Tree) loadMeta() error {
-	var newest metaRecord
-	found := false
+	var records []metaRecord
+	maxNextPage := firstTreePageID
 	for index := 0; index < metaPageCount; index++ {
 		record, ok := readMetaPage(t.arena.data[index*PageSize : (index+1)*PageSize])
 		if !ok {
 			continue
 		}
-		if !found || record.revision > newest.revision {
-			newest = record
-			found = true
+		records = append(records, record)
+		if record.nextPage > maxNextPage {
+			maxNextPage = record.nextPage
 		}
 	}
-	if !found {
+	if len(records) == 0 {
 		return fmt.Errorf("no valid mmap tree metadata page")
 	}
-
-	t.root = newest.root
-	t.nextPage = newest.nextPage
-	t.length = newest.length
-	t.revision = newest.revision
-	t.degree = normalizeDegree(newest.degree)
-	t.free = append([]PageID(nil), newest.free...)
-	if t.nextPage < firstTreePageID {
-		t.nextPage = firstTreePageID
+	slices.SortFunc(records, func(left, right metaRecord) int {
+		return compareUint64Desc(left.revision, right.revision)
+	})
+	if maxNextPage < firstTreePageID {
+		maxNextPage = firstTreePageID
 	}
 
-	for id := firstTreePageID; id < t.nextPage; id++ {
+	t.pages = map[PageID]*page{}
+	for id := firstTreePageID; id < maxNextPage; id++ {
 		data, err := t.arena.pageBytes(id)
 		if err != nil {
 			return err
 		}
 		t.pages[id] = &page{id: id, data: data}
 	}
-	return t.validateReachablePages()
+
+	var lastErr error
+	for _, record := range records {
+		t.applyMetaRecord(record)
+		if err := t.validateReachablePages(); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("no usable mmap tree metadata page")
+}
+
+func (t *Tree) applyMetaRecord(record metaRecord) {
+	t.root = record.root
+	t.nextPage = record.nextPage
+	t.length = record.length
+	t.revision = record.revision
+	t.degree = normalizeDegree(record.degree)
+	t.free = append([]PageID(nil), record.free...)
+	if t.nextPage < firstTreePageID {
+		t.nextPage = firstTreePageID
+	}
+}
+
+func compareUint64Desc(left, right uint64) int {
+	switch {
+	case left > right:
+		return -1
+	case left < right:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func (t *Tree) persistMeta() {
