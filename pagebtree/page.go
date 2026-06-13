@@ -15,8 +15,9 @@ const PageSize = 4096
 type PageID uint64
 
 var (
-	ErrPageChecksum = errors.New("page checksum mismatch")
-	ErrPageLayout   = errors.New("page layout invalid")
+	ErrPageChecksum  = errors.New("page checksum mismatch")
+	ErrPageLayout    = errors.New("page layout invalid")
+	ErrTreeInvariant = errors.New("tree invariant invalid")
 )
 
 const (

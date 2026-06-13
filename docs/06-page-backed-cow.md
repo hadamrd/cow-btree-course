@@ -35,7 +35,7 @@ flowchart LR
 
 The header and slots grow from the front of the page. Cells are copied from the end of the page backward. Leaf cells store key/value records. Branch cells store separator keys, and their value bytes encode the child page id to the right of that separator. The header also stores a CRC32 checksum over the rest of the page bytes.
 
-A checksum says the bytes match the stored checksum; it does not prove the bytes make sense as a slotted page. On mmap reopen, reachable pages must also pass structural validation before any cells are decoded: exactly one page kind, a slot directory inside the page, `freeUpper` between the slots and the cell area, cell ranges inside the cell area, no overlapping cells, sorted slot keys, legal slot flags, and branch child values that are exactly encoded page IDs.
+A checksum says the bytes match the stored checksum; it does not prove the bytes make sense as a slotted page. On mmap reopen, reachable pages must also pass structural validation before any cells are decoded: exactly one page kind, a slot directory inside the page, `freeUpper` between the slots and the cell area, cell ranges inside the cell area, no overlapping cells, sorted slot keys, legal slot flags, and branch child values that are exactly encoded page IDs. After that, tree validation checks routing invariants such as "a tree page is reachable through only one parent path" and "each separator equals the first key of its right child."
 
 Searching a page does not have to decode every cell into Go structs. The slot directory is already sorted by key, so `Get` can binary-search the slots, compare the query key against only the candidate cell key bytes, and then read only the selected value or child page id. Range scans use the same discipline: branch traversal compares separator keys before reading child page ids, and leaf traversal compares slot keys before reading value bytes.
 
@@ -126,6 +126,8 @@ For a lookup:
 - If the key is greater than every separator, walk the child page id stored in the last separator cell.
 
 That rule matches B+tree separator semantics: branch keys route the search, while actual values live in leaf pages.
+
+The implementation writes separators as copies of the first key in the right child. That gives recovery a useful invariant: if slot `i` routes to child `i+1`, then slot `i`'s key should equal `firstKey(child[i+1])`. A branch page can therefore have valid bytes and a valid checksum but still be rejected if its routing no longer describes the reachable children.
 
 ## Linked Leaves
 

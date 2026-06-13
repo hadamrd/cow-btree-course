@@ -733,8 +733,11 @@ func (t *Tree) validateFreelist(free []PageID, reachable map[PageID]bool) error 
 }
 
 func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
-	if id == 0 || seen[id] {
+	if id == 0 {
 		return nil
+	}
+	if seen[id] {
+		return fmt.Errorf("%w: page %d is reachable through multiple tree paths", ErrTreeInvariant, id)
 	}
 	seen[id] = true
 
@@ -759,9 +762,24 @@ func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
 	if !p.isBranch() {
 		return fmt.Errorf("page %d has invalid flags %x", id, p.flags())
 	}
-	for _, child := range p.childIDs() {
+	children := p.childIDs()
+	for index, child := range children {
+		if child == 0 {
+			return fmt.Errorf("%w: branch page %d child %d is zero", ErrTreeInvariant, id, index)
+		}
 		if err := t.validatePage(child, seen); err != nil {
 			return err
+		}
+		if index == 0 {
+			continue
+		}
+		separator := p.readCellKey(index - 1)
+		first, ok := t.firstKey(child)
+		if !ok {
+			return fmt.Errorf("%w: branch page %d child %d has no first key", ErrTreeInvariant, id, index)
+		}
+		if separator != first {
+			return fmt.Errorf("%w: branch page %d separator %q does not match child %d first key %q", ErrTreeInvariant, id, separator, index, first)
 		}
 	}
 	return nil

@@ -1157,6 +1157,67 @@ func TestMmapTreeRejectsValidChecksumBranchWithInvalidChildSlotLayout(t *testing
 	}
 }
 
+func TestMmapTreeRejectsBranchThatReferencesChildTwice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if !tree.pages[tree.root].isBranch() {
+		t.Fatalf("root is not a branch after many inserts")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	newest := keepOnlyNewestMetaPage(t, path)
+	corruptBranchSlotChildToLeftmost(t, path, newest.root, 0)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with duplicated branch child")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("OpenMmap duplicated branch child error = %v, want ErrTreeInvariant", err)
+	}
+}
+
+func TestMmapTreeRejectsBranchSeparatorThatDoesNotMatchRightChild(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	root := tree.pages[tree.root]
+	if !root.isBranch() || root.slotCount() == 0 {
+		t.Fatalf("root does not have a separator after many inserts")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	newest := keepOnlyNewestMetaPage(t, path)
+	corruptBranchSlotKey(t, path, newest.root, 0, "key-00")
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with mismatched branch separator")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("OpenMmap mismatched branch separator error = %v, want ErrTreeInvariant", err)
+	}
+}
+
 func corruptMetaPage(t *testing.T, path string, metaIndex int) {
 	t.Helper()
 
@@ -1294,5 +1355,52 @@ func corruptPageSlotValueLen(t *testing.T, path string, id PageID, slotIndex int
 	}
 	if err := file.Sync(); err != nil {
 		t.Fatalf("Sync corrupt page slot %d: %v", id, err)
+	}
+}
+
+func corruptBranchSlotChildToLeftmost(t *testing.T, path string, id PageID, slotIndex int) {
+	t.Helper()
+
+	mutatePage(t, path, id, func(p *page) {
+		slot := p.readSlot(slotIndex)
+		valueStart := int(slot.offset) + int(slot.keyLen)
+		encodePageID(p.data[valueStart:valueStart+8], p.leftmostChild())
+		p.updateChecksum()
+	})
+}
+
+func corruptBranchSlotKey(t *testing.T, path string, id PageID, slotIndex int, key string) {
+	t.Helper()
+
+	mutatePage(t, path, id, func(p *page) {
+		slot := p.readSlot(slotIndex)
+		if len(key) != int(slot.keyLen) {
+			t.Fatalf("replacement key length = %d, want %d", len(key), slot.keyLen)
+		}
+		copy(p.data[int(slot.offset):int(slot.offset)+int(slot.keyLen)], key)
+		p.updateChecksum()
+	})
+}
+
+func mutatePage(t *testing.T, path string, id PageID, mutate func(*page)) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile mutate page %d: %v", id, err)
+	}
+	defer file.Close()
+
+	buf := make([]byte, PageSize)
+	offset := int64(id) * PageSize
+	if _, err := file.ReadAt(buf, offset); err != nil {
+		t.Fatalf("ReadAt mutate page %d: %v", id, err)
+	}
+	mutate(&page{id: id, data: buf})
+	if _, err := file.WriteAt(buf, offset); err != nil {
+		t.Fatalf("WriteAt mutate page %d: %v", id, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("Sync mutate page %d: %v", id, err)
 	}
 }
