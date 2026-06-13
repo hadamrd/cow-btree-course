@@ -6,7 +6,9 @@
 // separator keys and child page ids, leaf pages store linked key/value records,
 // and overflow pages hold large values that do not fit cleanly inside a leaf
 // cell. Put and Delete publish new roots through copy-on-write, while snapshots
-// keep reading their older roots. Mmap-backed trees track dirty copied pages so
+// keep reading their older roots. Leaf sibling-link repair is deferred while a
+// snapshot is active, because rewriting those headers in place would mutate
+// bytes visible to the old root. Mmap-backed trees track dirty copied pages so
 // Sync can flush changed data pages before publishing metadata, and they can
 // grow the mapped file when allocation reaches the current capacity.
 // OpenMmapReadOnly opens mmap files with a shared read lock and rejects

@@ -1,7 +1,7 @@
 package pagebtree
 
 func (t *Tree) relinkLeaves() {
-	if t.root == 0 {
+	if t.root == 0 || t.activeReaderCount() > 0 {
 		return
 	}
 	leaves := make([]PageID, 0)

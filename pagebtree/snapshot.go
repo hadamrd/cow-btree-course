@@ -50,7 +50,11 @@ func (s *Snapshot) Close() {
 		return
 	}
 	s.closed = true
-	if s.tree != nil {
-		s.tree.endRead(s.revision)
+	tree := s.tree
+	if tree != nil {
+		tree.endRead(s.revision)
+		if !tree.closed && !tree.readOnly {
+			tree.relinkLeaves()
+		}
 	}
 }

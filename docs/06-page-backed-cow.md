@@ -132,7 +132,9 @@ flowchart LR
     L2 -- next leaf --> L3
 ```
 
-Copy-on-write makes leaf links more subtle than they first look. A copied leaf may still contain a link that was correct for an older root version. After `Put` or `Delete` publishes the current root in memory, the implementation relinks the leaves reachable from that current root and marks any changed mmap pages dirty. Public `Range` still walks the tree recursively for clarity; the leaf chain is a persisted page-layout invariant and a stepping stone toward scan-oriented range traversal.
+Copy-on-write makes leaf links more subtle than they first look. A copied leaf may still contain a link that was correct for an older root version. Relinking that leaf in place would rewrite page bytes that an active snapshot may still be able to see.
+
+The implementation therefore relinks leaves reachable from the current root only when no readers are active. If a `Put` or `Delete` happens while a snapshot is open, the current root is still published immediately, but leaf-link repair is deferred. When the last snapshot closes, `Snapshot.Close` releases the reader pin and repairs the current leaf chain, marking changed mmap pages dirty. Public `Range` still walks the tree recursively for clarity; the leaf chain is a persisted page-layout invariant and a stepping stone toward scan-oriented range traversal.
 
 ## Overflow Values
 

@@ -214,6 +214,31 @@ func TestDeleteRelinksCurrentLeafChain(t *testing.T) {
 	}
 }
 
+func TestSnapshotLeafLinksStayStableDuringConcurrentWrite(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	snapshot := tree.Snapshot()
+	before := leafChainKeys(snapshot.pages, snapshot.root)
+
+	tree.Put("key-99", []byte("new-right-edge"))
+
+	after := leafChainKeys(snapshot.pages, snapshot.root)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("snapshot leaf chain changed from %v to %v", before, after)
+	}
+	if !reflect.DeepEqual(after, sequentialKeys(40)) {
+		t.Fatalf("snapshot leaf chain after concurrent write = %v, want original keys", after)
+	}
+	snapshot.Close()
+
+	wantCurrent := append(sequentialKeys(40), "key-99")
+	if got := leafChainKeys(tree.pages, tree.root); !reflect.DeepEqual(got, wantCurrent) {
+		t.Fatalf("current leaf chain after closing snapshot = %v, want %v", got, wantCurrent)
+	}
+}
+
 func TestSnapshotKeepsOldRootAfterCopyOnWritePuts(t *testing.T) {
 	tree := New(2)
 	for i := 0; i < 30; i++ {
