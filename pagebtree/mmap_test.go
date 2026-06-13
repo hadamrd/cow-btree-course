@@ -4,6 +4,7 @@ package pagebtree
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -185,6 +186,38 @@ func TestMmapTreePersistsFreelistAcrossReopen(t *testing.T) {
 	}
 	if afterReuse.AllocatedPages > allocatedBeforeReuse+1 {
 		t.Fatalf("AllocatedPages grew from %d to %d despite persisted freelist pages", allocatedBeforeReuse, afterReuse.AllocatedPages)
+	}
+}
+
+func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	first, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap first: %v", err)
+	}
+
+	second, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err == nil {
+		second.Close()
+		first.Close()
+		t.Fatalf("second OpenMmap unexpectedly acquired the same database lock")
+	}
+	if !errors.Is(err, ErrDatabaseLocked) {
+		first.Close()
+		t.Fatalf("second OpenMmap error = %v, want ErrDatabaseLocked", err)
+	}
+
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close first: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap after close: %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("Close reopened: %v", err)
 	}
 }
 

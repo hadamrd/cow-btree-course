@@ -12,6 +12,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var ErrDatabaseLocked = errors.New("mmap tree database is already locked")
+
 const (
 	metaMagic        = "COWBTREE"
 	metaVersion      = uint64(1)
@@ -42,6 +44,7 @@ type mmapArena struct {
 	file     *os.File
 	data     []byte
 	maxPages int
+	locked   bool
 }
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
@@ -49,8 +52,13 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := lockFile(file); err != nil {
+		file.Close()
+		return nil, err
+	}
 	info, err := file.Stat()
 	if err != nil {
+		unlockFile(file)
 		file.Close()
 		return nil, err
 	}
@@ -58,6 +66,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	maxPages := options.MaxPages
 	if info.Size() > 0 {
 		if info.Size()%PageSize != 0 {
+			unlockFile(file)
 			file.Close()
 			return nil, fmt.Errorf("mmap tree file size %d is not page aligned", info.Size())
 		}
@@ -72,12 +81,14 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 
 	size := int64((maxPages + metaPageCount) * PageSize)
 	if err := file.Truncate(size); err != nil {
+		unlockFile(file)
 		file.Close()
 		return nil, err
 	}
 
 	data, err := unix.Mmap(int(file.Fd()), 0, int(size), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
+		unlockFile(file)
 		file.Close()
 		return nil, err
 	}
@@ -86,6 +97,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		file:     file,
 		data:     data,
 		maxPages: maxPages,
+		locked:   true,
 	}
 
 	tree := &Tree{
@@ -150,10 +162,31 @@ func (a *mmapArena) close() error {
 	if err := unix.Munmap(a.data); err != nil {
 		errs = append(errs, err)
 	}
+	if a.locked {
+		if err := unlockFile(a.file); err != nil {
+			errs = append(errs, err)
+		}
+		a.locked = false
+	}
 	if err := a.file.Close(); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+func lockFile(file *os.File) error {
+	err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
+		return ErrDatabaseLocked
+	}
+	return err
+}
+
+func unlockFile(file *os.File) error {
+	return unix.Flock(int(file.Fd()), unix.LOCK_UN)
 }
 
 type metaRecord struct {

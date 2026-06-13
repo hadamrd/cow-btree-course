@@ -4,6 +4,8 @@ package pagebtree
 
 import "errors"
 
+var ErrDatabaseLocked = errors.New("mmap tree database is already locked")
+
 type MmapOptions struct {
 	Degree   int
 	MaxPages int

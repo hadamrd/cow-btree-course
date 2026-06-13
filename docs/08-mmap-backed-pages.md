@@ -59,6 +59,24 @@ That is one of the reasons B-trees pair well with page-oriented storage:
 - hot pages stay in the OS page cache
 - range scans can walk mostly sequential page memory
 
+## File Lock
+
+`OpenMmap` takes a non-blocking exclusive advisory lock on the database file. A second writer attempting to open the same path receives `ErrDatabaseLocked` until the first tree closes.
+
+```mermaid
+sequenceDiagram
+    participant A as Writer A
+    participant B as Writer B
+    participant F as DB file
+    A->>F: OpenMmap + exclusive lock
+    B->>F: OpenMmap
+    F-->>B: ErrDatabaseLocked
+    A->>F: Close releases lock
+    B->>F: OpenMmap succeeds
+```
+
+This keeps the teaching engine honest: the mmap implementation has one writer at a time. It does not yet implement shared read locks or multi-process reader tables.
+
 ## What Is Still Not Production-grade
 
 This chapter makes the project more serious, but it is still not a production database:
@@ -66,7 +84,7 @@ This chapter makes the project more serious, but it is still not a production da
 - freelist state is persisted in the metadata page, but only with a bounded educational encoding
 - writes call `msync`, but there is no complete crash-safe write-order protocol
 - metadata pages are checksummed, but data pages are not
-- there is no file lock
+- file locking is exclusive-writer only; there is no shared-reader lock table
 - there are no overflow pages for large records
 - search still decodes page entries into small Go slices for readability
 - page capacity is fixed at open time
