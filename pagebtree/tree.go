@@ -1,12 +1,16 @@
 package pagebtree
 
 type Tree struct {
-	pages    map[PageID]*page
-	root     PageID
-	nextPage PageID
-	length   int
-	revision uint64
-	degree   int
+	pages         map[PageID]*page
+	root          PageID
+	nextPage      PageID
+	length        int
+	revision      uint64
+	degree        int
+	activeReaders map[uint64]int
+	retired       []retiredPage
+	free          []PageID
+	reusedPages   int
 }
 
 func New(degree int) *Tree {
@@ -58,6 +62,7 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 		t.length++
 	}
 	t.revision++
+	t.reclaimRetiredPages()
 	return old, replaced
 }
 
@@ -65,8 +70,10 @@ func (t *Tree) Range(visit func(string, []byte) bool) {
 	rangePage(t.pages, t.root, visit)
 }
 
-func (t *Tree) Snapshot() Snapshot {
-	return Snapshot{
+func (t *Tree) Snapshot() *Snapshot {
+	t.beginRead(t.revision)
+	return &Snapshot{
+		tree:     t,
 		pages:    t.pages,
 		root:     t.root,
 		length:   t.length,
@@ -76,10 +83,18 @@ func (t *Tree) Snapshot() Snapshot {
 }
 
 func (t *Tree) Stats() Stats {
-	return statsFor(t.pages, t.root, t.length, t.revision, t.degree)
+	return statsFor(t)
 }
 
 func (t *Tree) allocPage() PageID {
+	if len(t.free) > 0 {
+		last := len(t.free) - 1
+		id := t.free[last]
+		t.free = t.free[:last]
+		t.reusedPages++
+		return id
+	}
+
 	id := t.nextPage
 	t.nextPage++
 	return id
@@ -88,5 +103,6 @@ func (t *Tree) allocPage() PageID {
 func (t *Tree) copyPage(id PageID) PageID {
 	newID := t.allocPage()
 	t.pages[newID] = t.pages[id].clone(newID)
+	t.retirePage(id)
 	return newID
 }

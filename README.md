@@ -51,10 +51,11 @@ Start with [`docs/index.md`](docs/index.md), then read in order:
 4. [`docs/04-code-tour.md`](docs/04-code-tour.md)
 5. [`docs/05-exercises.md`](docs/05-exercises.md)
 6. [`docs/06-page-backed-cow.md`](docs/06-page-backed-cow.md)
+7. [`docs/07-freelist-and-readers.md`](docs/07-freelist-and-readers.md)
 
 ## Deliberate Scope
 
-This is a teaching implementation, not a storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, and leaf key/value records. Deletion, write-ahead logging, and disk persistence are left as guided exercises.
+This is a teaching implementation, not a storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, leaf key/value records, reader-pinned retired pages, and a reusable freelist. Deletion, write-ahead logging, and disk persistence are left as guided exercises.
 
 ## License
 

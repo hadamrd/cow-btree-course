@@ -21,6 +21,7 @@ flowchart TD
     C --> D["04. Code tour"]
     D --> E["05. Exercises"]
     D --> F["06. Page-backed CoW"]
+    F --> G["07. Freelist and readers"]
 ```
 
 ## Repository Layout
@@ -40,6 +41,7 @@ pagebtree/
   tree.go       Root page publication
   insert.go     Page-copying insertion and B+tree-style splitting
   snapshot.go   Read-only historical root page ids
+  freelist.go   Reader-pinned retired pages and reusable page IDs
 
 cmd/cowbtree/        Logical B-tree demonstration
 cmd/pagebtree-demo/  Page-backed CoW demonstration
@@ -53,4 +55,5 @@ docs/           Course chapters
 3. Read `btree/tree_test.go`; it is the executable specification.
 4. Step through `Tree.Set` in `btree/tree.go`.
 5. Run `go run ./cmd/pagebtree-demo` to see page root ids change across writes.
-6. Change the degree in the demos and observe how `Stats` changes.
+6. Read `docs/07-freelist-and-readers.md` to understand why old readers delay page reuse.
+7. Change the degree in the demos and observe how `Stats` changes.

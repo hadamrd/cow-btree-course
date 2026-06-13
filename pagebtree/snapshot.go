@@ -1,29 +1,56 @@
 package pagebtree
 
 type Snapshot struct {
+	tree     *Tree
 	pages    map[PageID]*page
 	root     PageID
 	length   int
 	revision uint64
 	degree   int
+	closed   bool
 }
 
-func (s Snapshot) Len() int {
+func (s *Snapshot) Len() int {
+	if s == nil {
+		return 0
+	}
 	return s.length
 }
 
-func (s Snapshot) Revision() uint64 {
+func (s *Snapshot) Revision() uint64 {
+	if s == nil {
+		return 0
+	}
 	return s.revision
 }
 
-func (s Snapshot) Get(key string) ([]byte, bool) {
+func (s *Snapshot) Get(key string) ([]byte, bool) {
+	if s == nil || s.closed {
+		return nil, false
+	}
 	return searchPage(s.pages, s.root, key)
 }
 
-func (s Snapshot) Range(visit func(string, []byte) bool) {
+func (s *Snapshot) Range(visit func(string, []byte) bool) {
+	if s == nil || s.closed {
+		return
+	}
 	rangePage(s.pages, s.root, visit)
 }
 
-func (s Snapshot) Stats() Stats {
-	return statsFor(s.pages, s.root, s.length, s.revision, s.degree)
+func (s *Snapshot) Stats() Stats {
+	if s == nil {
+		return Stats{}
+	}
+	return statsForSnapshot(s.pages, s.root, s.length, s.revision, s.degree)
+}
+
+func (s *Snapshot) Close() {
+	if s == nil || s.closed {
+		return
+	}
+	s.closed = true
+	if s.tree != nil {
+		s.tree.endRead(s.revision)
+	}
 }

@@ -29,5 +29,11 @@ func main() {
 	fmt.Println()
 	fmt.Printf("snapshot root page: %d, k06 = %q\n", snapshot.Stats().Root, oldValue)
 	fmt.Printf("current  root page: %d, k06 = %q\n", tree.Stats().Root, newValue)
-	fmt.Printf("stats: %+v\n", tree.Stats())
+	fmt.Printf("with reader open: %+v\n", tree.Stats())
+
+	snapshot.Close()
+	fmt.Printf("after reader close: %+v\n", tree.Stats())
+
+	tree.Put("k21", []byte("value-k21"))
+	fmt.Printf("after reuse write: %+v\n", tree.Stats())
 }

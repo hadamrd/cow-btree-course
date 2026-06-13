@@ -78,6 +78,8 @@ sequenceDiagram
 
 The old pages remain in the page map. A snapshot keeps its old root id and can still read the old path.
 
+Page IDs from copied old pages are not immediately reusable if a reader can still reach them. The next chapter covers reader-pinned recycling.
+
 ## Snapshot Proof
 
 ```mermaid
@@ -106,4 +108,4 @@ The page package models page identity, root publication, and slotted cell storag
 - Branch pages contain separator keys and child page ids; values live in leaves.
 - There is no deletion or disk persistence yet.
 
-Those are good next exercises once the page-id copy-on-write mechanics are clear.
+Those are good next exercises once the page-id copy-on-write and freelist mechanics are clear.

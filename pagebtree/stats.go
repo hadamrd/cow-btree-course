@@ -10,9 +10,23 @@ type Stats struct {
 	Keys           int
 	Separators     int
 	AllocatedPages int
+	RetiredPages   int
+	FreePages      int
+	ActiveReaders  int
+	ReusedPages    int
 }
 
-func statsFor(pages map[PageID]*page, root PageID, length int, revision uint64, degree int) Stats {
+func statsFor(t *Tree) Stats {
+	stats := statsForSnapshot(t.pages, t.root, t.length, t.revision, t.degree)
+	stats.AllocatedPages = len(t.pages)
+	stats.RetiredPages = len(t.retired)
+	stats.FreePages = len(t.free)
+	stats.ActiveReaders = t.activeReaderCount()
+	stats.ReusedPages = t.reusedPages
+	return stats
+}
+
+func statsForSnapshot(pages map[PageID]*page, root PageID, length int, revision uint64, degree int) Stats {
 	pagesCount, keys, separators := countPagesAndKeys(pages, root, map[PageID]bool{})
 	return Stats{
 		Root:           root,
