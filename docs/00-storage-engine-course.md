@@ -594,8 +594,8 @@ Serious pieces in this repository:
   checksums, truncation, and tree/overflow-bearing pages, then requires any
   accepted image to pass `Tree.Check`.
 - Process-exit crash probes that kill a child writer at sync-publication,
-  mmap-growth, compact-shrink, and large-freelist spill fault points, then
-  reopen the same database from a fresh process.
+  mmap-growth, compact-shrink, large-freelist spill, and large-reclaim spill
+  fault points, then reopen the same database from a fresh process.
 
 Still research or incomplete compared with a production engine:
 
@@ -605,8 +605,8 @@ Still research or incomplete compared with a production engine:
 - No sparse-file hole punching.
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with true power-fail fault injection;
-  sync publication, mmap growth, compact shrink, and large-freelist spill have
-  process-exit probes, but reclaim process matrices remain research work.
+  sync publication, mmap growth, compact shrink, large-freelist spill, and
+  large-reclaim spill have process-exit probes.
 - No byte-balanced deletion across variable-size records.
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.

@@ -157,6 +157,44 @@ func TestMmapLargeFreelistProcessCrashMatrixClassifiesRecoveryRoot(t *testing.T)
 	}
 }
 
+func TestMmapLargeReclaimProcessCrashMatrixClassifiesReaderPinnedRetiredPages(t *testing.T) {
+	if os.Getenv(mmapCrashChildEnv) == "1" {
+		runMmapLargeReclaimProcessCrashChild(t)
+		return
+	}
+
+	tests := []struct {
+		name        string
+		fault       mmapFaultPoint
+		wantReclaim bool
+	}{
+		{
+			name:        "before data sync",
+			fault:       mmapFaultBeforeDataSync,
+			wantReclaim: false,
+		},
+		{
+			name:        "after metadata write",
+			fault:       mmapFaultAfterMetaWrite,
+			wantReclaim: true,
+		},
+		{
+			name:        "before metadata sync",
+			fault:       mmapFaultBeforeMetaSync,
+			wantReclaim: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "course.db")
+			reader := runMmapLargeReclaimProcessCrash(t, path, tt.fault)
+			defer reader.Close()
+			assertMmapLargeReclaimProcessCrashRecovered(t, path, tt.fault, tt.wantReclaim)
+		})
+	}
+}
+
 func runMmapSyncProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
 	t.Helper()
 
@@ -179,6 +217,31 @@ func runMmapLargeFreelistProcessCrash(t *testing.T, path string, fault mmapFault
 	t.Helper()
 
 	runMmapProcessCrashChild(t, path, fault, "^TestMmapLargeFreelistProcessCrashMatrixClassifiesRecoveryRoot$", "large-freelist")
+}
+
+func runMmapLargeReclaimProcessCrash(t *testing.T, path string, fault mmapFaultPoint) *Tree {
+	t.Helper()
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 2048})
+	if err != nil {
+		t.Fatalf("OpenMmap large-reclaim parent create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		tree.Close()
+		t.Fatalf("initial large-reclaim parent Sync: %v", err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close large-reclaim parent writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly large-reclaim parent: %v", err)
+	}
+
+	runMmapProcessCrashChild(t, path, fault, "^TestMmapLargeReclaimProcessCrashMatrixClassifiesReaderPinnedRetiredPages$", "large-reclaim")
+	return reader
 }
 
 func runMmapProcessCrashChild(t *testing.T, path string, fault mmapFaultPoint, testPattern string, label string) {
@@ -325,6 +388,43 @@ func runMmapLargeFreelistProcessCrashChild(t *testing.T) {
 	t.Fatalf("large-freelist child Sync completed without hitting fault %s", fault)
 }
 
+func runMmapLargeReclaimProcessCrashChild(t *testing.T) {
+	t.Helper()
+
+	path := os.Getenv(mmapCrashPathEnv)
+	fault := mmapFaultPoint(os.Getenv(mmapCrashFaultEnv))
+	if path == "" || fault == "" {
+		t.Fatalf("missing large-reclaim crash child env path=%q fault=%q", path, fault)
+	}
+	tree, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap large-reclaim child open: %v", err)
+	}
+	defer tree.Close()
+
+	clear(tree.arena.dirtyPages)
+	tree.revision++
+	retiredCount := reclaimPageCapacity + 17
+	tree.retired = make([]retiredPage, retiredCount)
+	for i := range tree.retired {
+		tree.retired[i] = retiredPage{
+			id:       firstTreePageID + 1 + PageID(i),
+			revision: tree.revision,
+		}
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(retiredCount)
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			os.Exit(mmapCrashChildExitCode)
+		}
+		return nil
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("large-reclaim child Sync before process crash: %v", err)
+	}
+	t.Fatalf("large-reclaim child Sync completed without hitting fault %s", fault)
+}
+
 func assertMmapProcessCrashRecoveryRoot(t *testing.T, path string, fault mmapFaultPoint, wantNewRoot bool) {
 	t.Helper()
 
@@ -408,5 +508,46 @@ func assertMmapLargeFreelistProcessCrashRecovered(t *testing.T, path string, fau
 	}
 	if afterReuse.AllocatedPages > allocatedBeforeReuse+1 {
 		t.Fatalf("AllocatedPages after large-freelist process crash at %s grew from %d to %d despite persisted freelist", fault, allocatedBeforeReuse, afterReuse.AllocatedPages)
+	}
+}
+
+func assertMmapLargeReclaimProcessCrashRecovered(t *testing.T, path string, fault mmapFaultPoint, wantReclaim bool) {
+	t.Helper()
+
+	recovered, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after large-reclaim process crash at %s: %v", fault, err)
+	}
+	defer recovered.Close()
+
+	if err := recovered.Check(); err != nil {
+		t.Fatalf("Check after large-reclaim process crash at %s: %v", fault, err)
+	}
+	if got, ok := recovered.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("Get(alpha) after large-reclaim process crash at %s = %q, %v; want one, true", fault, got, ok)
+	}
+	if !wantReclaim {
+		stats := recovered.Stats()
+		if stats.RetiredPages != 0 || stats.FreePages != 0 {
+			t.Fatalf("Stats after large-reclaim process crash at %s = retired:%d free:%d; want old metadata with none", fault, stats.RetiredPages, stats.FreePages)
+		}
+		return
+	}
+
+	retiredCount := reclaimPageCapacity + 17
+	stats := recovered.Stats()
+	if stats.RetiredPages != retiredCount {
+		t.Fatalf("RetiredPages after large-reclaim process crash at %s = %d, want %d", fault, stats.RetiredPages, retiredCount)
+	}
+	if stats.FreePages != 0 {
+		t.Fatalf("FreePages after large-reclaim process crash at %s = %d, want live reader-pinned retired pages", fault, stats.FreePages)
+	}
+	recovered.Put("bravo", []byte("two"))
+	afterWrite := recovered.Stats()
+	if afterWrite.FreePages != 0 {
+		t.Fatalf("FreePages after write with live reader after large-reclaim process crash at %s = %d, want pinned pages", fault, afterWrite.FreePages)
+	}
+	if afterWrite.RetiredPages < retiredCount {
+		t.Fatalf("RetiredPages after write with live reader after large-reclaim process crash at %s = %d, want at least %d", fault, afterWrite.RetiredPages, retiredCount)
 	}
 }
