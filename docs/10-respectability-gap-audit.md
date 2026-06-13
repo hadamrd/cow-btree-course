@@ -29,7 +29,7 @@ storage-engine artifact.
 
 | Gap | Why it matters | Current state | Next useful slice |
 | --- | --- | --- | --- |
-| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication, growth, compact-shrink, large-freelist spill, large-reclaim spill, and obsolete metadata-generation reclaim images. `TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot` also kills a child writer at sync-publication fault points and reopens the same database from a fresh process. | Extend process-level crash/reopen probes to growth, shrink, freelist, and reclaim paths; true power-fail testing is still outside the local harness. |
+| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication, growth, compact-shrink, large-freelist spill, large-reclaim spill, and obsolete metadata-generation reclaim images. `TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot` kills a child writer at sync-publication fault points and reopens the same database from a fresh process. `TestMmapGrowthProcessCrashMatrixClassifiesOldRoot` does the same for growth file-size, directory-sync, and pre-remap fault points, all recovering the old root. | Extend process-level crash/reopen probes to shrink, freelist, and reclaim paths; true power-fail testing is still outside the local harness. |
 | Transaction batching | Real engines commit a unit of work, not one implicit root publish per call. | Started: `WriteBatch` stages point `Put`/`Delete` operations, hides them until `Commit`, and publishes one tree revision across memory and mmap trees. `Sync` remains the mmap durability boundary. | Add richer transaction ergonomics: old-value reporting, explicit errors, panic-safe rollback, and cursor/range-aware write experiments. |
 | Cursor API | Real B+tree users need `seek`/`next` control, not only callback scans. | Closed in this pass with snapshot-backed forward cursors. | Extend cursors with bounded end keys, reverse traversal, and delete-through-cursor experiments. |
 | Comparator and key model | Production B+trees cannot be hardwired to Go string ordering. | Page cells store strings and compare byte-by-byte through string order. | Introduce byte-key APIs and an explicit comparator boundary before adding prefix compression. |
@@ -119,6 +119,9 @@ slot still references a metadata freelist chain does not recycle that chain, and
 an image taken after both metadata slots advance recomputes the obsolete chain
 as reusable during recovery. The process-exit sync matrix kills a child writer
 at the same sync-publication fault points, then reopens the same database from a
-fresh process and classifies old-root versus new-root recovery. The remaining
-crash-work is extending that subprocess pattern beyond sync publication and
+fresh process and classifies old-root versus new-root recovery. The process-exit
+growth matrix applies the same child-process pattern to file-size,
+directory-sync, and pre-remap growth boundaries, all of which recover the old
+root because growth does not publish metadata. The remaining crash-work is
+extending that subprocess pattern to shrink/freelist/reclaim paths and
 eventually running true power-fail probes outside the local harness.

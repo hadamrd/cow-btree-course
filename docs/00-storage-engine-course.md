@@ -593,8 +593,8 @@ Serious pieces in this repository:
 - A malformed mmap-image fuzz target that mutates metadata, page headers,
   checksums, truncation, and tree/overflow-bearing pages, then requires any
   accepted image to pass `Tree.Check`.
-- A process-exit sync crash probe that kills a child writer at mmap publication
-  fault points and reopens the same database from a fresh process.
+- Process-exit crash probes that kill a child writer at sync-publication and
+  mmap-growth fault points, then reopen the same database from a fresh process.
 
 Still research or incomplete compared with a production engine:
 
@@ -604,8 +604,8 @@ Still research or incomplete compared with a production engine:
 - No sparse-file hole punching.
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with true power-fail fault injection;
-  sync publication has a process-exit probe, but growth/shrink/reclaim process
-  matrices remain research work.
+  sync publication and mmap growth have process-exit probes, but shrink/reclaim
+  process matrices remain research work.
 - No byte-balanced deletion across variable-size records.
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.

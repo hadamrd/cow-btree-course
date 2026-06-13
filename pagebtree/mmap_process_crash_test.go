@@ -53,10 +53,55 @@ func TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot(t *testing.T) {
 	}
 }
 
+func TestMmapGrowthProcessCrashMatrixClassifiesOldRoot(t *testing.T) {
+	if os.Getenv(mmapCrashChildEnv) == "1" {
+		runMmapGrowthProcessCrashChild(t)
+		return
+	}
+
+	tests := []struct {
+		name  string
+		fault mmapFaultPoint
+	}{
+		{
+			name:  "before file size sync",
+			fault: mmapFaultBeforeFileSizeSync,
+		},
+		{
+			name:  "before directory sync",
+			fault: mmapFaultBeforeDirectorySync,
+		},
+		{
+			name:  "before replacement remap",
+			fault: mmapFaultBeforeRemap,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "course.db")
+			runMmapGrowthProcessCrash(t, path, tt.fault)
+			assertMmapProcessCrashRecoveryRoot(t, path, tt.fault, false)
+		})
+	}
+}
+
 func runMmapSyncProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
 	t.Helper()
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot$")
+	runMmapProcessCrashChild(t, path, fault, "^TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot$", "sync")
+}
+
+func runMmapGrowthProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
+	t.Helper()
+
+	runMmapProcessCrashChild(t, path, fault, "^TestMmapGrowthProcessCrashMatrixClassifiesOldRoot$", "growth")
+}
+
+func runMmapProcessCrashChild(t *testing.T, path string, fault mmapFaultPoint, testPattern string, label string) {
+	t.Helper()
+
+	cmd := exec.Command(os.Args[0], "-test.run="+testPattern)
 	cmd.Env = append(os.Environ(),
 		mmapCrashChildEnv+"=1",
 		mmapCrashPathEnv+"="+path,
@@ -64,14 +109,14 @@ func runMmapSyncProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
 	)
 	output, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("crash child for %s exited successfully; output:\n%s", fault, output)
+		t.Fatalf("%s crash child for %s exited successfully; output:\n%s", label, fault, output)
 	}
 	exitErr, ok := err.(*exec.ExitError)
 	if !ok {
-		t.Fatalf("crash child for %s failed without exit status: %v\n%s", fault, err, output)
+		t.Fatalf("%s crash child for %s failed without exit status: %v\n%s", label, fault, err, output)
 	}
 	if got := exitErr.ExitCode(); got != mmapCrashChildExitCode {
-		t.Fatalf("crash child for %s exit code = %d, want %d; output:\n%s", fault, got, mmapCrashChildExitCode, output)
+		t.Fatalf("%s crash child for %s exit code = %d, want %d; output:\n%s", label, fault, got, mmapCrashChildExitCode, output)
 	}
 }
 
@@ -102,6 +147,36 @@ func runMmapSyncProcessCrashChild(t *testing.T) {
 		t.Fatalf("child Sync before process crash: %v", err)
 	}
 	t.Fatalf("child Sync completed without hitting fault %s", fault)
+}
+
+func runMmapGrowthProcessCrashChild(t *testing.T) {
+	t.Helper()
+
+	path := os.Getenv(mmapCrashPathEnv)
+	fault := mmapFaultPoint(os.Getenv(mmapCrashFaultEnv))
+	if path == "" || fault == "" {
+		t.Fatalf("missing growth crash child env path=%q fault=%q", path, fault)
+	}
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap growth child create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial growth child Sync: %v", err)
+	}
+	oldMaxPages := tree.arena.maxPages
+	tree.Put("bravo", []byte("two"))
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			os.Exit(mmapCrashChildExitCode)
+		}
+		return nil
+	}
+	if err := tree.remapMmap(oldMaxPages * 2); err != nil {
+		t.Fatalf("growth child remap before process crash: %v", err)
+	}
+	t.Fatalf("growth child remap completed without hitting fault %s", fault)
 }
 
 func assertMmapProcessCrashRecoveryRoot(t *testing.T, path string, fault mmapFaultPoint, wantNewRoot bool) {
