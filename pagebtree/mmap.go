@@ -25,6 +25,8 @@ var (
 	munmapBytes = unix.Munmap
 )
 
+var syncDirectoryPath = syncDirectoryPathOS
+
 const (
 	metaMagic        = "COWBTREE"
 	metaVersion      = uint64(2)
@@ -557,6 +559,10 @@ func (a *mmapArena) syncDirectory() error {
 	if a.dirSyncObserver != nil {
 		a.dirSyncObserver(dir)
 	}
+	return syncDirectoryPath(dir)
+}
+
+func syncDirectoryPathOS(dir string) error {
 	handle, err := os.Open(dir)
 	if err != nil {
 		return err

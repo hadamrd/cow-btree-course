@@ -669,6 +669,30 @@ func TestMmapGrowthSyncsDirectoryAfterTruncate(t *testing.T) {
 	}
 }
 
+func TestMmapCreateSyncsParentDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	var syncedDirs []string
+	oldSyncDirectoryPath := syncDirectoryPath
+	syncDirectoryPath = func(path string) error {
+		syncedDirs = append(syncedDirs, path)
+		return nil
+	}
+	defer func() {
+		syncDirectoryPath = oldSyncDirectoryPath
+	}()
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	if got, want := syncedDirs, []string{filepath.Dir(path)}; !slices.Equal(got, want) {
+		t.Fatalf("creation directory syncs = %v, want %v", got, want)
+	}
+}
+
 func TestMmapTreePersistsLeafNextLinksAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

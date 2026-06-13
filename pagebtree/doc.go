@@ -23,10 +23,11 @@
 // pages before publishing metadata. If the final metadata flush fails, Sync
 // restores the previous mapped metadata bytes before returning the error. Mmap
 // trees can grow the mapped file when allocation reaches the current capacity.
-// File-size changes from growth and compaction sync the data file and parent
-// directory. Compact can trim unused mapped capacity and a suffix of already-free
-// page ids when no snapshot is active; if compacted metadata publication fails,
-// the temporary in-memory compaction state is restored. Close returns
+// New database creation and file-size changes from growth and compaction sync
+// the data file and parent directory. Compact can trim unused mapped capacity
+// and a suffix of already-free page ids when no snapshot is active; if
+// compacted metadata publication fails, the temporary in-memory compaction state
+// is restored. Close returns
 // ErrActiveReaders for mmap-backed trees while snapshots are active, because
 // those snapshots still read slices backed by the mapping. If close-time Sync
 // fails but the mmap resources are still released, the handle is marked closed
