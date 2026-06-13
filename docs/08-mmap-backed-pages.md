@@ -28,6 +28,7 @@ Pages `0` and `1` are alternating metadata pages:
 
 - magic bytes
 - format version
+- database page size
 - root page id
 - next page id
 - length
@@ -37,7 +38,7 @@ Pages `0` and `1` are alternating metadata pages:
 - reusable page IDs
 - CRC32 checksum
 
-`Sync` is the explicit durability boundary. Writable mmap pages are marked dirty when copy-on-write allocates or reuses their page IDs. `Sync` flushes those dirty tree and overflow page bytes first, then writes the metadata page selected by `revision % 2`, then flushes that metadata page. `Close` calls `Sync` for writable trees. On reopen, the tree validates both metadata checksums, then tries candidate records from newest to oldest. A candidate is usable only if its root and `nextPage` are inside both the mapped file and the metadata's declared capacity, the root and every reachable tree or overflow page pass validation, the metadata length matches the reachable leaf-key count, and the persisted freelist is safe to reuse. If the newest metadata page is torn, corrupted, points at a torn root page, points outside the mapped file, contradicts its own capacity, stores the wrong logical length, or names an unsafe reusable page, the older valid page can still point to a previous root.
+`Sync` is the explicit durability boundary. Writable mmap pages are marked dirty when copy-on-write allocates or reuses their page IDs. `Sync` flushes those dirty tree and overflow page bytes first, then writes the metadata page selected by `revision % 2`, then flushes that metadata page. `Close` calls `Sync` for writable trees. On reopen, the tree validates metadata magic, version, database page size, checksum, and freelist encoding before trying candidate records from newest to oldest. A candidate is usable only if its root and `nextPage` are inside both the mapped file and the metadata's declared capacity, the root and every reachable tree or overflow page pass validation, the metadata length matches the reachable leaf-key count, and the persisted freelist is safe to reuse. If the newest metadata page is torn, corrupted, uses an unsupported format or page size, points at a torn root page, points outside the mapped file, contradicts its own capacity, stores the wrong logical length, or names an unsafe reusable page, the older valid page can still point to a previous root.
 
 The reusable page IDs are stored directly in the metadata page for now. That keeps the lesson compact and makes close/reopen freelist behavior visible. Reopen checks that each persisted reusable page ID is inside the allocated page range, appears only once, and is not reachable from the accepted root or its overflow chains. A larger database would usually store freelist records in normal pages and have metadata point to the freelist root.
 
@@ -50,7 +51,7 @@ size   = PageSize
 
 Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from each metadata candidate root, including overflow chains referenced by leaf values, and rejects corruption before serving reads. Validation is deliberately layered: first the page checksum must match, then the page bytes must still form a legal layout, then branch routing must still describe a proper tree. Leaf and branch pages validate their slotted-page structure before any key/value cells are decoded; overflow pages validate their payload length before the chain is followed, and referenced overflow chains must contain exactly the number of payload bytes recorded in the leaf's `OVF1` reference. Branch pages also reject duplicate child references and separators that do not match the first key of their right child. Leaf pages reject next-leaf links that do not match the branch-order leaf sequence. If an older metadata candidate is still reachable and valid, it can be used as the recovery point.
 
-The database page size is fixed at 4096 bytes for the lesson. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them. Dirty logical pages are coalesced into contiguous ranges before `msync`, so a small write does not force the whole mapped file to flush.
+The database page size is fixed at 4096 bytes for the lesson and stored in the metadata page. Reopen rejects a valid-checksum metadata page that advertises a different page size instead of interpreting page IDs with the wrong geometry. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them. Dirty logical pages are coalesced into contiguous ranges before `msync`, so a small write does not force the whole mapped file to flush.
 
 The mapped file can grow and explicitly compact. `MmapOptions.MaxPages` sets the initial tree-page capacity, and `OpenMmap` also honors any larger existing file on reopen. When copy-on-write allocation reaches the mapped capacity, the tree flushes dirty data pages without publishing new metadata, extends the file, creates a larger mapping, and rebinds the in-memory page objects to their new byte ranges. The next `Sync` still controls when metadata publishes the new root and `nextPage`.
 
@@ -164,7 +165,7 @@ This chapter makes the project more serious, but it is still not a production da
 
 - freelist state is persisted and validated in the metadata page, but only with a bounded educational encoding
 - `Sync` flushes dirty data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
-- metadata pages, reachable tree pages, and reachable overflow pages are checksummed and validated for bounds, layout, routing, freelist safety, and key-count consistency, but there is no page-level repair
+- metadata pages, reachable tree pages, and reachable overflow pages are checksummed and validated for format, page size, bounds, layout, routing, freelist safety, and key-count consistency, but there is no page-level repair
 - read-only mmap handles use shared file locks, but there is no reader table that allows a concurrent writer to recycle pages around external readers
 - overflow pages are linear chains, not a compact extent/tree structure
 - byte-full leaf rewrites can spill cells to overflow pages, but sibling redistribution is still key-count based

@@ -4,11 +4,13 @@ package pagebtree
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -1273,6 +1275,66 @@ func TestMmapTreeRejectsMetadataNextPageBeyondDeclaredCapacity(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsUnsupportedMetadataVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	replaceNewestMetaBytes(t, path, func(data []byte) {
+		binary.LittleEndian.PutUint64(data[metaVersionOff:], metaVersion+1)
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with unsupported metadata version")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap unsupported metadata version error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "metadata version") {
+		t.Fatalf("OpenMmap unsupported metadata version error = %v, want metadata version detail", err)
+	}
+}
+
+func TestMmapTreeRejectsMetadataPageSizeMismatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	replaceNewestMetaBytes(t, path, func(data []byte) {
+		binary.LittleEndian.PutUint64(data[metaPageSizeOff:], uint64(PageSize*2))
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with mismatched metadata page size")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap metadata page size error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "page size") {
+		t.Fatalf("OpenMmap metadata page size error = %v, want page size detail", err)
+	}
+}
+
 func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -1695,6 +1757,36 @@ func replaceNewestMetaRecord(t *testing.T, path string, rewrite func(metaRecord)
 		t.Fatalf("Sync rewrite meta %d: %v", index, err)
 	}
 	return record
+}
+
+func replaceNewestMetaBytes(t *testing.T, path string, rewrite func([]byte)) {
+	t.Helper()
+
+	index, _ := newestMetaPage(t, path)
+	for candidateIndex := 0; candidateIndex < metaPageCount; candidateIndex++ {
+		if candidateIndex != index {
+			corruptMetaPage(t, path, candidateIndex)
+		}
+	}
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile rewrite raw meta: %v", err)
+	}
+	defer file.Close()
+
+	buf := make([]byte, PageSize)
+	if _, err := file.ReadAt(buf, int64(index*PageSize)); err != nil {
+		t.Fatalf("ReadAt rewrite raw meta %d: %v", index, err)
+	}
+	rewrite(buf)
+	binary.LittleEndian.PutUint32(buf[metaChecksumOff:], metaChecksum(buf))
+	if _, err := file.WriteAt(buf, int64(index*PageSize)); err != nil {
+		t.Fatalf("WriteAt rewrite raw meta %d: %v", index, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("Sync rewrite raw meta %d: %v", index, err)
+	}
 }
 
 func newestMetaPage(t *testing.T, path string) (int, metaRecord) {

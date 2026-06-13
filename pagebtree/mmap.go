@@ -24,15 +24,16 @@ const (
 	metaVersion      = uint64(1)
 	metaMagicOffset  = 0
 	metaVersionOff   = 8
-	metaRootOff      = 16
-	metaNextPageOff  = 24
-	metaLengthOff    = 32
-	metaRevisionOff  = 40
-	metaDegreeOff    = 48
-	metaMaxPagesOff  = 56
-	metaChecksumOff  = 64
-	metaFreeCountOff = 72
-	metaFreeListOff  = 80
+	metaPageSizeOff  = 16
+	metaRootOff      = 24
+	metaNextPageOff  = 32
+	metaLengthOff    = 40
+	metaRevisionOff  = 48
+	metaDegreeOff    = 56
+	metaMaxPagesOff  = 64
+	metaChecksumOff  = 72
+	metaFreeCountOff = 80
+	metaFreeListOff  = 88
 	metaPageCount    = 2
 	minMmapPageCount = 2
 )
@@ -86,14 +87,15 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		return nil, err
 	}
 
+	existingSize := info.Size()
 	maxPages := options.MaxPages
-	if info.Size() > 0 {
-		if info.Size()%PageSize != 0 {
+	if existingSize > 0 {
+		if existingSize%PageSize != 0 {
 			unlockFile(file)
 			file.Close()
-			return nil, fmt.Errorf("mmap tree file size %d is not page aligned", info.Size())
+			return nil, fmt.Errorf("mmap tree file size %d is not page aligned", existingSize)
 		}
-		existingPages := int(info.Size()/PageSize) - metaPageCount
+		existingPages := int(existingSize/PageSize) - metaPageCount
 		if maxPages < existingPages {
 			maxPages = existingPages
 		}
@@ -137,7 +139,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		rangePrefetchLeafWindow: normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
 	}
 
-	if arena.initialized() {
+	if existingSize > 0 {
 		if err := tree.loadMeta(); err != nil {
 			arena.close()
 			return nil, err
@@ -627,7 +629,11 @@ func (t *Tree) loadMeta() error {
 	var lastMetaErr error
 	maxNextPage := firstTreePageID
 	for index := 0; index < metaPageCount; index++ {
-		record, ok := readMetaPage(t.arena.data[index*PageSize : (index+1)*PageSize])
+		record, ok, err := readMetaPageChecked(t.arena.data[index*PageSize : (index+1)*PageSize])
+		if err != nil {
+			lastMetaErr = err
+			continue
+		}
 		if !ok {
 			continue
 		}
@@ -757,23 +763,37 @@ func (t *Tree) MmapCacheStats() (MmapCacheStats, error) {
 }
 
 func readMetaPage(data []byte) (metaRecord, bool) {
-	if len(data) < PageSize {
+	record, ok, err := readMetaPageChecked(data)
+	if err != nil {
 		return metaRecord{}, false
+	}
+	return record, ok
+}
+
+func readMetaPageChecked(data []byte) (metaRecord, bool, error) {
+	if len(data) < PageSize {
+		return metaRecord{}, false, fmt.Errorf("%w: metadata page length %d below page size %d", ErrMetaInvariant, len(data), PageSize)
+	}
+	if isZeroPage(data[:PageSize]) {
+		return metaRecord{}, false, nil
 	}
 	if string(data[metaMagicOffset:metaMagicOffset+len(metaMagic)]) != metaMagic {
-		return metaRecord{}, false
+		return metaRecord{}, false, fmt.Errorf("%w: metadata magic mismatch", ErrMetaInvariant)
 	}
 	if binary.LittleEndian.Uint64(data[metaVersionOff:]) != metaVersion {
-		return metaRecord{}, false
+		return metaRecord{}, false, fmt.Errorf("%w: metadata version %d unsupported", ErrMetaInvariant, binary.LittleEndian.Uint64(data[metaVersionOff:]))
+	}
+	if binary.LittleEndian.Uint64(data[metaPageSizeOff:]) != PageSize {
+		return metaRecord{}, false, fmt.Errorf("%w: metadata page size %d does not match %d", ErrMetaInvariant, binary.LittleEndian.Uint64(data[metaPageSizeOff:]), PageSize)
 	}
 	want := binary.LittleEndian.Uint32(data[metaChecksumOff:])
 	got := metaChecksum(data)
 	if got != want {
-		return metaRecord{}, false
+		return metaRecord{}, false, fmt.Errorf("%w: metadata checksum mismatch", ErrMetaInvariant)
 	}
 	freeCount := int(binary.LittleEndian.Uint64(data[metaFreeCountOff:]))
 	if freeCount > maxMetaFreePages {
-		return metaRecord{}, false
+		return metaRecord{}, false, fmt.Errorf("%w: metadata free count %d exceeds %d", ErrMetaInvariant, freeCount, maxMetaFreePages)
 	}
 	free := make([]PageID, 0, freeCount)
 	for i := 0; i < freeCount; i++ {
@@ -788,7 +808,16 @@ func readMetaPage(data []byte) (metaRecord, bool) {
 		degree:   int(binary.LittleEndian.Uint64(data[metaDegreeOff:])),
 		maxPages: int(binary.LittleEndian.Uint64(data[metaMaxPagesOff:])),
 		free:     free,
-	}, true
+	}, true, nil
+}
+
+func isZeroPage(data []byte) bool {
+	for _, b := range data {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func writeMetaPage(data []byte, record metaRecord) {
@@ -799,6 +828,7 @@ func writeMetaPage(data []byte, record metaRecord) {
 	clear(data)
 	copy(data[metaMagicOffset:], metaMagic)
 	binary.LittleEndian.PutUint64(data[metaVersionOff:], metaVersion)
+	binary.LittleEndian.PutUint64(data[metaPageSizeOff:], PageSize)
 	binary.LittleEndian.PutUint64(data[metaRootOff:], uint64(record.root))
 	binary.LittleEndian.PutUint64(data[metaNextPageOff:], uint64(record.nextPage))
 	binary.LittleEndian.PutUint64(data[metaLengthOff:], uint64(record.length))
