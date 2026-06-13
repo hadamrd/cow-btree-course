@@ -20,6 +20,11 @@ var (
 	ErrMetaInvariant  = errors.New("metadata invariant invalid")
 )
 
+var (
+	mmapBytes   = unix.Mmap
+	munmapBytes = unix.Munmap
+)
+
 const (
 	metaMagic        = "COWBTREE"
 	metaVersion      = uint64(1)
@@ -112,7 +117,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		return nil, err
 	}
 
-	data, err := unix.Mmap(int(file.Fd()), 0, int(size), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	data, err := mmapBytes(int(file.Fd()), 0, int(size), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
 		unlockFile(file)
 		file.Close()
@@ -182,7 +187,7 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 	}
 
 	size := int(info.Size())
-	data, err := unix.Mmap(int(file.Fd()), 0, size, unix.PROT_READ, unix.MAP_SHARED)
+	data, err := mmapBytes(int(file.Fd()), 0, size, unix.PROT_READ, unix.MAP_SHARED)
 	if err != nil {
 		unlockFile(file)
 		file.Close()
@@ -278,12 +283,14 @@ func (t *Tree) remapMmap(newMaxPages int) error {
 	if err := t.arena.syncFileSize(); err != nil {
 		return err
 	}
-	if err := unix.Munmap(t.arena.data); err != nil {
+
+	data, err := mmapBytes(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
 		return err
 	}
-
-	data, err := unix.Mmap(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
+	oldData := t.arena.data
+	if err := munmapBytes(oldData); err != nil {
+		_ = munmapBytes(data)
 		return err
 	}
 	t.arena.data = data
@@ -380,11 +387,11 @@ func (t *Tree) shrinkMmap(newMaxPages int) error {
 	if err := t.arena.syncFileSize(); err != nil {
 		return err
 	}
-	if err := unix.Munmap(t.arena.data); err != nil {
+	if err := munmapBytes(t.arena.data); err != nil {
 		return err
 	}
 
-	data, err := unix.Mmap(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	data, err := mmapBytes(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
 		return err
 	}
@@ -646,7 +653,7 @@ func (a *mmapArena) close() error {
 
 	var errs []error
 	if len(a.data) > 0 {
-		if err := unix.Munmap(a.data); err != nil {
+		if err := munmapBytes(a.data); err != nil {
 			errs = append(errs, err)
 		} else {
 			a.data = nil

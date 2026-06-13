@@ -409,6 +409,55 @@ func TestMmapTreeGrowsMappingWhenPageCapacityIsExceeded(t *testing.T) {
 	}
 }
 
+func TestMmapGrowthMapsReplacementBeforeUnmappingOldMapping(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	if _, replaced := tree.Put("alpha", []byte("one")); replaced {
+		t.Fatalf("first Put replaced existing key")
+	}
+	oldData := tree.arena.data
+	oldMaxPages := tree.arena.maxPages
+
+	originalMmap := mmapBytes
+	originalMunmap := munmapBytes
+	defer func() {
+		mmapBytes = originalMmap
+		munmapBytes = originalMunmap
+	}()
+
+	var events []string
+	mmapBytes = func(fd int, offset int64, length, prot, flags int) ([]byte, error) {
+		events = append(events, "mmap")
+		return nil, errors.New("forced replacement mmap failure")
+	}
+	munmapBytes = func(data []byte) error {
+		events = append(events, "munmap")
+		return nil
+	}
+
+	err = tree.remapMmap(oldMaxPages * 2)
+	if err == nil {
+		t.Fatalf("remapMmap succeeded with forced replacement mmap failure")
+	}
+	if got, want := fmt.Sprint(events), "[mmap]"; got != want {
+		t.Fatalf("remap events = %s, want %s", got, want)
+	}
+	if len(tree.arena.data) != len(oldData) || &tree.arena.data[0] != &oldData[0] {
+		t.Fatalf("arena data changed after failed remap")
+	}
+	if tree.arena.maxPages != oldMaxPages {
+		t.Fatalf("maxPages after failed remap = %d, want %d", tree.arena.maxPages, oldMaxPages)
+	}
+	if got, ok := tree.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("Get after failed remap = %q, %v; want one, true", got, ok)
+	}
+}
+
 func TestMmapTreeGrowsMappingForOverflowPages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 	large := bytes.Repeat([]byte("x"), PageSize*9+123)
