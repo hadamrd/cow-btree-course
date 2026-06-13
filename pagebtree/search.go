@@ -30,15 +30,12 @@ func rangePage(pages map[PageID]*page, root PageID, visit func(string, []byte) b
 		return rangeLeafSlots(pages, p, 0, "", false, visit)
 	}
 
-	keys, children := p.branchParts()
-	for i, key := range keys {
-		if !rangePage(pages, children[i], visit) {
+	for i := 0; i <= int(p.slotCount()); i++ {
+		if !rangePage(pages, p.branchChild(i), visit) {
 			return false
 		}
-		_ = key
 	}
-
-	return rangePage(pages, children[len(children)-1], visit)
+	return true
 }
 
 func rangePageFrom(pages map[PageID]*page, root PageID, start string, visit func(string, []byte) bool) bool {
@@ -52,10 +49,9 @@ func rangePageFrom(pages map[PageID]*page, root PageID, start string, visit func
 		return rangeLeafSlots(pages, p, index, "", false, visit)
 	}
 
-	keys, children := p.branchParts()
-	index := childIndex(keys, start)
-	for ; index < len(children); index++ {
-		if !rangePageFrom(pages, children[index], start, visit) {
+	index := branchChildIndex(p, start)
+	for ; index <= int(p.slotCount()); index++ {
+		if !rangePageFrom(pages, p.branchChild(index), start, visit) {
 			return false
 		}
 	}
@@ -73,10 +69,12 @@ func rangePageBetween(pages map[PageID]*page, root PageID, start, end string, vi
 		return rangeLeafSlots(pages, p, index, end, true, visit)
 	}
 
-	keys, children := p.branchParts()
-	index := childIndex(keys, start)
-	for ; index < len(children); index++ {
-		if !rangePageBetween(pages, children[index], start, end, visit) {
+	index := branchChildIndex(p, start)
+	for ; index <= int(p.slotCount()); index++ {
+		if branchChildLowerBoundAtOrAfter(p, index, end) {
+			return true
+		}
+		if !rangePageBetween(pages, p.branchChild(index), start, end, visit) {
 			return false
 		}
 	}
@@ -269,6 +267,21 @@ func childIndex(keys []string, key string) int {
 		return index + 1
 	}
 	return index
+}
+
+func branchChildIndex(p *page, key string) int {
+	index, found := p.searchSlot(key)
+	if found {
+		return index + 1
+	}
+	return index
+}
+
+func branchChildLowerBoundAtOrAfter(p *page, childIndex int, key string) bool {
+	if childIndex == 0 {
+		return false
+	}
+	return p.compareCellKey(childIndex-1, key) >= 0
 }
 
 func compareStrings(left, right string) int {

@@ -149,7 +149,7 @@ This chapter makes the project more serious, but it is still not a production da
 - read-only mmap handles use shared file locks, but there is no reader table that allows a concurrent writer to recycle pages around external readers
 - overflow pages are linear chains, not a compact extent/tree structure
 - byte-full leaf rewrites can spill cells to overflow pages, but sibling redistribution is still key-count based
-- `Get` and bounded leaf scans search slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries
+- `Get`, branch range traversal, and bounded leaf scans search slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries
 - `Delete` removes records and collapses simple roots, but does not yet implement full sibling borrow/merge rebalancing
 - mmap files can grow by remapping, but there is no compaction or truncation of reusable pages at the end of the file
 

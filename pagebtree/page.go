@@ -193,6 +193,13 @@ func (p *page) readCellPageID(index int) PageID {
 	return decodePageID(p.data[valueStart : valueStart+int(slot.valueLen)])
 }
 
+func (p *page) branchChild(index int) PageID {
+	if index == 0 {
+		return p.leftmostChild()
+	}
+	return p.readCellPageID(index - 1)
+}
+
 func (p *page) compareCellKey(index int, key string) int {
 	slot := p.readSlot(index)
 	keyStart := int(slot.offset)

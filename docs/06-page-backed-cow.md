@@ -35,7 +35,7 @@ flowchart LR
 
 The header and slots grow from the front of the page. Cells are copied from the end of the page backward. Leaf cells store key/value records. Branch cells store separator keys, and their value bytes encode the child page id to the right of that separator. The header also stores a CRC32 checksum over the rest of the page bytes.
 
-Searching a page does not have to decode every cell into Go structs. The slot directory is already sorted by key, so `Get` can binary-search the slots, compare the query key against only the candidate cell key bytes, and then read only the selected value or child page id. Range scans use the same discipline inside each leaf: compare slot keys first, stop at the upper bound if there is one, and read value bytes only for cells the visitor will see.
+Searching a page does not have to decode every cell into Go structs. The slot directory is already sorted by key, so `Get` can binary-search the slots, compare the query key against only the candidate cell key bytes, and then read only the selected value or child page id. Range scans use the same discipline: branch traversal compares separator keys before reading child page ids, and leaf traversal compares slot keys before reading value bytes.
 
 ## Put, Get, and Delete
 
@@ -142,7 +142,7 @@ Copy-on-write makes leaf links more subtle than they first look. A copied leaf m
 
 The implementation therefore relinks leaves reachable from the current root only when no readers are active. If a `Put` or `Delete` happens while a snapshot is open, the current root is still published immediately, but leaf-link repair is deferred. When the last snapshot closes, `Snapshot.Close` releases the reader pin and repairs the current leaf chain, marking changed mmap pages dirty.
 
-Current-tree `Range` uses the leaf chain when no active reader can make those links stale. `RangeFrom(start)` first descends the tree to the leaf that can contain `start`, then scans forward through linked leaves and skips entries below the lower bound. `RangeBetween(start, end)` uses the same lower-bound leaf descent, stops before the exclusive `end` key, and avoids prefetching linked leaves whose first key is already outside the bound. Inside each leaf, these scans walk slot entries directly instead of materializing every key/value cell first. If a reader is active, these methods fall back to the recursive branch walk so they still return the current keys even while link repair is deferred. Snapshot ranges also keep the recursive walk because they are teaching the old-root view directly.
+Current-tree `Range` uses the leaf chain when no active reader can make those links stale. `RangeFrom(start)` first descends the tree to the leaf that can contain `start`, then scans forward through linked leaves and skips entries below the lower bound. `RangeBetween(start, end)` uses the same lower-bound leaf descent, stops before the exclusive `end` key, and avoids prefetching linked leaves whose first key is already outside the bound. Inside each leaf, these scans walk slot entries directly instead of materializing every key/value cell first. If a reader is active, these methods fall back to the recursive branch walk so they still return the current keys even while link repair is deferred; that fallback also reads branch child ids directly from slots only for children it actually visits. Snapshot ranges keep the recursive walk because they are teaching the old-root view directly.
 
 ## Overflow Values
 
@@ -185,7 +185,7 @@ The page package models page identity, root publication, and slotted cell storag
 
 - Pages are kept in an in-memory map rather than written to disk.
 - The implementation rewrites a copied page from decoded entries during insertion and deletion; it does not do in-place cell compaction.
-- `Get`, `RangeFrom`, and `RangeBetween` search slots directly, but insertion still decodes page contents before rewriting the copied page.
+- `Get`, branch range traversal, and bounded leaf scans search slots directly, but insertion still decodes page contents before rewriting the copied page.
 - Current-tree `Range`, `RangeFrom`, and `RangeBetween` use next-leaf links only when no active reader can make them stale; snapshot ranges still use a recursive tree walk.
 - Byte-full leaf rewrites spill inline cells to overflow pages, but the tree still does not do byte-balanced redistribution between sibling leaves.
 - `Delete` removes records, retires overflow pages, removes empty children, and collapses a one-child root; it does not yet implement full sibling borrow/merge rebalancing.

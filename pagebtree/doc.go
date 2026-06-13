@@ -10,9 +10,10 @@
 // snapshot is active, because rewriting those headers in place would mutate
 // bytes visible to the old root. Current-tree Range, RangeFrom, and
 // RangeBetween use those leaf links when no active reader can make them stale,
-// and leaf scans compare slot keys before reading values so bounded scans do
-// not decode cells outside the requested key range. Mmap-backed ranges prefetch
-// a small bounded window of exact next leaf pages with MADV_WILLNEED.
+// and range scans compare slot keys before reading child ids or values so
+// bounded scans do not decode cells outside the requested key range.
+// Mmap-backed ranges prefetch a small bounded window of exact next leaf pages
+// with MADV_WILLNEED.
 // Mmap-backed trees track dirty copied pages so Sync can flush changed data
 // pages before publishing metadata, and they can grow the mapped file when
 // allocation reaches the current capacity.

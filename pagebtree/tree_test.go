@@ -603,6 +603,32 @@ func TestBranchSlotSearchChoosesChildPageID(t *testing.T) {
 	}
 }
 
+func TestRangeBetweenStopsBeforeReadingOutOfBoundBranchChildValue(t *testing.T) {
+	left := newPage(10, flagLeaf)
+	mustWriteLeafEntries(left, []leafEntry{{key: "alpha", value: []byte("one")}})
+	right := newPage(20, flagLeaf)
+	mustWriteLeafEntries(right, []leafEntry{{key: "bravo", value: []byte("two")}})
+	branch := newPage(9, flagBranch)
+	mustWriteBranchParts(branch, []string{"bravo"}, []PageID{10, 20})
+	corruptSlotValueLen(branch, 0, PageSize)
+
+	pages := map[PageID]*page{
+		9:  branch,
+		10: left,
+		20: right,
+	}
+	var got []string
+	rangePageBetween(pages, 9, "alpha", "bravo", func(key string, value []byte) bool {
+		got = append(got, fmt.Sprintf("%s=%s", key, value))
+		return true
+	})
+
+	want := []string{"alpha=one"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rangePageBetween(alpha,bravo) = %v, want %v", got, want)
+	}
+}
+
 func TestLargeValuesUseOverflowPagesAndRemainCopyOnWrite(t *testing.T) {
 	tree := New(2)
 	large := bytes.Repeat([]byte("x"), PageSize*2+123)
