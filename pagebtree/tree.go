@@ -265,7 +265,7 @@ func (t *Tree) Compact() error {
 	if t == nil || t.closed || t.readOnly {
 		return nil
 	}
-	if t.activeReaderCount() > 0 {
+	if _, hasReader := t.oldestReaderRevision(); hasReader {
 		return nil
 	}
 	t.reclaimRetiredPages()

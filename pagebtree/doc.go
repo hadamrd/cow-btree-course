@@ -1,12 +1,12 @@
 // Package pagebtree contains a page-backed copy-on-write B+tree-style index.
 //
-// It is still an educational in-memory implementation, but it models the shape
-// used by storage engines more closely than package btree: pages are addressed
-// by stable page ids, page bytes use a slotted layout, branch pages store
-// separator keys and child page ids, leaf pages store linked key/value records,
-// and overflow pages hold large values that do not fit cleanly inside a leaf
-// cell. Put and Delete publish new roots through copy-on-write, while snapshots
-// keep reading their older roots. Leaf sibling-link repair is deferred while a
+// It is a research implementation of the storage-engine shape used by
+// mmap-oriented systems such as OpenLDAP LMDB/MDB: pages are addressed by
+// stable page ids, page bytes use a slotted layout, branch pages store separator
+// keys and child page ids, leaf pages store linked key/value records, and
+// overflow pages hold large values that do not fit cleanly inside a leaf cell.
+// Put and Delete publish new roots through copy-on-write, while snapshots keep
+// reading their older roots. Leaf sibling-link repair is deferred while a
 // snapshot is active, because rewriting those headers in place would mutate
 // bytes visible to the old root. Current-tree Range, RangeFrom, and
 // RangeBetween use those leaf links when no active reader can make them stale,
@@ -55,12 +55,16 @@
 // inline in metadata; larger freelists spill to checked freelist pages that are
 // synced before metadata points at them. Old freelist-page generations become
 // reusable only after neither checked metadata page still names their chain.
-// OpenMmapReadOnly opens mmap files with a shared read lock and rejects
-// mutations through the returned tree handle. Mmap-backed trees default to
-// random-access kernel advice, and expose Advise so callers can pass random,
-// sequential, will-need, or normal-policy access-pattern hints to the mmap
-// mapping and, on Linux, the backing file's readahead policy without adding a
-// second Go heap page cache. WarmMmapTree follows the current root and overflow
+// OpenMmap uses a sidecar writer mutex so only one writer can publish at a time.
+// OpenMmapReadOnly opens mmap files with a shared read lock, claims a sidecar
+// reader-table slot for the recovered revision, and rejects mutations through
+// the returned tree handle. Writers combine those reader slots with in-process
+// snapshots before recycling retired pages, so read-only mmap handles can
+// coexist with a writer while pinning old copy-on-write pages. Mmap-backed trees
+// default to random-access kernel advice, and expose Advise so callers can pass
+// random, sequential, will-need, or normal-policy access-pattern hints to the
+// mmap mapping and, on Linux, the backing file's readahead policy without adding
+// a second Go heap page cache. WarmMmapTree follows the current root and overflow
 // references, then asks the kernel to prefetch only those reachable page ranges.
 // DropMmapCache syncs writable mmap trees before asking the kernel to evict
 // clean mapped tree pages with MADV_DONTNEED and Linux file-level DONTNEED

@@ -1,6 +1,6 @@
-# Copy-on-Write B-tree Course
+# CoW B+tree Storage Lab
 
-This folder is a guided course for the code in this repository. Read it as a small book: each chapter introduces one idea, then points back to the exact implementation files.
+This folder is a research guide for the code in this repository. Read it as a small storage-engine notebook: each chapter introduces one mechanism, points back to the implementation, and keeps the OpenLDAP LMDB/MDB design line in view.
 
 ## Learning Goals
 
@@ -10,7 +10,8 @@ By the end, you should be able to explain:
 - How node splits preserve sorted search.
 - Why copy-on-write updates can keep old snapshots readable.
 - What path copying shares, what it copies, and why.
-- Where this teaching implementation differs from a production database index.
+- Why OpenLDAP's mmap/MVCC path differs from OpenDJ's Berkeley DB Java Edition path.
+- Where this research implementation still differs from a production database index.
 
 ## Map
 
@@ -23,6 +24,7 @@ flowchart TD
     D --> F["06. Page-backed CoW"]
     F --> G["07. Freelist and readers"]
     G --> H["08. Mmap-backed pages"]
+    H --> I["09. OpenLDAP/OpenDJ research"]
 ```
 
 ## Repository Layout
@@ -51,12 +53,13 @@ pagebtree/
   freelist_pages.go Checked freelist pages for large persisted reusable lists
   integrity.go  Public open-tree invariant checks
   mmap_warm.go  Exact reachable-page mmap warm-up advice
-  mmap.go       Mmap-backed page arena, metadata recovery, dirty sync, compact, tunable advice, cache stats, and file locks
+  reader_table_unix.go LMDB-style mmap reader table and writer mutex sidecars
+  mmap.go       Mmap-backed page arena, metadata recovery, dirty sync, compact, tunable advice, cache stats, and locks
 
 cmd/cowbtree/        Logical B-tree demonstration
 cmd/pagebtree-demo/  Page-backed CoW demonstration
 cmd/mmapbtree-demo/  Mmap persistence demonstration
-docs/           Course chapters
+docs/           Research chapters
 ```
 
 ## Suggested Reading Path
@@ -68,5 +71,6 @@ docs/           Course chapters
 5. Run `go run ./cmd/pagebtree-demo` to see page root ids change across writes.
 6. Read `docs/07-freelist-and-readers.md` to understand why old readers delay page reuse.
 7. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
-8. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, kernel page-cache behavior, Linux file-advice coordination, derived branch-routing cache behavior, exact reachable-page warm-up, tunable exact-page prefetch advice, and residency stats.
-9. Change the degree in the demos and observe how `Stats` changes.
+8. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, reader-table recycling, kernel page-cache behavior, Linux file-advice coordination, derived branch-routing cache behavior, exact reachable-page warm-up, tunable exact-page prefetch advice, and residency stats.
+9. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
+10. Change the degree in the demos and observe how `Stats` changes.

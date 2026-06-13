@@ -2,7 +2,7 @@
 
 The `pagebtree` package can now store pages in an mmap-backed file.
 
-This is the first step from an in-memory model toward a real storage engine. The B+tree still uses the same slotted page layout, copy-on-write page allocation, snapshots, and reader-safe freelist mechanics. The difference is that page bytes can live inside a file mapping instead of Go heap arrays.
+This is the step from an in-memory model toward the OpenLDAP LMDB/MDB design family. The B+tree still uses the same slotted page layout, copy-on-write page allocation, snapshots, and reader-safe freelist mechanics. The difference is that page bytes can live inside a file mapping instead of Go heap arrays, and read-only mmap handles now register their root revision in a small reader table so a concurrent writer knows which retired pages are still unsafe to recycle.
 
 ## Run It
 
@@ -51,11 +51,11 @@ size   = PageSize
 
 Tree pages and overflow pages also carry CRC32 checksums in their page headers. On reopen, `OpenMmap` walks the pages reachable from each metadata candidate root, including overflow chains referenced by leaf values, and rejects corruption before serving reads. Validation is deliberately layered: first the page checksum must match, then the page bytes must still form a legal layout, then branch routing must still describe a proper tree. Pages reached through the root and branch-child graph must be leaf or branch pages; a valid overflow page is still invalid in that graph. Leaf and branch pages validate their slotted-page structure before any key/value cells are decoded; overflow pages validate their payload length before the chain is followed, and referenced overflow chains must name a first page, must exist, must not loop, must contain only overflow pages, and must contain exactly the number of payload bytes recorded in the leaf's `OVF1` reference. Branch pages also reject missing child pages, duplicate child references, separators that do not match the first key of their right child, and child subtrees containing keys outside the half-open key interval assigned by the parent branch. Non-root leaf pages must also contain at least `degree-1` keys. Leaf pages reject next-leaf links that do not match the branch-order leaf sequence. If an older metadata candidate is still reachable and valid, it can be used as the recovery point.
 
-The database page size is fixed at 4096 bytes for the lesson and stored in the metadata page. Existing files must be page-aligned and large enough to hold the two metadata pages plus the minimum tree-page capacity before they are mapped. Reopen rejects a valid-checksum metadata page that advertises a different page size instead of interpreting page IDs with the wrong geometry. The persisted degree must also be inside the range that a fixed slotted page can represent: it must be at least 2, and its maximum-key count must fit inside the page's slot directory capacity. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them. Dirty logical pages are coalesced into contiguous ranges before `msync`, so a small write does not force the whole mapped file to flush.
+The database page size is fixed at 4096 bytes for the lab and stored in the metadata page. Existing files must be page-aligned and large enough to hold the two metadata pages plus the minimum tree-page capacity before they are mapped. Reopen rejects a valid-checksum metadata page that advertises a different page size instead of interpreting page IDs with the wrong geometry. The persisted degree must also be inside the range that a fixed slotted page can represent: it must be at least 2, and its maximum-key count must fit inside the page's slot directory capacity. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them. Dirty logical pages are coalesced into contiguous ranges before `msync`, so a small write does not force the whole mapped file to flush.
 
 The mapped file can grow and explicitly compact. `MmapOptions.MaxPages` sets the initial tree-page capacity for a new database. Creating a new mmap database writes initial metadata, syncs the file, and syncs the parent directory so the directory entry is part of the durability story. Existing databases reopen at their current file size, even if a larger `MaxPages` hint is passed; capacity grows later through page allocation. When copy-on-write allocation reaches the mapped capacity, the tree flushes dirty data pages without publishing new metadata, extends the file, syncs the file-size change and parent directory, creates a larger replacement mapping, and only then releases the old mapping. That order matters: if the replacement `mmap` fails, existing pages remain readable through the old mapping. If the replacement succeeds but releasing the old mapping fails, the growth path releases the replacement mapping and restores the previous file size before returning the error. After the swap succeeds, the tree rebinds in-memory page objects to their new byte ranges. The next `Sync` still controls when metadata publishes the new root and `nextPage`.
 
-`Compact` is intentionally conservative. It first refuses to run while an in-process snapshot is active. Then it reclaims safe retired pages, lowers `nextPage` only across a contiguous suffix of free page IDs, persists the compacted metadata, truncates the file, syncs the file-size change and parent directory, and remaps the file down to the remaining capacity. If metadata publication fails, the temporary in-memory compaction state is restored before the error is returned. Like growth, shrink remapping acquires the replacement mapping before releasing the old mapping, so a failed replacement `mmap` does not leave the handle pointing at unmapped bytes; it also restores the previous file size before returning the failure. It can also release unused mapped capacity beyond `nextPage`, such as an oversized initial `MaxPages`. It never moves live pages, so interior reusable pages remain in the freelist for future writes.
+`Compact` is intentionally conservative. It first refuses to run while any in-process snapshot or registered mmap reader-table slot is active. Then it reclaims safe retired pages, lowers `nextPage` only across a contiguous suffix of free page IDs, persists the compacted metadata, truncates the file, syncs the file-size change and parent directory, and remaps the file down to the remaining capacity. If metadata publication fails, the temporary in-memory compaction state is restored before the error is returned. Like growth, shrink remapping acquires the replacement mapping before releasing the old mapping, so a failed replacement `mmap` does not leave the handle pointing at unmapped bytes; it also restores the previous file size before returning the failure. It can also release unused mapped capacity beyond `nextPage`, such as an oversized initial `MaxPages`. It never moves live pages, so interior reusable pages remain in the freelist for future writes.
 
 ## Why Mmap Helps
 
@@ -68,7 +68,7 @@ That is one of the reasons B-trees pair well with page-oriented storage:
 - hot pages stay in the OS page cache
 - range scans can walk mostly sequential page memory
 
-The important caching point is that mmap already uses the kernel page cache. Adding a second, broad Go heap page cache would often duplicate memory and fight the kernel. This project keeps page bytes in the mapping and adds access-pattern advice instead. On Linux, each public access hint is applied twice: `madvise` tells the virtual-memory mapping how the process expects to touch mapped bytes, and `posix_fadvise` tells the backing file's readahead policy what file offsets are likely or unlikely to be useful. Other Unix platforms keep the same API and teaching hooks, but file-level advice is a no-op when the portable syscall is not available.
+The important caching point is that mmap already uses the kernel page cache. Adding a second, broad Go heap page cache would often duplicate memory and fight the kernel. This project keeps page bytes in the mapping and adds access-pattern advice instead. On Linux, each public access hint is applied twice: `madvise` tells the virtual-memory mapping how the process expects to touch mapped bytes, and `posix_fadvise` tells the backing file's readahead policy what file offsets are likely or unlikely to be useful. Other Unix platforms keep the same API and research hooks, but file-level advice is a no-op when the portable syscall is not available.
 
 - `MmapAccessDefault` uses the engine default, which is currently `MADV_RANDOM` plus Linux `FADV_RANDOM`. The zero-value option is intentionally point-lookup friendly.
 - `MmapAccessRandom` also uses random advice. This tells Linux not to spend much effort on broad sequential readahead for root-to-branch-to-leaf point lookups.
@@ -162,11 +162,13 @@ flowchart TD
     Y --> Z["MADV_DONTNEED clean tree-page range"]
 ```
 
-## File Lock
+## Writer Mutex and Reader Table
 
-`OpenMmap` takes a non-blocking exclusive advisory lock on the database file. A second writer attempting to open the same path receives `ErrDatabaseLocked` until the first tree closes.
+`OpenMmap` takes a non-blocking exclusive advisory lock on a sidecar writer-mutex file. A second writer attempting to open the same path receives `ErrDatabaseLocked` until the first writer closes. The database file itself is mapped with a shared advisory lock so read-only handles can coexist with the writer.
 
-`OpenMmapReadOnly` opens the same file with a shared advisory lock and a read-only mapping. Multiple read-only handles can coexist. A writer cannot open while any read-only handle is active, so cross-process readers are protected by the file lock rather than by a full reader table.
+`OpenMmapReadOnly` opens the database file with a shared advisory lock and a read-only mapping. After metadata recovery chooses a root, the handle claims a slot in a sidecar reader table. The slot records the process ID and the recovered revision. When a writer reclaims retired pages, it combines in-process snapshots with the oldest live revision found in that reader table. If any active reader can still see a retired page, the writer allocates new pages instead of recycling that page ID. When the read-only handle closes, it clears its slot; the writer can reclaim those pages on the next write or reclaim pass.
+
+This is the same kernel idea described in the MDB paper: a single writer mutex is separate from the main database mapping, and the lock region contains reader slots that let writers decide when old copy-on-write pages are safe to reuse. This project keeps the table deliberately small and file-backed for study; LMDB's production table is shared-memory-oriented and cache-line-aware.
 
 ```mermaid
 sequenceDiagram
@@ -174,16 +176,22 @@ sequenceDiagram
     participant R as Reader
     participant B as Writer B
     participant F as DB file
-    A->>F: OpenMmap + exclusive lock
-    A->>F: Close releases lock
-    R->>F: OpenMmapReadOnly + shared lock
-    B->>F: OpenMmap
-    F-->>B: ErrDatabaseLocked
-    R->>F: Close releases shared lock
-    B->>F: OpenMmap succeeds
+    participant L as writer sidecar
+    participant T as reader table
+    A->>L: OpenMmap + exclusive writer mutex
+    R->>F: OpenMmapReadOnly + read-only mapping
+    R->>T: claim slot at revision N
+    A->>T: scan oldest reader before recycling
+    A->>F: delete key, retire copied pages
+    A->>F: allocate fresh pages while N pins retired pages
+    B->>L: OpenMmap
+    L-->>B: ErrDatabaseLocked
+    R->>T: close clears slot
+    A->>T: scan finds no old reader
+    A->>F: retired pages become reusable
 ```
 
-This keeps the teaching engine honest: the mmap implementation has one writer at a time, and read-only processes can inspect a stable root without taking write permission. It still does not allow one writer to keep progressing while independent external readers pin old pages through a reader table.
+This keeps the storage lab honest: the mmap implementation has one writer at a time, read-only handles can inspect a stable root without taking write permission, and a writer can keep progressing while old readers pin pages through revision watermarks.
 
 ## What Is Still Not Production-grade
 
@@ -193,7 +201,7 @@ This chapter makes the project more serious, but it is still not a production da
 - `Sync` flushes dirty data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
 - file creation, mapped file growth, and compaction sync file-size or directory-entry changes, but the project still does not model every filesystem or storage-device ordering edge case
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed and validated for format, page size, degree, bounds, layout, routing, freelist safety, and key-count consistency, but there is no page-level repair
-- read-only mmap handles use shared file locks, but there is no reader table that allows a concurrent writer to recycle pages around external readers
+- the reader table now lets read-only mmap handles coexist with a writer and pin recycling, but it is intentionally simpler than LMDB's production lock-table implementation
 - overflow pages are linear chains, not a compact extent/tree structure
 - byte-full leaf rewrites can spill cells to overflow pages, and key-underfull leaves and branches can merge or redistribute with siblings, but sibling redistribution is still key-count based rather than byte-balanced
 - `Get`, branch range traversal, and bounded leaf scans search slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries

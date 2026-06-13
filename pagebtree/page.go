@@ -7,7 +7,7 @@ import (
 	"hash/crc32"
 )
 
-// PageSize is the teaching target used in the docs. This package keeps page
+// PageSize is the research target used in the docs. This package keeps page
 // contents in a fixed byte array so the code demonstrates the usual slotted
 // page shape: header and slots grow right, cells grow left.
 const PageSize = 4096

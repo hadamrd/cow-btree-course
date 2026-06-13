@@ -25,7 +25,15 @@ const (
 	mmapAccessDontNeed
 )
 
-type mmapArena struct{}
+type readerTable struct{}
+
+func (r *readerTable) oldest() (uint64, bool, error) {
+	return 0, false, nil
+}
+
+type mmapArena struct {
+	readerTable *readerTable
+}
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	return nil, errors.New("mmap page storage is only available on Unix-like platforms")

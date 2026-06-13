@@ -60,6 +60,8 @@ type MmapOptions struct {
 
 type mmapArena struct {
 	file               *os.File
+	writerLock         *os.File
+	readerTable        *readerTable
 	path               string
 	data               []byte
 	maxPages           int
@@ -86,17 +88,24 @@ const (
 )
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	writerLock, err := openWriterLock(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := lockFile(file, true); err != nil {
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		closeWriterLock(writerLock)
+		return nil, err
+	}
+	if err := lockFile(file, false); err != nil {
+		closeWriterLock(writerLock)
 		file.Close()
 		return nil, err
 	}
 	info, err := file.Stat()
 	if err != nil {
 		unlockFile(file)
+		closeWriterLock(writerLock)
 		file.Close()
 		return nil, err
 	}
@@ -106,6 +115,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	if existingSize > 0 {
 		if err := validateExistingMmapFileSize(existingSize); err != nil {
 			unlockFile(file)
+			closeWriterLock(writerLock)
 			file.Close()
 			return nil, err
 		}
@@ -117,6 +127,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	size := int64((maxPages + metaPageCount) * PageSize)
 	if err := file.Truncate(size); err != nil {
 		unlockFile(file)
+		closeWriterLock(writerLock)
 		file.Close()
 		return nil, err
 	}
@@ -124,17 +135,28 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	data, err := mmapBytes(int(file.Fd()), 0, int(size), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
 		unlockFile(file)
+		closeWriterLock(writerLock)
+		file.Close()
+		return nil, err
+	}
+	readerTable, err := openReaderTable(path)
+	if err != nil {
+		munmapBytes(data)
+		unlockFile(file)
+		closeWriterLock(writerLock)
 		file.Close()
 		return nil, err
 	}
 
 	arena := &mmapArena{
-		file:       file,
-		path:       path,
-		data:       data,
-		maxPages:   maxPages,
-		locked:     true,
-		dirtyPages: map[PageID]bool{},
+		file:        file,
+		writerLock:  writerLock,
+		readerTable: readerTable,
+		path:        path,
+		data:        data,
+		maxPages:    maxPages,
+		locked:      true,
+		dirtyPages:  map[PageID]bool{},
 	}
 	if err := arena.advise(options.AccessPattern); err != nil {
 		arena.close()
@@ -219,6 +241,16 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 		return nil, err
 	}
 	if err := tree.loadMeta(); err != nil {
+		arena.close()
+		return nil, err
+	}
+	readerTable, err := openReaderTable(path)
+	if err != nil {
+		arena.close()
+		return nil, err
+	}
+	arena.readerTable = readerTable
+	if err := readerTable.claim(tree.revision); err != nil {
 		arena.close()
 		return nil, err
 	}
@@ -741,6 +773,13 @@ func (a *mmapArena) close() error {
 	}
 
 	var errs []error
+	if a.readerTable != nil {
+		if err := a.readerTable.close(); err != nil {
+			errs = append(errs, err)
+		} else {
+			a.readerTable = nil
+		}
+	}
 	if len(a.data) > 0 {
 		if err := munmapBytes(a.data); err != nil {
 			errs = append(errs, err)
@@ -761,6 +800,13 @@ func (a *mmapArena) close() error {
 			errs = append(errs, err)
 		} else {
 			a.file = nil
+		}
+	}
+	if a.writerLock != nil {
+		if err := closeWriterLock(a.writerLock); err != nil {
+			errs = append(errs, err)
+		} else {
+			a.writerLock = nil
 		}
 	}
 	return errors.Join(errs...)

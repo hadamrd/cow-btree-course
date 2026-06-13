@@ -1,17 +1,17 @@
-# Copy-on-Write B-tree Course
+# CoW B+tree Storage Lab
 
-An educational Go implementation of a copy-on-write B-tree.
+An experimental Go storage-engine lab for mmap-backed copy-on-write B+trees.
 
-The project is intentionally small, heavily commented, and organized as a course. It is meant for readers who want to understand the mechanics behind B-trees, structural sharing, and snapshot-friendly writes without starting inside a production database engine.
+The project is research-oriented: it keeps the code small enough to study, but follows the serious design line used by OpenLDAP LMDB/MDB: slotted pages, copy-on-write roots, mmap-backed page storage, dual metadata pages, reader-pinned recycling, and kernel page-cache cooperation. The docs compare that path with OpenDJ's Berkeley DB Java Edition lineage, where a Java heap cache, append-only logs, cleaning, and B+tree recovery make a very different set of tradeoffs.
 
 ## What You Get
 
 - A clean generic B-tree package in [`btree/`](btree/)
-- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages, linked leaves, overflow pages, growable/compactable mmap-backed storage, tunable kernel page-cache advice, bounded branch-routing cache, and cache residency stats
+- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages, linked leaves, overflow pages, growable/compactable mmap-backed storage, read-only mmap reader slots, tunable kernel page-cache advice, bounded branch-routing cache, and cache residency stats
 - Copy-on-write writes with stable read-only snapshots
 - Runnable demos in [`cmd/cowbtree`](cmd/cowbtree/) and [`cmd/pagebtree-demo`](cmd/pagebtree-demo/)
 - Tests that document the behavior and invariants
-- A course-style documentation folder with Mermaid diagrams in [`docs/`](docs/)
+- Research notes and diagrams in [`docs/`](docs/)
 
 ## Quick Start
 
@@ -51,7 +51,7 @@ tree.RangeBetween("k10", "k20", func(key string, value []byte) bool {
 })
 ```
 
-## Course Map
+## Research Map
 
 Start with [`docs/index.md`](docs/index.md), then read in order:
 
@@ -63,10 +63,11 @@ Start with [`docs/index.md`](docs/index.md), then read in order:
 6. [`docs/06-page-backed-cow.md`](docs/06-page-backed-cow.md)
 7. [`docs/07-freelist-and-readers.md`](docs/07-freelist-and-readers.md)
 8. [`docs/08-mmap-backed-pages.md`](docs/08-mmap-backed-pages.md)
+9. [`docs/09-openldap-opendj-research.md`](docs/09-openldap-opendj-research.md)
 
 ## Deliberate Scope
 
-This is a teaching implementation, not a production storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, linked leaf key/value pages, lower-bound and bounded range scans, overflow pages, educational deletion, reader-pinned retired pages, a reusable freelist with checked spill pages for large persisted lists, a bounded derived branch-routing cache, and an optional growable mmap-backed page file with dirty-page `Sync`, conservative tail `Compact`, file-size/directory sync after remaps, `madvise` plus Linux file-advice access-pattern hints, tunable exact-leaf prefetch, and `mincore` cache residency stats. Full deletion rebalancing, write-ahead logging, and durability hardening are left as guided exercises.
+This is a research implementation, not a production database. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, linked leaf key/value pages, lower-bound and bounded range scans, overflow pages, copy-on-write deletion, reader-pinned retired pages, a reusable freelist with checked spill pages for large persisted lists, an LMDB-inspired read-only mmap reader table, a bounded derived branch-routing cache, and an optional growable mmap-backed page file with dirty-page `Sync`, conservative tail `Compact`, file-size/directory sync after remaps, `madvise` plus Linux file-advice access-pattern hints, tunable exact-leaf prefetch, and `mincore` cache residency stats. Production-grade crash-order proofs, byte-balanced deletion, multi-database catalogs, and full vacuum are still open research tracks.
 
 ## License
 

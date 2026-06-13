@@ -67,6 +67,16 @@ func (t *Tree) oldestReaderRevision() (uint64, bool) {
 			found = true
 		}
 	}
+	if t.arena != nil && t.arena.readerTable != nil {
+		revision, hasReader, err := t.arena.readerTable.oldest()
+		if err != nil {
+			return 0, true
+		}
+		if hasReader && (!found || revision < oldest) {
+			oldest = revision
+			found = true
+		}
+	}
 	return oldest, found
 }
 

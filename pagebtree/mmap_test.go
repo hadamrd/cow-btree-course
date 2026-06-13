@@ -2756,7 +2756,7 @@ func TestMmapTreeRejectsMetadataDegreeBeyondPageCapacity(t *testing.T) {
 	}
 }
 
-func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
+func TestMmapTreeTakesExclusiveWriterMutex(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
 	first, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
@@ -2768,7 +2768,7 @@ func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
 	if err == nil {
 		second.Close()
 		first.Close()
-		t.Fatalf("second OpenMmap unexpectedly acquired the same database lock")
+		t.Fatalf("second OpenMmap unexpectedly acquired the same writer mutex")
 	}
 	if !errors.Is(err, ErrDatabaseLocked) {
 		first.Close()
@@ -2788,64 +2788,75 @@ func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
 	}
 }
 
-func TestMmapReadOnlyOpensShareFileLockAndBlockWriter(t *testing.T) {
+func TestMmapReadOnlyCoexistsWithWriterAndPinsRecycling(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
 	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
 	if err != nil {
 		t.Fatalf("OpenMmap writer: %v", err)
 	}
-	writer.Put("alpha", []byte("one"))
+	for i := 0; i < 24; i++ {
+		writer.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("Close writer: %v", err)
 	}
 
-	firstReader, err := OpenMmapReadOnly(path)
+	reader, err := OpenMmapReadOnly(path)
 	if err != nil {
-		t.Fatalf("OpenMmapReadOnly first: %v", err)
-	}
-	secondReader, err := OpenMmapReadOnly(path)
-	if err != nil {
-		firstReader.Close()
-		t.Fatalf("OpenMmapReadOnly second: %v", err)
+		t.Fatalf("OpenMmapReadOnly: %v", err)
 	}
 
-	for name, reader := range map[string]*Tree{"first": firstReader, "second": secondReader} {
-		got, ok := reader.Get("alpha")
-		if !ok || string(got) != "one" {
-			secondReader.Close()
-			firstReader.Close()
-			t.Fatalf("%s reader Get(alpha) = %q, %v; want one, true", name, got, ok)
+	concurrentWriter, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		reader.Close()
+		t.Fatalf("OpenMmap writer while read-only reader is active: %v", err)
+	}
+
+	for i := 0; i < 12; i++ {
+		if _, ok := concurrentWriter.Delete(fmt.Sprintf("key-%02d", i)); !ok {
+			concurrentWriter.Close()
+			reader.Close()
+			t.Fatalf("Delete key-%02d = false, want true", i)
 		}
 	}
 
-	blockedWriter, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
-	if err == nil {
-		blockedWriter.Close()
-		secondReader.Close()
-		firstReader.Close()
-		t.Fatalf("writer unexpectedly opened while shared readers were active")
+	pinned := concurrentWriter.Stats()
+	if pinned.RetiredPages == 0 {
+		concurrentWriter.Close()
+		reader.Close()
+		t.Fatalf("RetiredPages with read-only mmap reader active = 0, want pinned retired pages")
 	}
-	if !errors.Is(err, ErrDatabaseLocked) {
-		secondReader.Close()
-		firstReader.Close()
-		t.Fatalf("writer while readers active error = %v, want ErrDatabaseLocked", err)
-	}
-
-	if err := secondReader.Close(); err != nil {
-		firstReader.Close()
-		t.Fatalf("Close second reader: %v", err)
-	}
-	if err := firstReader.Close(); err != nil {
-		t.Fatalf("Close first reader: %v", err)
+	if pinned.FreePages != 0 {
+		concurrentWriter.Close()
+		reader.Close()
+		t.Fatalf("FreePages with read-only mmap reader active = %d, want 0", pinned.FreePages)
 	}
 
-	reopenedWriter, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
-	if err != nil {
-		t.Fatalf("OpenMmap writer after readers close: %v", err)
+	got, ok := reader.Get("key-00")
+	if !ok || string(got) != "value-00" {
+		concurrentWriter.Close()
+		reader.Close()
+		t.Fatalf("reader Get(key-00) after concurrent delete = %q, %v; want value-00, true", got, ok)
 	}
-	if err := reopenedWriter.Close(); err != nil {
-		t.Fatalf("Close reopened writer: %v", err)
+
+	if err := reader.Close(); err != nil {
+		concurrentWriter.Close()
+		t.Fatalf("Close reader: %v", err)
+	}
+	concurrentWriter.Put("key-99", []byte("value-99"))
+
+	released := concurrentWriter.Stats()
+	if released.RetiredPages != 0 {
+		concurrentWriter.Close()
+		t.Fatalf("RetiredPages after read-only reader closes = %d, want 0", released.RetiredPages)
+	}
+	if released.FreePages == 0 {
+		concurrentWriter.Close()
+		t.Fatalf("FreePages after read-only reader closes = 0, want reclaimed pages")
+	}
+	if err := concurrentWriter.Close(); err != nil {
+		t.Fatalf("Close concurrent writer: %v", err)
 	}
 }
 
