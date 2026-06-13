@@ -621,10 +621,15 @@ type metaRecord struct {
 
 func (t *Tree) loadMeta() error {
 	var records []metaRecord
+	var lastMetaErr error
 	maxNextPage := firstTreePageID
 	for index := 0; index < metaPageCount; index++ {
 		record, ok := readMetaPage(t.arena.data[index*PageSize : (index+1)*PageSize])
 		if !ok {
+			continue
+		}
+		if err := t.validateMetaBounds(record); err != nil {
+			lastMetaErr = err
 			continue
 		}
 		records = append(records, record)
@@ -633,6 +638,9 @@ func (t *Tree) loadMeta() error {
 		}
 	}
 	if len(records) == 0 {
+		if lastMetaErr != nil {
+			return lastMetaErr
+		}
 		return fmt.Errorf("no valid mmap tree metadata page")
 	}
 	slices.SortFunc(records, func(left, right metaRecord) int {
@@ -835,12 +843,29 @@ func (t *Tree) validateFreelist(free []PageID, reachable map[PageID]bool) error 
 }
 
 func (t *Tree) validateMetaInvariants(record metaRecord) error {
+	if err := t.validateMetaBounds(record); err != nil {
+		return err
+	}
 	if record.length < 0 {
 		return fmt.Errorf("%w: length %d is negative", ErrMetaInvariant, record.length)
 	}
 	keyCount := t.countReachableKeys(t.root, map[PageID]bool{})
 	if keyCount != record.length {
 		return fmt.Errorf("%w: length %d does not match reachable key count %d", ErrMetaInvariant, record.length, keyCount)
+	}
+	return nil
+}
+
+func (t *Tree) validateMetaBounds(record metaRecord) error {
+	mappedNextPage := PageID(len(t.arena.data) / PageSize)
+	if record.nextPage < firstTreePageID {
+		return fmt.Errorf("%w: next page %d before first tree page %d", ErrMetaInvariant, record.nextPage, firstTreePageID)
+	}
+	if record.nextPage > mappedNextPage {
+		return fmt.Errorf("%w: next page %d beyond mapped page count %d", ErrMetaInvariant, record.nextPage, mappedNextPage)
+	}
+	if record.root != 0 && (record.root < firstTreePageID || record.root >= record.nextPage) {
+		return fmt.Errorf("%w: root page %d outside allocated range [%d,%d)", ErrMetaInvariant, record.root, firstTreePageID, record.nextPage)
 	}
 	return nil
 }

@@ -18,9 +18,9 @@
 // pages before publishing metadata, and they can grow the mapped file when
 // allocation reaches the current capacity. Compact can trim unused mapped
 // capacity and a suffix of already-free page ids when no snapshot is active.
-// Reopen validation checks both page checksums and slotted-page structure
-// before decoding reachable cells, and it rejects branch routing that duplicates
-// children or has separators that no longer match right-child first keys.
+// Reopen validation checks metadata bounds, page checksums, and slotted-page
+// structure before decoding reachable cells, and it rejects branch routing that
+// duplicates children or has separators that no longer match right-child first keys.
 // Persisted leaf next pointers must match the branch-order leaf sequence.
 // Overflow chains must contain exactly the referenced number of payload bytes.
 // Reopen also rejects metadata whose stored length does not match the reachable

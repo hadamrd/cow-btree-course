@@ -1114,6 +1114,65 @@ func TestMmapTreeRejectsMetadataLengthThatDoesNotMatchReachableKeys(t *testing.T
 	}
 }
 
+func TestMmapTreeRejectsMetadataRootOutsideNextPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	replaceNewestMetaRecord(t, path, func(record metaRecord) metaRecord {
+		record.root = record.nextPage
+		return record
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with metadata root outside nextPage")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap root bounds error = %v, want ErrMetaInvariant", err)
+	}
+}
+
+func TestMmapTreeRejectsMetadataNextPageBeyondMappedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 8})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Compact(); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	replaceNewestMetaRecord(t, path, func(record metaRecord) metaRecord {
+		record.nextPage = PageID(fileSize(t, path)/PageSize) + 1
+		return record
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with metadata nextPage beyond mapped file")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap nextPage bounds error = %v, want ErrMetaInvariant", err)
+	}
+}
+
 func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
