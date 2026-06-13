@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestMmapTreePersistsKeysAcrossCloseAndReopen(t *testing.T) {
@@ -199,6 +201,91 @@ func TestMmapReadOnlyAccessAdviceKeepsReadsWorking(t *testing.T) {
 	got, ok := reader.Get("alpha")
 	if !ok || string(got) != "one" {
 		t.Fatalf("read-only Get(alpha) after advice = %q, %v; want one, true", got, ok)
+	}
+}
+
+func TestMmapCacheStatsReportsKernelResidency(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, AccessPattern: MmapAccessRandom})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 20; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if got, ok := tree.Get("key-10"); !ok || string(got) != "value-10" {
+		t.Fatalf("Get(key-10) = %q, %v; want value-10, true", got, ok)
+	}
+
+	stats, err := tree.MmapCacheStats()
+	if err != nil {
+		t.Fatalf("MmapCacheStats: %v", err)
+	}
+	wantMappedBytes := (64 + metaPageCount) * PageSize
+	if stats.MappedBytes != wantMappedBytes {
+		t.Fatalf("MappedBytes = %d, want %d", stats.MappedBytes, wantMappedBytes)
+	}
+	if stats.MappedDatabasePages != 64+metaPageCount {
+		t.Fatalf("MappedDatabasePages = %d, want %d", stats.MappedDatabasePages, 64+metaPageCount)
+	}
+	if stats.OSPageSize != unix.Getpagesize() {
+		t.Fatalf("OSPageSize = %d, want %d", stats.OSPageSize, unix.Getpagesize())
+	}
+	wantOSPages := (stats.MappedBytes + stats.OSPageSize - 1) / stats.OSPageSize
+	if stats.OSPages != wantOSPages {
+		t.Fatalf("OSPages = %d, want %d", stats.OSPages, wantOSPages)
+	}
+	if stats.ResidentOSPages <= 0 {
+		t.Fatalf("ResidentOSPages = %d, want at least one resident mapped page", stats.ResidentOSPages)
+	}
+	if stats.ResidentOSPages > stats.OSPages {
+		t.Fatalf("ResidentOSPages = %d, want <= OSPages %d", stats.ResidentOSPages, stats.OSPages)
+	}
+}
+
+func TestMmapReadOnlyCacheStatsReportsKernelResidency(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	defer reader.Close()
+	if got, ok := reader.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("Get(alpha) = %q, %v; want one, true", got, ok)
+	}
+
+	stats, err := reader.MmapCacheStats()
+	if err != nil {
+		t.Fatalf("read-only MmapCacheStats: %v", err)
+	}
+	if stats.MappedBytes == 0 || stats.OSPages == 0 {
+		t.Fatalf("read-only cache stats = %+v, want mapped pages", stats)
+	}
+}
+
+func TestMemoryTreeMmapCacheStatsIsEmpty(t *testing.T) {
+	stats, err := New(2).MmapCacheStats()
+	if err != nil {
+		t.Fatalf("memory MmapCacheStats: %v", err)
+	}
+	if stats != (MmapCacheStats{}) {
+		t.Fatalf("memory cache stats = %+v, want zero stats", stats)
 	}
 }
 

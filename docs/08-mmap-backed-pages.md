@@ -72,6 +72,16 @@ The important caching point is that mmap already uses the kernel page cache. Add
 
 These are hints, not contracts. The kernel can ignore them or combine them with its own readahead heuristics. Correctness comes from the page checksums, copy-on-write roots, and metadata validation, not from prefetch behavior.
 
+The package also exposes `MmapCacheStats`, backed by `mincore` on Unix. This is an observability tool, not an application cache. It reports:
+
+- mapped file bytes
+- mapped database pages
+- OS VM page size
+- mapped OS page count
+- resident OS page count
+
+That lets learners see the distinction between the project's 4096-byte database pages and the kernel's VM pages. On some systems those sizes match; on others one OS page covers several database pages.
+
 ```mermaid
 flowchart TD
     G["Get(key)"] --> A["Advise random access"]
@@ -84,6 +94,9 @@ flowchart TD
     Q --> P1["leaf page N"]
     P1 --> P2["leaf page N+1"]
     P2 --> P3["leaf page N+2"]
+
+    C["MmapCacheStats"] --> M["mincore"]
+    M --> K["resident OS pages"]
 ```
 
 ## File Lock

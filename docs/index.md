@@ -45,7 +45,7 @@ pagebtree/
   delete.go     Page-copying deletion and root collapse
   snapshot.go   Read-only historical root page ids
   freelist.go   Reader-pinned retired pages and reusable page IDs
-  mmap.go       Mmap-backed page arena, metadata recovery, sync, advice, and file locks
+  mmap.go       Mmap-backed page arena, metadata recovery, sync, advice, cache stats, and file locks
 
 cmd/cowbtree/        Logical B-tree demonstration
 cmd/pagebtree-demo/  Page-backed CoW demonstration
@@ -62,5 +62,5 @@ docs/           Course chapters
 5. Run `go run ./cmd/pagebtree-demo` to see page root ids change across writes.
 6. Read `docs/07-freelist-and-readers.md` to understand why old readers delay page reuse.
 7. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
-8. Read `docs/08-mmap-backed-pages.md` for kernel page-cache behavior and access-pattern advice.
+8. Read `docs/08-mmap-backed-pages.md` for kernel page-cache behavior, access-pattern advice, and residency stats.
 9. Change the degree in the demos and observe how `Stats` changes.

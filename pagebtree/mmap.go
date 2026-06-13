@@ -9,6 +9,7 @@ import (
 	"hash/crc32"
 	"os"
 	"slices"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -269,6 +270,45 @@ func (a *mmapArena) advise(pattern MmapAccessPattern) error {
 	return unix.Madvise(a.data, advice)
 }
 
+func (a *mmapArena) cacheStats() (MmapCacheStats, error) {
+	if a == nil || len(a.data) == 0 {
+		return MmapCacheStats{}, nil
+	}
+	osPageSize := unix.Getpagesize()
+	osPages := divideRoundUp(len(a.data), osPageSize)
+	vec := make([]byte, osPages)
+	_, _, errno := unix.Syscall(
+		unix.SYS_MINCORE,
+		uintptr(unsafe.Pointer(&a.data[0])),
+		uintptr(len(a.data)),
+		uintptr(unsafe.Pointer(&vec[0])),
+	)
+	if errno != 0 {
+		return MmapCacheStats{}, errno
+	}
+
+	resident := 0
+	for _, value := range vec {
+		if value&1 == 1 {
+			resident++
+		}
+	}
+	return MmapCacheStats{
+		MappedBytes:         len(a.data),
+		MappedDatabasePages: divideRoundUp(len(a.data), PageSize),
+		OSPageSize:          osPageSize,
+		OSPages:             osPages,
+		ResidentOSPages:     resident,
+	}, nil
+}
+
+func divideRoundUp(value, by int) int {
+	if value == 0 {
+		return 0
+	}
+	return (value + by - 1) / by
+}
+
 func mmapAdvice(pattern MmapAccessPattern) (int, error) {
 	switch pattern {
 	case MmapAccessDefault:
@@ -437,6 +477,14 @@ func (t *Tree) Advise(pattern MmapAccessPattern) error {
 		return nil
 	}
 	return t.arena.advise(pattern)
+}
+
+// MmapCacheStats reports kernel page-cache residency for an mmap-backed tree.
+func (t *Tree) MmapCacheStats() (MmapCacheStats, error) {
+	if t == nil || t.arena == nil {
+		return MmapCacheStats{}, nil
+	}
+	return t.arena.cacheStats()
 }
 
 func readMetaPage(data []byte) (metaRecord, bool) {

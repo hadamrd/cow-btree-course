@@ -47,6 +47,10 @@ func main() {
 	if _, ok := reopened.Get("key-05"); ok {
 		log.Fatal("key-05 was found after delete and reopen")
 	}
+	cacheStats, err := reopened.MmapCacheStats()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -58,4 +62,5 @@ func main() {
 	fmt.Printf("key-17: %s\n", value)
 	fmt.Println("key-05: deleted")
 	fmt.Printf("stats: %+v\n", reopened.Stats())
+	fmt.Printf("cache: %+v\n", cacheStats)
 }

@@ -43,6 +43,10 @@ func (t *Tree) Advise(pattern MmapAccessPattern) error {
 	return nil
 }
 
+func (t *Tree) MmapCacheStats() (MmapCacheStats, error) {
+	return MmapCacheStats{}, nil
+}
+
 func (a *mmapArena) close() error {
 	return nil
 }
