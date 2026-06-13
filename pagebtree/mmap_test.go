@@ -3649,6 +3649,50 @@ func TestMmapReaderTableFutureRevisionPinsRetiredPagesFailClosed(t *testing.T) {
 	}
 }
 
+func TestMmapWriterRejectsFutureReaderTableRevisionAfterMetadataLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	table, err := openReaderTable(path)
+	if err != nil {
+		t.Fatalf("openReaderTable: %v", err)
+	}
+	if err := table.withLock(func() error {
+		return table.writeSlotLocked(0, readerSlot{
+			active:   true,
+			pid:      os.Getpid(),
+			revision: 10_000,
+			token:    99,
+		})
+	}); err != nil {
+		table.close()
+		t.Fatalf("write future reader slot: %v", err)
+	}
+	if err := table.close(); err != nil {
+		t.Fatalf("close injected reader table: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with future reader-table revision")
+	}
+	if !errors.Is(err, ErrReaderTable) {
+		t.Fatalf("OpenMmap future reader-table revision error = %v, want ErrReaderTable", err)
+	}
+	if !strings.Contains(err.Error(), "future") && !strings.Contains(err.Error(), "beyond tree revision") {
+		t.Fatalf("OpenMmap future reader-table revision error = %v, want revision detail", err)
+	}
+}
+
 func TestMmapReadOnlyRejectsFutureReaderTableRevisionAfterMetadataLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

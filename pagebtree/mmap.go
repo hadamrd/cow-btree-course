@@ -179,6 +179,10 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 			arena.close()
 			return nil, err
 		}
+		if err := readerTable.validate(tree.revision); err != nil {
+			arena.close()
+			return nil, err
+		}
 		return tree, nil
 	}
 

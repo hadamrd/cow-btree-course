@@ -75,11 +75,12 @@
 // provisional revision-0 reader-table slot before metadata recovery, updates the
 // slot to the recovered revision, validates existing live slots against that
 // recovered revision, and rejects mutations through the returned tree handle.
-// Writers combine those reader slots with in-process snapshots before recycling
-// retired pages, so read-only mmap handles can coexist with a writer while
-// pinning old copy-on-write pages. MmapReaderStats reports live and
-// stale reader-table slots, and CleanStaleMmapReaders clears slots owned by dead
-// processes. Existing malformed reader-table sidecars and live slots with
+// Writable OpenMmap also validates live reader slots after recovering metadata
+// from an existing file. Writers combine those reader slots with in-process
+// snapshots before recycling retired pages, so read-only mmap handles can
+// coexist with a writer while pinning old copy-on-write pages. MmapReaderStats
+// reports live and stale reader-table slots, and CleanStaleMmapReaders clears
+// slots owned by dead processes. Existing malformed reader-table sidecars and live slots with
 // impossible future revisions return ErrReaderTable instead of being reset,
 // because resetting them could forget active reader watermarks; writer reclaim
 // treats reader-table scan errors as a conservative pin on all retired pages.
