@@ -6,18 +6,10 @@ func searchPage(pages map[PageID]*page, root PageID, key string) ([]byte, bool) 
 	for root != 0 {
 		p := pages[root]
 		if p.isLeaf() {
-			entries := p.leafEntries()
-			index, found := slices.BinarySearchFunc(entries, key, func(entry leafEntry, key string) int {
-				return compareStrings(entry.key, key)
-			})
-			if found {
-				return cloneBytes(entries[index].value), true
-			}
-			return nil, false
+			return p.searchLeafValue(key)
 		}
 
-		keys, children := p.branchParts()
-		root = children[childIndex(keys, key)]
+		root = p.searchBranchChild(key)
 	}
 	return nil, false
 }

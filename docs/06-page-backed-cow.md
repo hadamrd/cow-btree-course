@@ -35,6 +35,8 @@ flowchart LR
 
 The header and slots grow from the front of the page. Cells are copied from the end of the page backward. Leaf cells store key/value records. Branch cells store separator keys, and their value bytes encode the child page id to the right of that separator. The header also stores a CRC32 checksum over the rest of the page bytes.
 
+Searching a page does not have to decode every cell into Go structs. The slot directory is already sorted by key, so `Get` can binary-search the slots, compare the query key against only the candidate cell key bytes, and then read only the selected value or child page id.
+
 ## Put and Get
 
 The runnable demo is:
@@ -60,7 +62,7 @@ On every write:
 
 1. Copy the root page to a new page id.
 2. Descend toward the key.
-3. On branch pages, binary-search separator keys and follow the selected child page id.
+3. On branch pages, binary-search separator slots and follow the selected child page id.
 4. Before descending into a child, copy that child to a new page id.
 5. Split copied full pages as needed.
 6. Publish the copied root id as the new root.
@@ -79,6 +81,26 @@ sequenceDiagram
 The old pages remain in the page map. A snapshot keeps its old root id and can still read the old path.
 
 Page IDs from copied old pages are not immediately reusable if a reader can still reach them. The next chapter covers reader-pinned recycling. The chapter after that moves the same page bytes into an mmap-backed file.
+
+## Walking Branch Pages
+
+A branch page stores one special child in the header, then one child inside each separator cell value:
+
+```mermaid
+flowchart LR
+    L["header.leftmostChild<br/>keys < bravo"] --> P10["page 10"]
+    S0["slot 0<br/>key=bravo<br/>value=page 20"] --> P20["page 20"]
+    S1["slot 1<br/>key=delta<br/>value=page 30"] --> P30["page 30"]
+```
+
+For a lookup:
+
+- If the key is less than the first separator, walk `leftmostChild`.
+- If the key equals a separator, walk the child page id stored in that separator cell.
+- If the key falls between two separators, walk the child page id stored in the lower separator cell.
+- If the key is greater than every separator, walk the child page id stored in the last separator cell.
+
+That rule matches B+tree separator semantics: branch keys route the search, while actual values live in leaf pages.
 
 ## Snapshot Proof
 
@@ -104,6 +126,7 @@ The page package models page identity, root publication, and slotted cell storag
 
 - Pages are kept in an in-memory map rather than written to disk.
 - The implementation rewrites a copied page from decoded entries during insertion; it does not do in-place cell compaction.
+- `Get` searches slots directly, but insertion still decodes page contents before rewriting the copied page.
 - `PageSize` is enforced by the slotted writer, but the examples use tiny degree values so page overflow is not the main teaching problem.
 - Branch pages contain separator keys and child page ids; values live in leaves.
 - There is no deletion or disk persistence yet.

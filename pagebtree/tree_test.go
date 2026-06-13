@@ -214,6 +214,54 @@ func TestBranchPagesUseSlottedSeparatorsAndChildPageIDs(t *testing.T) {
 	}
 }
 
+func TestLeafSlotSearchReadsOnlySelectedCellValue(t *testing.T) {
+	leaf := newPage(1, flagLeaf)
+	mustWriteLeafEntries(leaf, []leafEntry{
+		{key: "alpha", value: []byte("one")},
+		{key: "bravo", value: []byte("two")},
+		{key: "charlie", value: []byte("three")},
+	})
+
+	value, found := leaf.searchLeafValue("bravo")
+	if !found {
+		t.Fatalf("searchLeafValue missed existing key")
+	}
+	if string(value) != "two" {
+		t.Fatalf("searchLeafValue returned %q, want two", value)
+	}
+
+	value[0] = 'X'
+	again, found := leaf.searchLeafValue("bravo")
+	if !found || string(again) != "two" {
+		t.Fatalf("searchLeafValue leaked page memory through returned slice: %q, %v", again, found)
+	}
+
+	if _, found := leaf.searchLeafValue("beta"); found {
+		t.Fatalf("searchLeafValue found absent key")
+	}
+}
+
+func TestBranchSlotSearchChoosesChildPageID(t *testing.T) {
+	branch := newPage(9, flagBranch)
+	mustWriteBranchParts(branch, []string{"bravo", "delta"}, []PageID{10, 20, 30})
+
+	cases := []struct {
+		key  string
+		want PageID
+	}{
+		{key: "alpha", want: 10},
+		{key: "bravo", want: 20},
+		{key: "charlie", want: 20},
+		{key: "delta", want: 30},
+		{key: "echo", want: 30},
+	}
+	for _, tc := range cases {
+		if got := branch.searchBranchChild(tc.key); got != tc.want {
+			t.Fatalf("searchBranchChild(%q) = %d, want %d", tc.key, got, tc.want)
+		}
+	}
+}
+
 func sharesAtLeastOnePage(leftRoot, rightRoot PageID, pages map[PageID]*page) bool {
 	seen := map[PageID]bool{}
 	collectPageIDs(leftRoot, pages, seen)

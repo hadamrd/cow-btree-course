@@ -155,6 +155,80 @@ func (p *page) readCell(index int) (string, []byte) {
 	return string(p.data[keyStart:keyEnd]), value
 }
 
+func (p *page) readCellValue(index int) []byte {
+	slot := p.readSlot(index)
+	valueStart := int(slot.offset) + int(slot.keyLen)
+	valueEnd := valueStart + int(slot.valueLen)
+	value := make([]byte, slot.valueLen)
+	copy(value, p.data[valueStart:valueEnd])
+	return value
+}
+
+func (p *page) readCellPageID(index int) PageID {
+	slot := p.readSlot(index)
+	valueStart := int(slot.offset) + int(slot.keyLen)
+	return decodePageID(p.data[valueStart : valueStart+int(slot.valueLen)])
+}
+
+func (p *page) compareCellKey(index int, key string) int {
+	slot := p.readSlot(index)
+	keyStart := int(slot.offset)
+	keyBytes := p.data[keyStart : keyStart+int(slot.keyLen)]
+
+	for i := 0; i < len(keyBytes) && i < len(key); i++ {
+		switch {
+		case keyBytes[i] < key[i]:
+			return -1
+		case keyBytes[i] > key[i]:
+			return 1
+		}
+	}
+
+	switch {
+	case len(keyBytes) < len(key):
+		return -1
+	case len(keyBytes) > len(key):
+		return 1
+	default:
+		return 0
+	}
+}
+
+func (p *page) searchLeafValue(key string) ([]byte, bool) {
+	index, found := p.searchSlot(key)
+	if !found {
+		return nil, false
+	}
+	return p.readCellValue(index), true
+}
+
+func (p *page) searchBranchChild(key string) PageID {
+	index, found := p.searchSlot(key)
+	if found {
+		return p.readCellPageID(index)
+	}
+	if index == 0 {
+		return p.leftmostChild()
+	}
+	return p.readCellPageID(index - 1)
+}
+
+func (p *page) searchSlot(key string) (int, bool) {
+	low, high := 0, int(p.slotCount())
+	for low < high {
+		mid := low + (high-low)/2
+		switch cmp := p.compareCellKey(mid, key); {
+		case cmp < 0:
+			low = mid + 1
+		case cmp > 0:
+			high = mid
+		default:
+			return mid, true
+		}
+	}
+	return low, false
+}
+
 func (p *page) appendCell(key string, value []byte) bool {
 	cellSize := len(key) + len(value)
 	needed := slotSize + cellSize

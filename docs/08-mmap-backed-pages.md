@@ -88,7 +88,7 @@ This chapter makes the project more serious, but it is still not a production da
 - metadata pages and reachable tree pages are checksummed, but there is no page-level repair
 - file locking is exclusive-writer only; there is no shared-reader lock table
 - there are no overflow pages for large records
-- search still decodes page entries into small Go slices for readability
+- `Get` searches slot directories directly, but insertion still rewrites copied pages from decoded entries
 - page capacity is fixed at open time
 
 The goal is to make mmap concrete without burying the learner under every database-engine concern at once.
