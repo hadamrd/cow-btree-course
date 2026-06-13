@@ -7,7 +7,7 @@ The project is intentionally small, heavily commented, and organized as a course
 ## What You Get
 
 - A clean generic B-tree package in [`btree/`](btree/)
-- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages, linked leaves, overflow pages, growable mmap-backed storage, kernel page-cache advice, bounded branch-routing cache, and cache residency stats
+- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages, linked leaves, overflow pages, growable/compactable mmap-backed storage, kernel page-cache advice, bounded branch-routing cache, and cache residency stats
 - Copy-on-write writes with stable read-only snapshots
 - Runnable demos in [`cmd/cowbtree`](cmd/cowbtree/) and [`cmd/pagebtree-demo`](cmd/pagebtree-demo/)
 - Tests that document the behavior and invariants
@@ -66,7 +66,7 @@ Start with [`docs/index.md`](docs/index.md), then read in order:
 
 ## Deliberate Scope
 
-This is a teaching implementation, not a production storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, linked leaf key/value pages, lower-bound and bounded range scans, overflow pages, educational deletion, reader-pinned retired pages, a reusable freelist, a bounded derived branch-routing cache, and an optional growable mmap-backed page file with dirty-page `Sync`, `madvise` access-pattern hints, and `mincore` cache residency stats. Full deletion rebalancing, write-ahead logging, and durability hardening are left as guided exercises.
+This is a teaching implementation, not a production storage engine. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, linked leaf key/value pages, lower-bound and bounded range scans, overflow pages, educational deletion, reader-pinned retired pages, a reusable freelist, a bounded derived branch-routing cache, and an optional growable mmap-backed page file with dirty-page `Sync`, conservative tail `Compact`, `madvise` access-pattern hints, and `mincore` cache residency stats. Full deletion rebalancing, write-ahead logging, and durability hardening are left as guided exercises.
 
 ## License
 

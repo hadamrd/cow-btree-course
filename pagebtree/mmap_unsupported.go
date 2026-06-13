@@ -50,6 +50,10 @@ func (t *Tree) syncMmap() error {
 	return nil
 }
 
+func (t *Tree) compactMmapTail() error {
+	return nil
+}
+
 func (t *Tree) Advise(pattern MmapAccessPattern) error {
 	return nil
 }

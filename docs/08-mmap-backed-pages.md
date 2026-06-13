@@ -52,7 +52,9 @@ Tree pages and overflow pages also carry CRC32 checksums in their page headers. 
 
 The database page size is fixed at 4096 bytes for the lesson. The operating system's VM page size may be larger. The mmap sync helpers therefore align requested `msync` byte ranges to the OS page size before asking the kernel to flush them. Dirty logical pages are coalesced into contiguous ranges before `msync`, so a small write does not force the whole mapped file to flush.
 
-The mapped file can grow. `MmapOptions.MaxPages` sets the initial tree-page capacity, and `OpenMmap` also honors any larger existing file on reopen. When copy-on-write allocation reaches the mapped capacity, the tree flushes dirty data pages without publishing new metadata, extends the file, creates a larger mapping, and rebinds the in-memory page objects to their new byte ranges. The next `Sync` still controls when metadata publishes the new root and `nextPage`.
+The mapped file can grow and explicitly compact. `MmapOptions.MaxPages` sets the initial tree-page capacity, and `OpenMmap` also honors any larger existing file on reopen. When copy-on-write allocation reaches the mapped capacity, the tree flushes dirty data pages without publishing new metadata, extends the file, creates a larger mapping, and rebinds the in-memory page objects to their new byte ranges. The next `Sync` still controls when metadata publishes the new root and `nextPage`.
+
+`Compact` is intentionally conservative. It first refuses to run while an in-process snapshot is active. Then it reclaims safe retired pages, lowers `nextPage` only across a contiguous suffix of free page IDs, and remaps the file down to the remaining capacity. It can also release unused mapped capacity beyond `nextPage`, such as an oversized initial `MaxPages`. It never moves live pages, so interior reusable pages remain in the freelist for future writes.
 
 ## Why Mmap Helps
 
@@ -168,6 +170,6 @@ This chapter makes the project more serious, but it is still not a production da
 - byte-full leaf rewrites can spill cells to overflow pages, but sibling redistribution is still key-count based
 - `Get`, branch range traversal, and bounded leaf scans search slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries
 - `Delete` removes records and collapses simple roots, but does not yet implement full sibling borrow/merge rebalancing
-- mmap files can grow by remapping, but there is no compaction or truncation of reusable pages at the end of the file
+- `Compact` can truncate unused capacity and trailing free pages, but there is no full vacuum that moves live pages, rewrites page IDs, or punches sparse holes for interior free pages
 
 The goal is to make mmap concrete without burying the learner under every database-engine concern at once.

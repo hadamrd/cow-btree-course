@@ -47,18 +47,25 @@ func main() {
 	if _, ok := reopened.Get("key-05"); ok {
 		log.Fatal("key-05 was found after delete and reopen")
 	}
+	beforeCompact, err := os.Stat(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := reopened.Compact(); err != nil {
+		log.Fatal(err)
+	}
+	afterCompact, err := os.Stat(path)
+	if err != nil {
+		log.Fatal(err)
+	}
 	cacheStats, err := reopened.MmapCacheStats()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	info, err := os.Stat(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	fmt.Printf("mmap file: %s\n", path)
-	fmt.Printf("file size: %d bytes\n", info.Size())
+	fmt.Printf("file size before compact: %d bytes\n", beforeCompact.Size())
+	fmt.Printf("file size after compact:  %d bytes\n", afterCompact.Size())
 	fmt.Printf("key-17: %s\n", value)
 	fmt.Println("key-05: deleted")
 	fmt.Printf("stats: %+v\n", reopened.Stats())

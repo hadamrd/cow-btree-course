@@ -275,6 +275,94 @@ func (t *Tree) rebindMmapPages() error {
 	return nil
 }
 
+func (t *Tree) compactMmapTail() error {
+	if t.arena == nil || t.arena.readOnly {
+		return nil
+	}
+	trimmedNextPage := t.trailingFreeNextPage()
+	newMaxPages := int(trimmedNextPage - firstTreePageID)
+	if newMaxPages < minMmapPageCount {
+		newMaxPages = minMmapPageCount
+	}
+	oldMaxPages := t.arena.maxPages
+	if trimmedNextPage == t.nextPage && newMaxPages >= oldMaxPages {
+		return nil
+	}
+
+	t.removeFreePagesAtOrAbove(trimmedNextPage)
+	for id := range t.pages {
+		if id >= trimmedNextPage {
+			delete(t.pages, id)
+		}
+	}
+	for id := range t.arena.dirtyPages {
+		if id >= trimmedNextPage {
+			delete(t.arena.dirtyPages, id)
+		}
+	}
+	t.nextPage = trimmedNextPage
+
+	t.arena.maxPages = newMaxPages
+
+	if err := t.arena.syncDataPages(t.nextPage); err != nil {
+		t.arena.maxPages = oldMaxPages
+		return err
+	}
+	t.persistMeta()
+	if err := t.arena.syncMetaPage(int(t.revision % metaPageCount)); err != nil {
+		t.arena.maxPages = oldMaxPages
+		return err
+	}
+	if newMaxPages >= oldMaxPages {
+		return nil
+	}
+	return t.shrinkMmap(newMaxPages)
+}
+
+func (t *Tree) trailingFreeNextPage() PageID {
+	free := map[PageID]bool{}
+	for _, id := range t.free {
+		free[id] = true
+	}
+
+	next := t.nextPage
+	for next > firstTreePageID && free[next-1] {
+		next--
+	}
+	return next
+}
+
+func (t *Tree) removeFreePagesAtOrAbove(limit PageID) {
+	kept := t.free[:0]
+	for _, id := range t.free {
+		if id < limit {
+			kept = append(kept, id)
+		}
+	}
+	t.free = kept
+}
+
+func (t *Tree) shrinkMmap(newMaxPages int) error {
+	newSize := int64((newMaxPages + metaPageCount) * PageSize)
+	if err := t.arena.file.Truncate(newSize); err != nil {
+		return err
+	}
+	if err := unix.Munmap(t.arena.data); err != nil {
+		return err
+	}
+
+	data, err := unix.Mmap(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return err
+	}
+	t.arena.data = data
+	t.arena.maxPages = newMaxPages
+	if err := t.arena.advise(t.arena.accessPattern); err != nil {
+		return err
+	}
+	return t.rebindMmapPages()
+}
+
 func (a *mmapArena) syncDataPages(nextPage PageID) error {
 	if a == nil || a.readOnly || nextPage <= firstTreePageID || len(a.dirtyPages) == 0 {
 		return nil

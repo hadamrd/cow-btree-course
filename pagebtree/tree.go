@@ -207,6 +207,27 @@ func (t *Tree) Sync() error {
 	return t.syncMmap()
 }
 
+// Compact trims reusable mmap pages from the physical end of the database file.
+//
+// It never moves live pages. Interior free-list pages remain reusable for later
+// writes; unused mapped capacity can be released, and only a contiguous suffix
+// of already-free page ids can shrink nextPage. If a snapshot is active, Compact
+// does nothing so pages that may still be visible to that reader cannot be
+// reclaimed or unmapped.
+func (t *Tree) Compact() error {
+	if t == nil || t.closed || t.readOnly {
+		return nil
+	}
+	if t.activeReaderCount() > 0 {
+		return nil
+	}
+	t.reclaimRetiredPages()
+	if t.arena == nil {
+		return nil
+	}
+	return t.compactMmapTail()
+}
+
 func (t *Tree) Close() error {
 	if t == nil || t.closed {
 		return nil

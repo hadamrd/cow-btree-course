@@ -477,6 +477,134 @@ func TestMmapTreePageCacheCapacityBoundsBranchRoutingEntries(t *testing.T) {
 	}
 }
 
+func TestMmapCompactTruncatesTrailingFreePagesAndPersistsNextPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 32})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	firstTail := appendFreeTailPage(t, tree)
+	appendFreeTailPage(t, tree)
+	appendFreeTailPage(t, tree)
+	beforeNext := tree.nextPage
+	beforeSize := fileSize(t, path)
+
+	if err := tree.Compact(); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	afterSize := fileSize(t, path)
+	if afterSize >= beforeSize {
+		t.Fatalf("file size after Compact = %d, want less than %d", afterSize, beforeSize)
+	}
+	if tree.nextPage != firstTail {
+		t.Fatalf("nextPage after Compact = %d, want %d", tree.nextPage, firstTail)
+	}
+	if tree.nextPage >= beforeNext {
+		t.Fatalf("nextPage after Compact = %d, want less than previous %d", tree.nextPage, beforeNext)
+	}
+	for _, id := range tree.free {
+		if id >= tree.nextPage {
+			t.Fatalf("free page %d remains beyond compacted nextPage %d", id, tree.nextPage)
+		}
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close compacted tree: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen compacted tree: %v", err)
+	}
+	defer reopened.Close()
+	if reopened.nextPage != firstTail {
+		t.Fatalf("reopened nextPage = %d, want %d", reopened.nextPage, firstTail)
+	}
+	for i := 0; i < 12; i++ {
+		key := fmt.Sprintf("key-%02d", i)
+		if got, ok := reopened.Get(key); !ok || string(got) != fmt.Sprintf("value-%02d", i) {
+			t.Fatalf("reopened Get(%s) = %q, %v", key, got, ok)
+		}
+	}
+}
+
+func TestMmapCompactTruncatesUnusedMappedCapacity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	beforeSize := fileSize(t, path)
+	beforeNext := tree.nextPage
+
+	if err := tree.Compact(); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+
+	afterSize := fileSize(t, path)
+	if afterSize >= beforeSize {
+		t.Fatalf("file size after Compact = %d, want less than %d", afterSize, beforeSize)
+	}
+	if tree.nextPage != beforeNext {
+		t.Fatalf("nextPage after capacity-only Compact = %d, want unchanged %d", tree.nextPage, beforeNext)
+	}
+	wantSize := int64((int(tree.nextPage-firstTreePageID) + metaPageCount) * PageSize)
+	minSize := int64((minMmapPageCount + metaPageCount) * PageSize)
+	if wantSize < minSize {
+		wantSize = minSize
+	}
+	if afterSize != wantSize {
+		t.Fatalf("file size after Compact = %d, want %d", afterSize, wantSize)
+	}
+}
+
+func TestMmapCompactWaitsForActiveReaders(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 32})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	appendFreeTailPage(t, tree)
+	appendFreeTailPage(t, tree)
+	beforeNext := tree.nextPage
+	beforeSize := fileSize(t, path)
+
+	snapshot := tree.Snapshot()
+	if err := tree.Compact(); err != nil {
+		t.Fatalf("Compact with active reader: %v", err)
+	}
+	if tree.nextPage != beforeNext {
+		t.Fatalf("nextPage with active reader = %d, want unchanged %d", tree.nextPage, beforeNext)
+	}
+	if got := fileSize(t, path); got != beforeSize {
+		t.Fatalf("file size with active reader = %d, want unchanged %d", got, beforeSize)
+	}
+
+	snapshot.Close()
+	if err := tree.Compact(); err != nil {
+		t.Fatalf("Compact after reader close: %v", err)
+	}
+	if tree.nextPage >= beforeNext {
+		t.Fatalf("nextPage after reader close = %d, want less than %d", tree.nextPage, beforeNext)
+	}
+	if got := fileSize(t, path); got >= beforeSize {
+		t.Fatalf("file size after reader close = %d, want less than %d", got, beforeSize)
+	}
+}
+
 func TestMmapSyncFlushesDataPagesBeforePublishingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -1544,6 +1672,30 @@ func corruptLeafNext(t *testing.T, path string, id PageID, next PageID) {
 		p.setLeftmostChild(next)
 		p.updateChecksum()
 	})
+}
+
+func appendFreeTailPage(t *testing.T, tree *Tree) PageID {
+	t.Helper()
+
+	id := tree.nextPage
+	if err := tree.growMmapForPage(id); err != nil {
+		t.Fatalf("grow mmap for tail page %d: %v", id, err)
+	}
+	page := tree.newPage(id, flagLeaf)
+	tree.pages[id] = page
+	tree.free = append(tree.free, id)
+	tree.nextPage++
+	return id
+}
+
+func fileSize(t *testing.T, path string) int64 {
+	t.Helper()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(%s): %v", path, err)
+	}
+	return info.Size()
 }
 
 func mutatePage(t *testing.T, path string, id PageID, mutate func(*page)) {

@@ -40,7 +40,7 @@ Because snapshots pin old page IDs, production-style code should close them as s
 
 `Tree.copyPage` is the retirement point. It allocates a new page ID, copies the old page bytes, then retires the old page ID. `reclaimRetiredPages` moves safe retired pages to the freelist. `allocPage` prefers the freelist before increasing `nextPage`.
 
-## Why the File Still Grows
+## Why the Freelist Alone Still Grows
 
 Recycling pages inside a database file does not usually shrink the file.
 
@@ -55,6 +55,8 @@ flowchart LR
 
 To reduce the file's physical size, an engine needs extra work such as compaction, vacuuming, truncating free pages at the end of the file, or punching sparse holes where the platform supports it. Internal freelist recycling controls future growth; it is not the same as returning already-allocated file space.
 
+The mmap-backed chapter now includes the smallest safe form of that extra work: `Tree.Compact`. It can release unused mapped capacity beyond `nextPage` and truncate a contiguous suffix of page IDs that are already safe in the freelist. It does not move live pages, so reusable pages in the middle of the file remain allocated to the database and are reused by future writes.
+
 ## What This Project Models
 
 This repository is still in memory, so `AllocatedPages` is a map size rather than a file size. The model is the same:
@@ -66,7 +68,7 @@ This repository is still in memory, so `AllocatedPages` is a map size rather tha
 
 The tests in `pagebtree/freelist_test.go` prove that active readers prevent reuse and that closing readers releases retired pages to the freelist.
 
-The next chapter maps the same page IDs into a real file with mmap and persists safe freelist IDs across close/reopen. Because that freelist becomes durable metadata, reopen cannot trust it just because the metadata checksum matches. The mmap loader validates persisted reusable IDs before accepting a metadata candidate:
+The next chapter maps the same page IDs into a real file with mmap, persists safe freelist IDs across close/reopen, and demonstrates explicit tail compaction. Because that freelist becomes durable metadata, reopen cannot trust it just because the metadata checksum matches. The mmap loader validates persisted reusable IDs before accepting a metadata candidate:
 
 - every reusable page ID must be inside `[first tree page, nextPage)`
 - no reusable page ID may appear twice
