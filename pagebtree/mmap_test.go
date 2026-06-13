@@ -4935,6 +4935,34 @@ func TestMmapTreePersistsBytewiseKeyOrderAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMmapTreeOpensLegacyZeroKeyOrderFixture(t *testing.T) {
+	path := copyMmapFixture(t, "testdata/mmap-v2-legacy-zero-key-order.db")
+	assertLegacyZeroKeyOrderFixture(t, path)
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap legacy zero-key-order fixture: %v", err)
+	}
+	defer reopened.Close()
+
+	if profile := reopened.MDBKernelProfile(); profile.KeyOrder != KeyOrderBytewise {
+		t.Fatalf("legacy fixture KeyOrder = %d, want bytewise", profile.KeyOrder)
+	}
+	if got, ok := reopened.GetBytes([]byte{0x00, 0xff}); !ok || string(got) != "high" {
+		t.Fatalf("legacy fixture GetBytes(00ff) = %q, %v; want high, true", got, ok)
+	}
+
+	var got [][]byte
+	reopened.RangeBytes(func(key []byte, value []byte) bool {
+		got = append(got, append([]byte(nil), key...))
+		return true
+	})
+	want := [][]byte{{0x00, 0x10}, {0x00, 0xff}, {0x01}}
+	if !equalByteKeySlices(got, want) {
+		t.Fatalf("legacy fixture RangeBytes keys = %x, want %x", got, want)
+	}
+}
+
 func TestOpenMmapRejectsUnsupportedKeyOrderOption(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -5786,6 +5814,43 @@ func copyMmapCrashImageWithReaderTable(t *testing.T, path string, label string) 
 		t.Fatalf("Write crash image reader table %s: %v", image+".readers", err)
 	}
 	return image
+}
+
+func copyMmapFixture(t *testing.T, fixture string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatalf("Read fixture %s: %v", fixture, err)
+	}
+	path := filepath.Join(t.TempDir(), filepath.Base(fixture))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("Write fixture copy %s: %v", path, err)
+	}
+	return path
+}
+
+func assertLegacyZeroKeyOrderFixture(t *testing.T, path string) {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Read fixture copy %s: %v", path, err)
+	}
+	found := false
+	for index := 0; index < metaPageCount; index++ {
+		page := data[index*PageSize : (index+1)*PageSize]
+		if string(page[metaMagicOffset:metaMagicOffset+len(metaMagic)]) != metaMagic {
+			continue
+		}
+		if got := binary.LittleEndian.Uint32(page[metaKeyOrderOff:]); got != 0 {
+			t.Fatalf("fixture raw metadata key order in slot %d = %d, want legacy zero", index, got)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("fixture %s has no metadata pages", path)
+	}
 }
 
 func sanitizeCrashImageLabel(label string) string {
