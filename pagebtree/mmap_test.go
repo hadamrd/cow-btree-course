@@ -1411,6 +1411,31 @@ func TestMmapAccessAdviceKeepsReadsWorking(t *testing.T) {
 	}
 }
 
+func TestMmapAdviseAlsoAdvisesBackingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, AccessPattern: MmapAccessRandom})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	var advised []pageRange
+	tree.arena.fileAdviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == MmapAccessSequential {
+			advised = append(advised, pageRange{start: start, end: end})
+		}
+	}
+	if err := tree.Advise(MmapAccessSequential); err != nil {
+		t.Fatalf("Advise(sequential): %v", err)
+	}
+
+	want := []pageRange{{start: 0, end: PageID(len(tree.arena.data) / PageSize)}}
+	if !slices.Equal(advised, want) {
+		t.Fatalf("file advice ranges = %+v, want %+v", advised, want)
+	}
+}
+
 func TestMmapDefaultsToRandomAccessAdvice(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -1523,6 +1548,37 @@ func TestMmapDropCacheSyncsBeforeDontNeedAdvice(t *testing.T) {
 	}
 	if got, ok := tree.Get("key-09"); !ok || string(got) != "value-09" {
 		t.Fatalf("Get after DropMmapCache = %q, %v; want value-09, true", got, ok)
+	}
+}
+
+func TestMmapDropCacheAdvisesBackingFileAfterSync(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	for i := 0; i < 20; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var events []string
+	tree.arena.syncObserver = func(event string) {
+		events = append(events, event)
+	}
+	tree.arena.fileAdviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == mmapAccessDontNeed {
+			events = append(events, fmt.Sprintf("file-drop:%d-%d", start, end))
+		}
+	}
+
+	if err := tree.DropMmapCache(); err != nil {
+		t.Fatalf("DropMmapCache: %v", err)
+	}
+	want := []string{"data", "meta", fmt.Sprintf("file-drop:%d-%d", firstTreePageID, tree.nextPage)}
+	if !slices.Equal(events, want) {
+		t.Fatalf("DropMmapCache events = %v, want %v", events, want)
 	}
 }
 

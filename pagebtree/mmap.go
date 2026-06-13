@@ -56,18 +56,19 @@ type MmapOptions struct {
 }
 
 type mmapArena struct {
-	file             *os.File
-	path             string
-	data             []byte
-	maxPages         int
-	locked           bool
-	readOnly         bool
-	accessPattern    MmapAccessPattern
-	dirtyPages       map[PageID]bool
-	syncObserver     func(string)
-	dataSyncObserver func(start, end PageID)
-	dirSyncObserver  func(path string)
-	adviceObserver   func(pattern MmapAccessPattern, start, end PageID)
+	file               *os.File
+	path               string
+	data               []byte
+	maxPages           int
+	locked             bool
+	readOnly           bool
+	accessPattern      MmapAccessPattern
+	dirtyPages         map[PageID]bool
+	syncObserver       func(string)
+	dataSyncObserver   func(start, end PageID)
+	dirSyncObserver    func(path string)
+	adviceObserver     func(pattern MmapAccessPattern, start, end PageID)
+	fileAdviceObserver func(pattern MmapAccessPattern, start, end PageID)
 }
 
 type MmapAccessPattern int
@@ -579,6 +580,9 @@ func (a *mmapArena) advise(pattern MmapAccessPattern) error {
 	if err != nil {
 		return err
 	}
+	if err := a.adviseFileRange(0, PageID(len(a.data)/PageSize), normalized); err != nil {
+		return err
+	}
 	a.accessPattern = normalized
 	return unix.Madvise(a.data, advice)
 }
@@ -599,10 +603,35 @@ func (a *mmapArena) advisePageRange(startPage, endPage PageID, pattern MmapAcces
 	if err != nil {
 		return err
 	}
+	if err := a.adviseFileRange(startPage, endPage, normalized); err != nil {
+		return err
+	}
 	if a.adviceObserver != nil {
 		a.adviceObserver(normalized, startPage, endPage)
 	}
 	return a.madviseRange(int(startPage)*PageSize, endByte, advice)
+}
+
+func (a *mmapArena) adviseFileRange(startPage, endPage PageID, pattern MmapAccessPattern) error {
+	if a == nil || a.file == nil || len(a.data) == 0 {
+		return nil
+	}
+	if endPage < startPage {
+		return fmt.Errorf("invalid file advice page range [%d,%d)", startPage, endPage)
+	}
+	mappedPages := PageID(len(a.data) / PageSize)
+	if endPage > mappedPages {
+		return fmt.Errorf("file advice page range [%d,%d) exceeds mmap page count %d", startPage, endPage, mappedPages)
+	}
+	if startPage == endPage {
+		return nil
+	}
+	if a.fileAdviceObserver != nil {
+		a.fileAdviceObserver(pattern, startPage, endPage)
+	}
+	offset := int64(startPage) * PageSize
+	length := int64(endPage-startPage) * PageSize
+	return fadviseFileRange(a.file, offset, length, pattern)
 }
 
 func (a *mmapArena) madviseRange(start, end, advice int) error {

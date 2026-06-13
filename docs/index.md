@@ -65,5 +65,5 @@ docs/           Course chapters
 5. Run `go run ./cmd/pagebtree-demo` to see page root ids change across writes.
 6. Read `docs/07-freelist-and-readers.md` to understand why old readers delay page reuse.
 7. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
-8. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, kernel page-cache behavior, derived branch-routing cache behavior, tunable exact-page prefetch advice, and residency stats.
+8. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, kernel page-cache behavior, Linux file-advice coordination, derived branch-routing cache behavior, tunable exact-page prefetch advice, and residency stats.
 9. Change the degree in the demos and observe how `Stats` changes.
