@@ -809,6 +809,89 @@ func TestMmapTreePersistsFreelistAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsFreelistEntryForReachablePage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	record := replaceNewestMetaFreeList(t, path, nil)
+	replaceNewestMetaFreeList(t, path, []PageID{record.root})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with reachable root in persisted freelist")
+	}
+	if !errors.Is(err, ErrFreelist) {
+		t.Fatalf("OpenMmap reachable freelist error = %v, want ErrFreelist", err)
+	}
+}
+
+func TestMmapTreeRejectsDuplicatePersistedFreelistEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 30; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	snapshot := tree.Snapshot()
+	tree.Put("key-10", []byte("updated"))
+	snapshot.Close()
+	free := append([]PageID(nil), tree.free...)
+	if len(free) == 0 {
+		t.Fatalf("tree did not produce a free page after snapshot release")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	replaceNewestMetaFreeList(t, path, []PageID{free[0], free[0]})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with duplicate persisted freelist entries")
+	}
+	if !errors.Is(err, ErrFreelist) {
+		t.Fatalf("OpenMmap duplicate freelist error = %v, want ErrFreelist", err)
+	}
+}
+
+func TestMmapTreeRejectsOutOfRangePersistedFreelistEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	record := replaceNewestMetaFreeList(t, path, nil)
+	replaceNewestMetaFreeList(t, path, []PageID{record.nextPage})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with out-of-range persisted freelist entry")
+	}
+	if !errors.Is(err, ErrFreelist) {
+		t.Fatalf("OpenMmap out-of-range freelist error = %v, want ErrFreelist", err)
+	}
+}
+
 func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -1095,6 +1178,46 @@ func corruptMetaPage(t *testing.T, path string, metaIndex int) {
 func keepOnlyNewestMetaPage(t *testing.T, path string) metaRecord {
 	t.Helper()
 
+	newestIndex, record := newestMetaPage(t, path)
+	for index := 0; index < metaPageCount; index++ {
+		if index != newestIndex {
+			corruptMetaPage(t, path, index)
+		}
+	}
+	return record
+}
+
+func replaceNewestMetaFreeList(t *testing.T, path string, free []PageID) metaRecord {
+	t.Helper()
+
+	index, record := newestMetaPage(t, path)
+	for candidateIndex := 0; candidateIndex < metaPageCount; candidateIndex++ {
+		if candidateIndex != index {
+			corruptMetaPage(t, path, candidateIndex)
+		}
+	}
+
+	record.free = append([]PageID(nil), free...)
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile rewrite meta: %v", err)
+	}
+	defer file.Close()
+
+	buf := make([]byte, PageSize)
+	writeMetaPage(buf, record)
+	if _, err := file.WriteAt(buf, int64(index*PageSize)); err != nil {
+		t.Fatalf("WriteAt rewrite meta %d: %v", index, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("Sync rewrite meta %d: %v", index, err)
+	}
+	return record
+}
+
+func newestMetaPage(t *testing.T, path string) (int, metaRecord) {
+	t.Helper()
+
 	file, err := os.Open(path)
 	if err != nil {
 		t.Fatalf("Open newest meta: %v", err)
@@ -1125,10 +1248,7 @@ func keepOnlyNewestMetaPage(t *testing.T, path string) metaRecord {
 	slices.SortFunc(candidates, func(left, right candidate) int {
 		return compareUint64Desc(left.record.revision, right.record.revision)
 	})
-	for _, candidate := range candidates[1:] {
-		corruptMetaPage(t, path, candidate.index)
-	}
-	return candidates[0].record
+	return candidates[0].index, candidates[0].record
 }
 
 func corruptPagePayload(t *testing.T, path string, id PageID) {

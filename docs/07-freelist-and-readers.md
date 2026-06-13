@@ -66,4 +66,10 @@ This repository is still in memory, so `AllocatedPages` is a map size rather tha
 
 The tests in `pagebtree/freelist_test.go` prove that active readers prevent reuse and that closing readers releases retired pages to the freelist.
 
-The next chapter maps the same page IDs into a real file with mmap and persists safe freelist IDs across close/reopen.
+The next chapter maps the same page IDs into a real file with mmap and persists safe freelist IDs across close/reopen. Because that freelist becomes durable metadata, reopen cannot trust it just because the metadata checksum matches. The mmap loader validates persisted reusable IDs before accepting a metadata candidate:
+
+- every reusable page ID must be inside `[first tree page, nextPage)`
+- no reusable page ID may appear twice
+- no reusable page ID may still be reachable from the candidate root or one of its overflow chains
+
+If any of those checks fail, the metadata candidate is rejected instead of letting a future write overwrite a live page.

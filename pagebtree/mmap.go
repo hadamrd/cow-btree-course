@@ -560,7 +560,12 @@ func (t *Tree) loadMeta() error {
 	var lastErr error
 	for _, record := range records {
 		t.applyMetaRecord(record)
-		if err := t.validateReachablePages(); err != nil {
+		reachable, err := t.validateReachablePages()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := t.validateFreelist(record.free, reachable); err != nil {
 			lastErr = err
 			continue
 		}
@@ -702,9 +707,29 @@ func metaChecksum(data []byte) uint32 {
 	return checksum.Sum32()
 }
 
-func (t *Tree) validateReachablePages() error {
+func (t *Tree) validateReachablePages() (map[PageID]bool, error) {
 	seen := map[PageID]bool{}
-	return t.validatePage(t.root, seen)
+	if err := t.validatePage(t.root, seen); err != nil {
+		return nil, err
+	}
+	return seen, nil
+}
+
+func (t *Tree) validateFreelist(free []PageID, reachable map[PageID]bool) error {
+	seenFree := map[PageID]bool{}
+	for _, id := range free {
+		if id < firstTreePageID || id >= t.nextPage {
+			return fmt.Errorf("%w: page %d outside reusable range [%d,%d)", ErrFreelist, id, firstTreePageID, t.nextPage)
+		}
+		if reachable[id] {
+			return fmt.Errorf("%w: page %d is still reachable", ErrFreelist, id)
+		}
+		if seenFree[id] {
+			return fmt.Errorf("%w: page %d appears more than once", ErrFreelist, id)
+		}
+		seenFree[id] = true
+	}
+	return nil
 }
 
 func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {

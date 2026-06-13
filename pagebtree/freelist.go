@@ -1,5 +1,9 @@
 package pagebtree
 
+import "errors"
+
+var ErrFreelist = errors.New("freelist invalid")
+
 type retiredPage struct {
 	id       PageID
 	revision uint64
