@@ -19,6 +19,7 @@ type Tree struct {
 	pageCache               pageCache
 	rangePrefetchLeafWindow int
 	rangePrefetchHints      int
+	rangePrefetchPages      int
 }
 
 type Options struct {
@@ -127,19 +128,37 @@ func (t *Tree) RangeBetween(start, end string, visit func(string, []byte) bool) 
 	rangePageBetween(t.pages, t.root, start, end, visit)
 }
 
-func (t *Tree) rangePrefetcher() func(PageID) {
+func (t *Tree) rangePrefetcher() func(PageID, PageID) {
 	if t.arena == nil || t.rangePrefetchLeafWindow <= 0 {
 		return nil
 	}
 	advised := map[PageID]bool{}
-	return func(id PageID) {
-		if advised[id] {
+	return func(start, end PageID) {
+		if start >= end {
 			return
 		}
-		advised[id] = true
-		if err := t.arena.advisePageRange(id, id+1, MmapAccessWillNeed); err == nil {
-			t.rangePrefetchHints++
+		var runStart PageID
+		flush := func(runEnd PageID) {
+			if runStart == 0 {
+				return
+			}
+			if err := t.arena.advisePageRange(runStart, runEnd, MmapAccessWillNeed); err == nil {
+				t.rangePrefetchHints++
+				t.rangePrefetchPages += int(runEnd - runStart)
+			}
+			runStart = 0
 		}
+		for id := start; id < end; id++ {
+			if advised[id] {
+				flush(id)
+				continue
+			}
+			advised[id] = true
+			if runStart == 0 {
+				runStart = id
+			}
+		}
+		flush(end)
 	}
 }
 

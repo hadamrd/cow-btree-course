@@ -13,8 +13,9 @@
 // and range scans compare slot keys before reading child ids or values so
 // bounded scans do not decode cells outside the requested key range.
 // Mmap-backed ranges prefetch a configurable bounded window of exact next leaf
-// pages with MADV_WILLNEED; the window can be disabled when the caller wants to
-// avoid even exact linked-leaf hints.
+// page ranges with MADV_WILLNEED; adjacent page ids are coalesced into one
+// hint, and the window can be disabled when the caller wants to avoid even
+// exact linked-leaf hints.
 // Mmap-backed trees track dirty copied pages so Sync can flush changed data
 // pages before publishing metadata, and they can grow the mapped file when
 // allocation reaches the current capacity. File-size changes from growth and
@@ -51,5 +52,6 @@
 // derived cache is bounded by
 // least-recently-used eviction and can be sized through Options or MmapOptions;
 // Stats exposes its capacity, entries, hits, misses, invalidations, evictions,
-// range-prefetch window, and range-prefetch hint count.
+// range-prefetch window, range-prefetch hint-call count, and exact pages
+// covered by those hints.
 package pagebtree

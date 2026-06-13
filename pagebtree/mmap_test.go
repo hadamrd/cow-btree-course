@@ -704,15 +704,12 @@ func TestMmapRangeAdvisesNextLeafPages(t *testing.T) {
 		leafSet[id] = true
 	}
 
-	var advised []PageID
+	var advised []pageRange
 	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
 		if pattern != MmapAccessWillNeed {
 			return
 		}
-		if end != start+1 {
-			t.Fatalf("advised range = [%d,%d), want single-page leaf range", start, end)
-		}
-		advised = append(advised, start)
+		advised = append(advised, pageRange{start: start, end: end})
 	}
 
 	var got []string
@@ -727,13 +724,15 @@ func TestMmapRangeAdvisesNextLeafPages(t *testing.T) {
 	if len(advised) == 0 {
 		t.Fatalf("Range did not advise any next leaf pages")
 	}
-	for _, id := range advised {
-		if !leafSet[id] {
-			t.Fatalf("Range advised page %d, want only leaf pages from %v", id, leafIDs)
+	for _, r := range advised {
+		for id := r.start; id < r.end; id++ {
+			if !leafSet[id] {
+				t.Fatalf("Range advised page %d in range [%d,%d), want only leaf pages from %v", id, r.start, r.end, leafIDs)
+			}
 		}
 	}
-	if advised[0] != leafIDs[1] {
-		t.Fatalf("first advised page = %d, want second leaf page %d", advised[0], leafIDs[1])
+	if advised[0].start != leafIDs[1] {
+		t.Fatalf("first advised range starts at page %d, want second leaf page %d", advised[0].start, leafIDs[1])
 	}
 }
 
@@ -789,13 +788,10 @@ func TestMmapRangeFromStartsAtLowerBoundAndPrefetchesNextLeaves(t *testing.T) {
 		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
 	}
 
-	var advised []PageID
+	var advised []pageRange
 	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
 		if pattern == MmapAccessWillNeed {
-			if end != start+1 {
-				t.Fatalf("advised range = [%d,%d), want single page", start, end)
-			}
-			advised = append(advised, start)
+			advised = append(advised, pageRange{start: start, end: end})
 		}
 	}
 
@@ -821,8 +817,8 @@ func TestMmapRangeFromStartsAtLowerBoundAndPrefetchesNextLeaves(t *testing.T) {
 	if wantFirstAdvice == 0 {
 		t.Fatalf("start leaf %d has no next leaf; test needs multiple leaves", startLeaf)
 	}
-	if advised[0] != wantFirstAdvice {
-		t.Fatalf("first advised page = %d, want next leaf %d after start leaf %d", advised[0], wantFirstAdvice, startLeaf)
+	if advised[0].start != wantFirstAdvice {
+		t.Fatalf("first advised range starts at page %d, want next leaf %d after start leaf %d", advised[0].start, wantFirstAdvice, startLeaf)
 	}
 }
 
@@ -839,10 +835,10 @@ func TestMmapRangePrefetchWindowCanBeSized(t *testing.T) {
 		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
 	}
 
-	var advised []PageID
+	var advised []pageRange
 	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
 		if pattern == MmapAccessWillNeed {
-			advised = append(advised, start)
+			advised = append(advised, pageRange{start: start, end: end})
 		}
 	}
 
@@ -851,7 +847,10 @@ func TestMmapRangePrefetchWindowCanBeSized(t *testing.T) {
 	})
 
 	if len(advised) != 1 {
-		t.Fatalf("advised pages = %v, want exactly 1 page from configured range prefetch window", advised)
+		t.Fatalf("advised ranges = %+v, want exactly 1 hint from configured range prefetch window", advised)
+	}
+	if got := advised[0].end - advised[0].start; got != 1 {
+		t.Fatalf("advised range = [%d,%d), want exactly 1 page from configured range prefetch window", advised[0].start, advised[0].end)
 	}
 	stats := tree.Stats()
 	if stats.RangePrefetchLeafWindow != 1 {
@@ -859,6 +858,44 @@ func TestMmapRangePrefetchWindowCanBeSized(t *testing.T) {
 	}
 	if stats.RangePrefetchHints != 1 {
 		t.Fatalf("RangePrefetchHints = %d, want 1", stats.RangePrefetchHints)
+	}
+}
+
+func TestMmapRangePrefetchStatsCountPagesCovered(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64, RangePrefetchLeafWindow: 2})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	var hintCalls int
+	var pagesCovered int
+	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
+		if pattern == MmapAccessWillNeed {
+			hintCalls++
+			pagesCovered += int(end - start)
+		}
+	}
+
+	tree.RangeFrom("key-17", func(key string, value []byte) bool {
+		return false
+	})
+
+	stats := tree.Stats()
+	if stats.RangePrefetchHints != hintCalls {
+		t.Fatalf("RangePrefetchHints = %d, want observed hint calls %d", stats.RangePrefetchHints, hintCalls)
+	}
+	if stats.RangePrefetchPages != pagesCovered {
+		t.Fatalf("RangePrefetchPages = %d, want observed pages covered %d", stats.RangePrefetchPages, pagesCovered)
+	}
+	if stats.RangePrefetchPages < stats.RangePrefetchHints {
+		t.Fatalf("RangePrefetchPages = %d, RangePrefetchHints = %d; pages covered cannot be less than hint calls", stats.RangePrefetchPages, stats.RangePrefetchHints)
 	}
 }
 
@@ -911,13 +948,10 @@ func TestMmapRangeBetweenStopsBeforeEndAndBoundsPrefetch(t *testing.T) {
 		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
 	}
 
-	var advised []PageID
+	var advised []pageRange
 	tree.arena.adviceObserver = func(pattern MmapAccessPattern, start, end PageID) {
 		if pattern == MmapAccessWillNeed {
-			if end != start+1 {
-				t.Fatalf("advised range = [%d,%d), want single page", start, end)
-			}
-			advised = append(advised, start)
+			advised = append(advised, pageRange{start: start, end: end})
 		}
 	}
 
@@ -931,13 +965,15 @@ func TestMmapRangeBetweenStopsBeforeEndAndBoundsPrefetch(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("RangeBetween(key-17,key-23) = %v, want %v", got, want)
 	}
-	for _, id := range advised {
-		first, ok := firstLeafKey(tree.pages[id])
-		if !ok {
-			t.Fatalf("advised page %d is not a non-empty leaf", id)
-		}
-		if first >= "key-23" {
-			t.Fatalf("advised leaf page %d starts at %s, want prefetch strictly before end key-23", id, first)
+	for _, r := range advised {
+		for id := r.start; id < r.end; id++ {
+			first, ok := firstLeafKey(tree.pages[id])
+			if !ok {
+				t.Fatalf("advised page %d in range [%d,%d) is not a non-empty leaf", id, r.start, r.end)
+			}
+			if first >= "key-23" {
+				t.Fatalf("advised leaf page %d starts at %s, want prefetch strictly before end key-23", id, first)
+			}
 		}
 	}
 }

@@ -23,6 +23,7 @@ type Stats struct {
 	PageCacheEvictions      int
 	RangePrefetchLeafWindow int
 	RangePrefetchHints      int
+	RangePrefetchPages      int
 }
 
 func statsFor(t *Tree) Stats {
@@ -45,6 +46,7 @@ func statsFor(t *Tree) Stats {
 	stats.PageCacheEvictions = cacheStats.Evictions
 	stats.RangePrefetchLeafWindow = t.rangePrefetchLeafWindow
 	stats.RangePrefetchHints = t.rangePrefetchHints
+	stats.RangePrefetchPages = t.rangePrefetchPages
 	return stats
 }
 
