@@ -915,6 +915,94 @@ func TestMmapGrowthMapsReplacementBeforeUnmappingOldMapping(t *testing.T) {
 	}
 }
 
+func TestMmapGrowthFaultMatrixPreservesOldMapping(t *testing.T) {
+	tests := []struct {
+		name       string
+		fault      mmapFaultPoint
+		wantPoints []mmapFaultPoint
+	}{
+		{
+			name:       "before file size sync",
+			fault:      mmapFaultBeforeFileSizeSync,
+			wantPoints: []mmapFaultPoint{mmapFaultBeforeFileSizeSync},
+		},
+		{
+			name:  "before replacement remap",
+			fault: mmapFaultBeforeRemap,
+			wantPoints: []mmapFaultPoint{
+				mmapFaultBeforeFileSizeSync,
+				mmapFaultBeforeRemap,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertMmapGrowthFaultPreservesOldMapping(t, tt.fault, tt.wantPoints)
+		})
+	}
+}
+
+func assertMmapGrowthFaultPreservesOldMapping(t *testing.T, fault mmapFaultPoint, wantPoints []mmapFaultPoint) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "course.db")
+	forced := fmt.Errorf("forced %s fault", fault)
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	oldData := tree.arena.data
+	oldMaxPages := tree.arena.maxPages
+	oldSize := fileSize(t, path)
+
+	var points []mmapFaultPoint
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		points = append(points, point)
+		if point == fault {
+			return forced
+		}
+		return nil
+	}
+
+	err = tree.remapMmap(oldMaxPages * 2)
+	if !errors.Is(err, forced) {
+		t.Fatalf("remapMmap fault error = %v, want forced fault", err)
+	}
+	if !slices.Equal(points, wantPoints) {
+		t.Fatalf("growth fault points = %v, want %v", points, wantPoints)
+	}
+	if len(tree.arena.data) != len(oldData) || &tree.arena.data[0] != &oldData[0] {
+		t.Fatalf("arena data changed after %s fault", fault)
+	}
+	if tree.arena.maxPages != oldMaxPages {
+		t.Fatalf("maxPages after %s fault = %d, want %d", fault, tree.arena.maxPages, oldMaxPages)
+	}
+	if got := fileSize(t, path); got != oldSize {
+		t.Fatalf("file size after %s fault = %d, want restored size %d", fault, got, oldSize)
+	}
+	if got, ok := tree.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("Get after %s fault = %q, %v; want one, true", fault, got, ok)
+	}
+	if err := tree.arena.close(); err != nil {
+		t.Fatalf("forced crash close arena: %v", err)
+	}
+	tree.closed = true
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after growth fault: %v", err)
+	}
+	defer reopened.Close()
+	if got, ok := reopened.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("reopened Get(alpha) = %q, %v; want one, true", got, ok)
+	}
+}
+
 func TestMmapGrowthRestoresFileSizeWhenOldUnmapFails(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

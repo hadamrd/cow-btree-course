@@ -93,9 +93,11 @@ const (
 type mmapFaultPoint string
 
 const (
-	mmapFaultBeforeDataSync mmapFaultPoint = "before-data-sync"
-	mmapFaultAfterMetaWrite mmapFaultPoint = "after-meta-write"
-	mmapFaultBeforeMetaSync mmapFaultPoint = "before-meta-sync"
+	mmapFaultBeforeDataSync     mmapFaultPoint = "before-data-sync"
+	mmapFaultAfterMetaWrite     mmapFaultPoint = "after-meta-write"
+	mmapFaultBeforeMetaSync     mmapFaultPoint = "before-meta-sync"
+	mmapFaultBeforeFileSizeSync mmapFaultPoint = "before-file-size-sync"
+	mmapFaultBeforeRemap        mmapFaultPoint = "before-remap"
 )
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
@@ -344,12 +346,16 @@ func (t *Tree) remapMmap(newMaxPages int) error {
 		return err
 	}
 	if err := t.arena.syncFileSize(); err != nil {
-		return err
+		return t.arena.restoreFileSize(oldSize, err)
+	}
+
+	if err := t.arena.injectFault(mmapFaultBeforeRemap); err != nil {
+		return t.arena.restoreFileSize(oldSize, err)
 	}
 
 	data, err := mmapBytes(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		return err
+		return t.arena.restoreFileSize(oldSize, err)
 	}
 	oldData := t.arena.data
 	if err := munmapBytes(oldData); err != nil {
@@ -609,10 +615,30 @@ func (a *mmapArena) syncFileSize() error {
 	if a == nil || a.readOnly {
 		return nil
 	}
+	if err := a.injectFault(mmapFaultBeforeFileSizeSync); err != nil {
+		return err
+	}
+	return a.syncFileSizeDurable()
+}
+
+func (a *mmapArena) syncFileSizeDurable() error {
+	if a == nil || a.readOnly {
+		return nil
+	}
 	if err := a.file.Sync(); err != nil {
 		return err
 	}
 	return a.syncDirectory()
+}
+
+func (a *mmapArena) restoreFileSize(size int64, cause error) error {
+	if err := a.file.Truncate(size); err != nil {
+		return errors.Join(cause, err)
+	}
+	if err := a.syncFileSizeDurable(); err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
 }
 
 func (a *mmapArena) syncDirectory() error {
