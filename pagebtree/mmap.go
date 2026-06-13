@@ -1068,7 +1068,7 @@ func (t *Tree) validatePage(id PageID, seen map[PageID]bool) error {
 		return nil
 	}
 	if !p.isBranch() {
-		return fmt.Errorf("page %d has invalid flags %x", id, p.flags())
+		return fmt.Errorf("%w: reachable page %d is not a tree page", ErrTreeInvariant, id)
 	}
 	children := p.childIDs()
 	for index, child := range children {

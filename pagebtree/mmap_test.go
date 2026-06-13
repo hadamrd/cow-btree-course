@@ -1808,6 +1808,41 @@ func TestMmapTreeRejectsCorruptReachableOverflowPage(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsOverflowPageAsTreeRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("large", bytes.Repeat([]byte("o"), PageSize*2+17))
+	root := tree.pages[tree.root]
+	ref, ok := root.overflowRef("large")
+	if !ok {
+		t.Fatalf("large value was not stored as an overflow reference")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	replaceNewestMetaRecord(t, path, func(record metaRecord) metaRecord {
+		record.root = ref.first
+		return record
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with overflow page as tree root")
+	}
+	if !errors.Is(err, ErrTreeInvariant) {
+		t.Fatalf("OpenMmap overflow root error = %v, want ErrTreeInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "not a tree page") {
+		t.Fatalf("OpenMmap overflow root error = %v, want tree-page detail", err)
+	}
+}
+
 func TestMmapTreeRejectsMissingReachableOverflowPage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
