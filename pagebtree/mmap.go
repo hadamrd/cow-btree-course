@@ -858,6 +858,12 @@ func (t *Tree) validateMetaInvariants(record metaRecord) error {
 
 func (t *Tree) validateMetaBounds(record metaRecord) error {
 	mappedNextPage := PageID(len(t.arena.data) / PageSize)
+	if record.maxPages < minMmapPageCount {
+		return fmt.Errorf("%w: max pages %d below minimum %d", ErrMetaInvariant, record.maxPages, minMmapPageCount)
+	}
+	if record.nextPage > firstTreePageID+PageID(record.maxPages) {
+		return fmt.Errorf("%w: next page %d beyond metadata capacity %d", ErrMetaInvariant, record.nextPage, record.maxPages)
+	}
 	if record.nextPage < firstTreePageID {
 		return fmt.Errorf("%w: next page %d before first tree page %d", ErrMetaInvariant, record.nextPage, firstTreePageID)
 	}

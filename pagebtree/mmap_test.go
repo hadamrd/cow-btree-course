@@ -1173,6 +1173,34 @@ func TestMmapTreeRejectsMetadataNextPageBeyondMappedFile(t *testing.T) {
 	}
 }
 
+func TestMmapTreeRejectsMetadataNextPageBeyondDeclaredCapacity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	keepOnlyNewestMetaPage(t, path)
+	replaceNewestMetaRecord(t, path, func(record metaRecord) metaRecord {
+		record.maxPages = int(record.nextPage-firstTreePageID) - 1
+		return record
+	})
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err == nil {
+		reopened.Close()
+		t.Fatalf("OpenMmap succeeded with metadata nextPage beyond declared maxPages")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap maxPages bounds error = %v, want ErrMetaInvariant", err)
+	}
+}
+
 func TestMmapTreeTakesExclusiveFileLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
