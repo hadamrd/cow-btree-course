@@ -39,6 +39,7 @@ btree/
 
 pagebtree/
   page.go       Slotted page header, slots, and cells
+  leaf_links.go Leaf sibling links for current root pages
   overflow.go   Overflow references and chained large-value pages
   tree.go       Root page publication
   insert.go     Page-copying insertion and B+tree-style splitting

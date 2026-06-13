@@ -43,12 +43,15 @@ func (t *Tree) insertLeaf(pageID PageID, key string, value []byte) ([]byte, bool
 		return nil, false, nil
 	}
 
+	next := p.nextLeaf()
 	mid := len(entries) / 2
 	rightID := t.allocPage()
 	right := t.newPage(rightID, flagLeaf)
 	t.pages[rightID] = right
 	t.writeLeafEntries(p, entries[:mid])
 	t.writeLeafEntries(right, entries[mid:])
+	p.setNextLeaf(rightID)
+	right.setNextLeaf(next)
 	return nil, false, &splitResult{separator: entries[mid].key, right: rightID}
 }
 
@@ -107,6 +110,7 @@ func mustWriteLeafEntries(p *page, entries []leafEntry) {
 }
 
 func (t *Tree) writeLeafEntries(p *page, entries []leafEntry) {
+	next := p.nextLeaf()
 	encoded := make([]leafEntry, len(entries))
 	for i, entry := range entries {
 		encoded[i] = entry
@@ -119,6 +123,7 @@ func (t *Tree) writeLeafEntries(p *page, entries []leafEntry) {
 
 	for {
 		if writeEncodedLeafEntries(p, encoded) {
+			p.setNextLeaf(next)
 			return
 		}
 		index := largestInlineLeafEntry(encoded)

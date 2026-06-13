@@ -57,6 +57,7 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 		t.root = id
 		t.length = 1
 		t.revision++
+		t.relinkLeaves()
 		return nil, false
 	}
 
@@ -76,6 +77,7 @@ func (t *Tree) Put(key string, value []byte) ([]byte, bool) {
 	}
 	t.revision++
 	t.reclaimRetiredPages()
+	t.relinkLeaves()
 	return old, replaced
 }
 

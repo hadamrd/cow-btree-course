@@ -199,6 +199,33 @@ func TestMmapTreeGrowsMappingForOverflowPages(t *testing.T) {
 	}
 }
 
+func TestMmapTreePersistsLeafNextLinksAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 32})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if got, want := leafChainKeys(tree.pages, tree.root), sequentialKeys(40); !slices.Equal(got, want) {
+		t.Fatalf("leaf chain before reopen = %v, want %v", got, want)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+	if got, want := leafChainKeys(reopened.pages, reopened.root), sequentialKeys(40); !slices.Equal(got, want) {
+		t.Fatalf("leaf chain after reopen = %v, want %v", got, want)
+	}
+}
+
 func TestMmapSyncFlushesDataPagesBeforePublishingMeta(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

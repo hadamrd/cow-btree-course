@@ -174,6 +174,46 @@ func TestRangeReturnsSortedKeysFromPages(t *testing.T) {
 	}
 }
 
+func TestLeafSplitsMaintainNextLeafLinks(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	got := leafChainKeys(tree.pages, tree.root)
+	want := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		want = append(want, fmt.Sprintf("key-%02d", i))
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("leaf chain keys = %v, want %v", got, want)
+	}
+}
+
+func TestDeleteRelinksCurrentLeafChain(t *testing.T) {
+	tree := New(2)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	for _, i := range []int{2, 3, 4, 17, 18, 35} {
+		if _, deleted := tree.Delete(fmt.Sprintf("key-%02d", i)); !deleted {
+			t.Fatalf("Delete missed key-%02d", i)
+		}
+	}
+
+	got := leafChainKeys(tree.pages, tree.root)
+	var want []string
+	deleted := map[int]bool{2: true, 3: true, 4: true, 17: true, 18: true, 35: true}
+	for i := 0; i < 40; i++ {
+		if !deleted[i] {
+			want = append(want, fmt.Sprintf("key-%02d", i))
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("leaf chain after delete = %v, want %v", got, want)
+	}
+}
+
 func TestSnapshotKeepsOldRootAfterCopyOnWritePuts(t *testing.T) {
 	tree := New(2)
 	for i := 0; i < 30; i++ {
@@ -487,4 +527,42 @@ func hasSeenPageID(root PageID, pages map[PageID]*page, seen map[PageID]bool) bo
 		}
 	}
 	return false
+}
+
+func leafChainKeys(pages map[PageID]*page, root PageID) []string {
+	leaf := leftmostLeafID(pages, root)
+	var out []string
+	seen := map[PageID]bool{}
+	for leaf != 0 {
+		if seen[leaf] {
+			out = append(out, fmt.Sprintf("cycle-at-%d", leaf))
+			return out
+		}
+		seen[leaf] = true
+		p := pages[leaf]
+		for _, entry := range p.leafEntries() {
+			out = append(out, entry.key)
+		}
+		leaf = p.nextLeaf()
+	}
+	return out
+}
+
+func leftmostLeafID(pages map[PageID]*page, root PageID) PageID {
+	for root != 0 {
+		p := pages[root]
+		if p.isLeaf() {
+			return root
+		}
+		root = p.leftmostChild()
+	}
+	return 0
+}
+
+func sequentialKeys(count int) []string {
+	keys := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		keys = append(keys, fmt.Sprintf("key-%02d", i))
+	}
+	return keys
 }

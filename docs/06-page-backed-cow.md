@@ -119,6 +119,21 @@ For a lookup:
 
 That rule matches B+tree separator semantics: branch keys route the search, while actual values live in leaf pages.
 
+## Linked Leaves
+
+B+trees usually link leaf pages so a range scan can move from one leaf to the next without walking back up through parent branches. `pagebtree` stores the next leaf page id in the same header field that branch pages use for `leftmostChild`.
+
+```mermaid
+flowchart LR
+    B["branch page"] --> L1["leaf page 12<br/>key-00..key-05"]
+    B --> L2["leaf page 18<br/>key-06..key-11"]
+    B --> L3["leaf page 23<br/>key-12..key-17"]
+    L1 -- next leaf --> L2
+    L2 -- next leaf --> L3
+```
+
+Copy-on-write makes leaf links more subtle than they first look. A copied leaf may still contain a link that was correct for an older root version. After `Put` or `Delete` publishes the current root in memory, the implementation relinks the leaves reachable from that current root and marks any changed mmap pages dirty. Public `Range` still walks the tree recursively for clarity; the leaf chain is a persisted page-layout invariant and a stepping stone toward scan-oriented range traversal.
+
 ## Overflow Values
 
 Small values live directly inside leaf cells. A large value would crowd out the slot directory and make page splits about byte capacity instead of tree shape. To keep the teaching tree simple while still handling real byte slices, large values are stored in overflow pages:
@@ -161,6 +176,7 @@ The page package models page identity, root publication, and slotted cell storag
 - Pages are kept in an in-memory map rather than written to disk.
 - The implementation rewrites a copied page from decoded entries during insertion and deletion; it does not do in-place cell compaction.
 - `Get` searches slots directly, but insertion still decodes page contents before rewriting the copied page.
+- Leaf pages carry next-leaf links, but public `Range` still uses a recursive tree walk.
 - Byte-full leaf rewrites spill inline cells to overflow pages, but the tree still does not do byte-balanced redistribution between sibling leaves.
 - `Delete` removes records, retires overflow pages, removes empty children, and collapses a one-child root; it does not yet implement full sibling borrow/merge rebalancing.
 - Branch pages contain separator keys and child page ids; values live in leaves.

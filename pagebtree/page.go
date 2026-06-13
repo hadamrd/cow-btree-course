@@ -111,6 +111,15 @@ func (p *page) setLeftmostChild(id PageID) {
 	encodePageID(p.data[headerLeftmostOffset:headerLeftmostOffset+8], id)
 }
 
+func (p *page) nextLeaf() PageID {
+	return p.leftmostChild()
+}
+
+func (p *page) setNextLeaf(id PageID) {
+	p.setLeftmostChild(id)
+	p.updateChecksum()
+}
+
 func (p *page) checksum() uint32 {
 	return binary.LittleEndian.Uint32(p.data[headerChecksumOffset:])
 }
