@@ -952,6 +952,82 @@ func TestMmapGrowthFaultMatrixPreservesOldMapping(t *testing.T) {
 	}
 }
 
+func TestMmapGrowthCrashImageMatrixClassifiesOldRoot(t *testing.T) {
+	tests := []struct {
+		name  string
+		fault mmapFaultPoint
+	}{
+		{
+			name:  "before file size sync",
+			fault: mmapFaultBeforeFileSizeSync,
+		},
+		{
+			name:  "before directory sync",
+			fault: mmapFaultBeforeDirectorySync,
+		},
+		{
+			name:  "before replacement remap",
+			fault: mmapFaultBeforeRemap,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertMmapGrowthCrashImageClassifiesOldRoot(t, tt.fault)
+		})
+	}
+}
+
+func assertMmapGrowthCrashImageClassifiesOldRoot(t *testing.T, fault mmapFaultPoint) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "course.db")
+	forced := fmt.Errorf("forced %s fault", fault)
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	oldMaxPages := tree.arena.maxPages
+
+	tree.Put("bravo", []byte("two"))
+	var crashImage string
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			crashImage = copyMmapCrashImage(t, path, string(point))
+			return forced
+		}
+		return nil
+	}
+
+	err = tree.remapMmap(oldMaxPages * 2)
+	if !errors.Is(err, forced) {
+		t.Fatalf("remapMmap fault error = %v, want forced fault", err)
+	}
+	if crashImage == "" {
+		t.Fatalf("fault %s did not capture a crash image", fault)
+	}
+	if err := tree.arena.close(); err != nil {
+		t.Fatalf("forced crash close arena: %v", err)
+	}
+	tree.closed = true
+
+	recovered, err := OpenMmap(crashImage, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap growth crash image for %s: %v", fault, err)
+	}
+	defer recovered.Close()
+	if got, ok := recovered.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("growth crash image Get(alpha) after %s = %q, %v; want one, true", fault, got, ok)
+	}
+	if got, ok := recovered.Get("bravo"); ok {
+		t.Fatalf("growth crash image Get(bravo) after %s = %q, true; want old root without bravo", fault, got)
+	}
+}
+
 func assertMmapGrowthFaultPreservesOldMapping(t *testing.T, fault mmapFaultPoint, wantPoints []mmapFaultPoint) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "course.db")
