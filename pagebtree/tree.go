@@ -19,6 +19,7 @@ type Tree struct {
 	free                     []PageID
 	metaFreelistRoot         PageID
 	metaFreelistPages        []PageID
+	metadataUpgradePending   bool
 	reusedPages              int
 	arena                    *mmapArena
 	closed                   bool

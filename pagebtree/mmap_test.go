@@ -6826,6 +6826,62 @@ func TestMmapTreeOpensLegacyV2ChainedFreelistFixture(t *testing.T) {
 	}
 }
 
+func TestMmapSyncUpgradesLegacyMetadataInAlternateSlot(t *testing.T) {
+	path := copyMmapFixture(t, "testdata/mmap-v1-inline-freelist.db")
+	legacyIndex, legacy := newestMetaPage(t, path)
+	if legacy.version != 1 {
+		t.Fatalf("legacy fixture metadata version = %d, want 1", legacy.version)
+	}
+	if len(legacy.free) == 0 {
+		t.Fatalf("legacy fixture inline free list is empty")
+	}
+
+	tree, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap legacy fixture: %v", err)
+	}
+	freePages := tree.Stats().FreePages
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync legacy fixture: %v", err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close legacy fixture: %v", err)
+	}
+
+	upgradedIndex, upgraded := newestMetaPage(t, path)
+	if upgraded.version != 2 {
+		t.Fatalf("upgraded metadata version = %d, want 2", upgraded.version)
+	}
+	if upgraded.revision != legacy.revision+1 {
+		t.Fatalf("upgraded metadata revision = %d, want %d", upgraded.revision, legacy.revision+1)
+	}
+	if upgradedIndex == legacyIndex {
+		t.Fatalf("upgraded metadata slot = %d, want alternate slot from legacy %d", upgradedIndex, legacyIndex)
+	}
+	if upgraded.freeCount != freePages {
+		t.Fatalf("upgraded metadata free count = %d, want %d", upgraded.freeCount, freePages)
+	}
+	oldSlot, ok := metaPageRecordAt(t, path, legacyIndex)
+	if !ok {
+		t.Fatalf("legacy slot %d missing after upgrade", legacyIndex)
+	}
+	if oldSlot.version != 1 || oldSlot.revision != legacy.revision {
+		t.Fatalf("legacy slot after upgrade = version %d revision %d, want version 1 revision %d", oldSlot.version, oldSlot.revision, legacy.revision)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap upgraded fixture: %v", err)
+	}
+	defer reopened.Close()
+	if stats := reopened.Stats(); stats.FreePages != freePages {
+		t.Fatalf("reopened upgraded FreePages = %d, want %d", stats.FreePages, freePages)
+	}
+	if got, ok := reopened.Get("key-19"); !ok || string(got) != "value-19" {
+		t.Fatalf("reopened upgraded Get(key-19) = %q, %v; want value-19, true", got, ok)
+	}
+}
+
 func TestOpenMmapRejectsUnsupportedKeyOrderOption(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -7547,6 +7603,23 @@ func newestMetaPage(t *testing.T, path string) (int, metaRecord) {
 		return compareUint64Desc(left.record.revision, right.record.revision)
 	})
 	return candidates[0].index, candidates[0].record
+}
+
+func metaPageRecordAt(t *testing.T, path string, index int) (metaRecord, bool) {
+	t.Helper()
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("Open meta page %d: %v", index, err)
+	}
+	defer file.Close()
+
+	buf := make([]byte, PageSize)
+	if _, err := file.ReadAt(buf, int64(index*PageSize)); err != nil {
+		t.Fatalf("ReadAt meta page %d: %v", index, err)
+	}
+	record, ok := readMetaPage(buf)
+	return record, ok
 }
 
 func corruptPagePayload(t *testing.T, path string, id PageID) {

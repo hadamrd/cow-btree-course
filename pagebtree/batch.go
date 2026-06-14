@@ -220,33 +220,35 @@ func (b *WriteBatch) CommitSyncDetailed() (BatchCommitResult, error) {
 }
 
 type batchTreeState struct {
-	pages             map[PageID]*page
-	root              PageID
-	nextPage          PageID
-	length            int
-	revision          uint64
-	syncedRevision    uint64
-	retired           []retiredPage
-	free              []PageID
-	metaFreelistRoot  PageID
-	metaFreelistPages []PageID
-	reusedPages       int
-	dirtyPages        map[PageID]bool
+	pages                  map[PageID]*page
+	root                   PageID
+	nextPage               PageID
+	length                 int
+	revision               uint64
+	syncedRevision         uint64
+	retired                []retiredPage
+	free                   []PageID
+	metaFreelistRoot       PageID
+	metaFreelistPages      []PageID
+	metadataUpgradePending bool
+	reusedPages            int
+	dirtyPages             map[PageID]bool
 }
 
 func saveBatchTreeState(t *Tree) batchTreeState {
 	state := batchTreeState{
-		pages:             cloneBatchPages(t.pages),
-		root:              t.root,
-		nextPage:          t.nextPage,
-		length:            t.length,
-		revision:          t.revision,
-		syncedRevision:    t.syncedRevision,
-		retired:           append([]retiredPage(nil), t.retired...),
-		free:              append([]PageID(nil), t.free...),
-		metaFreelistRoot:  t.metaFreelistRoot,
-		metaFreelistPages: append([]PageID(nil), t.metaFreelistPages...),
-		reusedPages:       t.reusedPages,
+		pages:                  cloneBatchPages(t.pages),
+		root:                   t.root,
+		nextPage:               t.nextPage,
+		length:                 t.length,
+		revision:               t.revision,
+		syncedRevision:         t.syncedRevision,
+		retired:                append([]retiredPage(nil), t.retired...),
+		free:                   append([]PageID(nil), t.free...),
+		metaFreelistRoot:       t.metaFreelistRoot,
+		metaFreelistPages:      append([]PageID(nil), t.metaFreelistPages...),
+		metadataUpgradePending: t.metadataUpgradePending,
+		reusedPages:            t.reusedPages,
 	}
 	if t.arena != nil {
 		state.dirtyPages = cloneBatchDirtyPages(t.arena.dirtyPages)
@@ -265,6 +267,7 @@ func (s batchTreeState) restore(t *Tree) {
 	t.free = append([]PageID(nil), s.free...)
 	t.metaFreelistRoot = s.metaFreelistRoot
 	t.metaFreelistPages = append([]PageID(nil), s.metaFreelistPages...)
+	t.metadataUpgradePending = s.metadataUpgradePending
 	t.reusedPages = s.reusedPages
 	t.pageCache = newPageCache(t.pageCache.capacity)
 	if t.arena != nil {

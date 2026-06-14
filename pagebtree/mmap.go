@@ -1089,6 +1089,7 @@ func (t *Tree) loadMeta() error {
 		t.retired = append([]retiredPage(nil), record.retired...)
 		t.metaFreelistRoot = record.freeRoot
 		t.metaFreelistPages = append([]PageID(nil), freelistPages...)
+		t.metadataUpgradePending = record.version < mmapWriterMetaVersion(record.retired)
 		t.reclaimObsoleteMetaFreelistPages()
 		t.emitMmapTraceRecord(MmapTraceRecoveryCandidateAccepted, record, int(record.revision%metaPageCount), "")
 		return nil
@@ -1304,10 +1305,7 @@ func (t *Tree) persistMeta() error {
 	}
 
 	index := int(t.revision % metaPageCount)
-	version := uint64(2)
-	if len(t.retired) > 0 {
-		version = metaVersion
-	}
+	version := mmapWriterMetaVersion(t.retired)
 	return writeMetaPage(t.arena.data[index*PageSize:(index+1)*PageSize], metaRecord{
 		version:  version,
 		root:     t.root,
@@ -1323,17 +1321,36 @@ func (t *Tree) persistMeta() error {
 	})
 }
 
+func mmapWriterMetaVersion(retired []retiredPage) uint64 {
+	if len(retired) > 0 {
+		return metaVersion
+	}
+	return 2
+}
+
 func (t *Tree) syncMmap() error {
 	if t.arena == nil || t.arena.readOnly {
 		return nil
 	}
 	t.emitMmapTrace(MmapTraceSyncBegin)
+	oldRevision := t.revision
+	advancedForUpgrade := t.metadataUpgradePending && t.revision == t.syncedRevision
+	if advancedForUpgrade {
+		t.revision++
+	}
+	restoreUpgradeRevision := func() {
+		if advancedForUpgrade {
+			t.revision = oldRevision
+		}
+	}
 	restoreFreelistPages, err := t.prepareMetaFreelistPages()
 	if err != nil {
+		restoreUpgradeRevision()
 		t.emitMmapTraceFailure(MmapTraceSyncFailed, err)
 		return err
 	}
 	if err := t.arena.syncDataPages(t.nextPage, t.emitMmapTraceDataRange); err != nil {
+		restoreUpgradeRevision()
 		t.emitMmapTraceMetadataRollback(err)
 		restoreFreelistPages()
 		t.emitMmapTraceFailure(MmapTraceSyncFailed, err)
@@ -1341,11 +1358,13 @@ func (t *Tree) syncMmap() error {
 	}
 	t.emitMmapTrace(MmapTraceSyncDataSynced)
 	if err := t.publishMeta(); err != nil {
+		restoreUpgradeRevision()
 		t.emitMmapTraceMetadataRollback(err)
 		restoreFreelistPages()
 		t.emitMmapTraceFailure(MmapTraceSyncFailed, err)
 		return err
 	}
+	t.metadataUpgradePending = false
 	t.emitMmapTrace(MmapTraceSyncMetaPublished)
 	t.reclaimObsoleteMetaFreelistPages()
 	t.emitMmapTrace(MmapTraceSyncEnd)

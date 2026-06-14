@@ -127,6 +127,10 @@
 // Reopen rejects reclaim records whose retired revision is zero or newer than
 // the metadata revision that references them, and rejects a reclaim root with
 // zero reclaim records.
+// A writable handle that accepts an older metadata version rewrites it through
+// the normal dual-metadata Sync path; if no logical mutation happened, the
+// format upgrade advances one revision so the current writer format lands in
+// the alternate metadata slot.
 // Old freelist/reclaim-page generations become reusable only after neither
 // checked metadata page still names their chain.
 // OpenMmap uses a sidecar writer mutex so only one writer can publish at a time.
