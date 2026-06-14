@@ -20,9 +20,12 @@ type txWorkloadReport struct {
 	TracePath               string          `json:"trace_path,omitempty"`
 	TracePathRedacted       bool            `json:"trace_path_redacted,omitempty"`
 	Transactions            int             `json:"transactions"`
+	DeleteEvery             int             `json:"delete_every,omitempty"`
 	Committed               int             `json:"committed"`
 	Conflicted              int             `json:"conflicted"`
+	DeletedCommittedKeys    int             `json:"deleted_committed_keys,omitempty"`
 	ReopenedCommittedKeys   int             `json:"reopened_committed_keys"`
+	ReopenedDeletedKeys     int             `json:"reopened_deleted_keys"`
 	ReopenedConflictedKeys  int             `json:"reopened_conflicted_keys"`
 	ReopenedOutsideKeys     int             `json:"reopened_outside_keys"`
 	FinalStats              pagebtree.Stats `json:"final_stats"`
@@ -34,6 +37,7 @@ type txWorkloadOptions struct {
 	tracePath    string
 	redactPath   bool
 	transactions int
+	deleteEvery  int
 }
 
 func main() {
@@ -112,6 +116,22 @@ func parseArgs(args []string) (txWorkloadOptions, error) {
 				return txWorkloadOptions{}, fmt.Errorf("--transactions expects a positive integer: %w", err)
 			}
 			options.transactions = transactions
+		case arg == "--delete-every":
+			value, ok := nextArg(args, &i)
+			if !ok {
+				return txWorkloadOptions{}, fmt.Errorf("--delete-every expects a positive integer")
+			}
+			deleteEvery, err := parsePositiveInt(value)
+			if err != nil {
+				return txWorkloadOptions{}, fmt.Errorf("--delete-every expects a positive integer: %w", err)
+			}
+			options.deleteEvery = deleteEvery
+		case strings.HasPrefix(arg, "--delete-every="):
+			deleteEvery, err := parsePositiveInt(strings.TrimPrefix(arg, "--delete-every="))
+			if err != nil {
+				return txWorkloadOptions{}, fmt.Errorf("--delete-every expects a positive integer: %w", err)
+			}
+			options.deleteEvery = deleteEvery
 		case arg == "--trace":
 			value, ok := nextArg(args, &i)
 			if !ok || value == "" {
@@ -161,7 +181,7 @@ func parsePositiveInt(text string) (int, error) {
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintln(stderr, "usage: mmaptxworkload [--transactions N] [--trace TRACE.jsonl] [--redact-path] DB.db")
+	fmt.Fprintln(stderr, "usage: mmaptxworkload [--transactions N] [--delete-every N] [--trace TRACE.jsonl] [--redact-path] DB.db")
 }
 
 func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (txWorkloadReport, error) {
@@ -186,15 +206,19 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 
 	report := txWorkloadReport{
 		Transactions:            options.transactions,
+		DeleteEvery:             options.deleteEvery,
 		TransactionConflictKind: string(pagebtree.MmapTraceTxConflict),
 	}
 	if !options.redactPath {
 		report.Path = options.path
 	}
 
+	liveCommittedKeys := []string{}
+	deletedCommittedKeys := map[string]bool{}
 	for i := 0; i < options.transactions; i++ {
 		tx := tree.BeginReadWrite()
-		tx.Put(txKey(i), []byte(fmt.Sprintf("tx-value-%04d", i)))
+		key := txKey(i)
+		tx.Put(key, []byte(fmt.Sprintf("tx-value-%04d", i)))
 		if i%2 == 0 {
 			tree.Put(outsideKey(i), []byte(fmt.Sprintf("outside-value-%04d", i)))
 			if err := tree.Sync(); err != nil {
@@ -210,6 +234,11 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 			report.Conflicted++
 			continue
 		}
+		var deletedKey string
+		if options.deleteEvery > 0 && (report.Committed+1)%options.deleteEvery == 0 && len(liveCommittedKeys) > 0 {
+			deletedKey = liveCommittedKeys[len(liveCommittedKeys)-1]
+			tx.Delete(deletedKey)
+		}
 		result, err := tx.CommitSyncDetailed()
 		if err != nil {
 			return txWorkloadReport{}, fmt.Errorf("transaction %d commit-sync: %w", i, err)
@@ -218,6 +247,12 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 			return txWorkloadReport{}, fmt.Errorf("transaction %d did not change tree", i)
 		}
 		report.Committed++
+		if deletedKey != "" {
+			liveCommittedKeys = liveCommittedKeys[:len(liveCommittedKeys)-1]
+			deletedCommittedKeys[deletedKey] = true
+			report.DeletedCommittedKeys++
+		}
+		liveCommittedKeys = append(liveCommittedKeys, key)
 	}
 
 	if err := tree.Check(); err != nil {
@@ -235,9 +270,12 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 	}
 	defer reopened.Close()
 	for i := 0; i < options.transactions; i++ {
-		if _, ok := reopened.Get(txKey(i)); ok {
+		key := txKey(i)
+		if _, ok := reopened.Get(key); ok {
 			if i%2 == 0 {
 				report.ReopenedConflictedKeys++
+			} else if deletedCommittedKeys[key] {
+				report.ReopenedDeletedKeys++
 			} else {
 				report.ReopenedCommittedKeys++
 			}

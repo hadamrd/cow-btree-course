@@ -799,13 +799,14 @@ readable while still counting all events.
 `cmd/mmaptxworkload` is a bounded transaction-observability workload. It refuses
 existing database artifacts, creates a fresh mmap tree, alternates successful
 read-write transaction `CommitSyncDetailed` calls with forced optimistic
-conflicts, verifies the reopened committed/conflicted key counts, and can write
-value-free trace JSONL. Use `--redact-path` when the JSON report will be shared
-or checked in; the command still uses the real database and trace paths
-internally, but omits them from the report:
+conflicts, can stage deterministic deletes inside successful transactions with
+`--delete-every N`, verifies reopened committed/deleted/conflicted key counts,
+and can write value-free trace JSONL. Use `--redact-path` when the JSON report
+will be shared or checked in; the command still uses the real database and
+trace paths internally, but omits them from the report:
 
 ```bash
-go run ./cmd/mmaptxworkload --transactions 12 --trace tx-trace.jsonl --redact-path txworkload.db
+go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --trace tx-trace.jsonl --redact-path txworkload.db
 go run ./cmd/mmaptracesummary tx-trace.jsonl
 ```
 

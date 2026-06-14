@@ -99,6 +99,50 @@ func TestRunCanRedactReportPaths(t *testing.T) {
 	}
 }
 
+func TestRunCanMixCommittedDeletesIntoWorkload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "txworkload.db")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--transactions", "8", "--delete-every", "2", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report txWorkloadReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.Transactions != 8 || report.DeleteEvery != 2 {
+		t.Fatalf("Transactions/DeleteEvery = %d/%d, want 8/2", report.Transactions, report.DeleteEvery)
+	}
+	if report.Committed != 4 || report.Conflicted != 4 {
+		t.Fatalf("Committed/Conflicted = %d/%d, want 4/4", report.Committed, report.Conflicted)
+	}
+	if report.DeletedCommittedKeys != 2 {
+		t.Fatalf("DeletedCommittedKeys = %d, want 2", report.DeletedCommittedKeys)
+	}
+	if report.ReopenedCommittedKeys != 2 {
+		t.Fatalf("ReopenedCommittedKeys = %d, want 2 surviving keys", report.ReopenedCommittedKeys)
+	}
+	if report.ReopenedDeletedKeys != 0 {
+		t.Fatalf("ReopenedDeletedKeys = %d, want 0", report.ReopenedDeletedKeys)
+	}
+	if report.ReopenedConflictedKeys != 0 {
+		t.Fatalf("ReopenedConflictedKeys = %d, want 0", report.ReopenedConflictedKeys)
+	}
+	if report.ReopenedOutsideKeys != 4 {
+		t.Fatalf("ReopenedOutsideKeys = %d, want 4", report.ReopenedOutsideKeys)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw JSON: %v", err)
+	}
+	if _, ok := raw["reopened_deleted_keys"]; !ok {
+		t.Fatalf("report omitted explicit reopened_deleted_keys zero: %s", stdout.String())
+	}
+}
+
 func TestRunRejectsExistingDatabaseArtifacts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "txworkload.db")
 	if err := os.WriteFile(path, []byte("already here"), 0o644); err != nil {
