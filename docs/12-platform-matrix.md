@@ -16,6 +16,7 @@ The executable source of truth is `pagebtree.MmapPlatformProfile()`:
 - Non-Unix stub: [`../pagebtree/platform_profile_unsupported.go`](../pagebtree/platform_profile_unsupported.go)
 - JSON command: [`../cmd/mmapplatform/main.go`](../cmd/mmapplatform/main.go)
 - Runtime filesystem probe: [`../cmd/mmapfsprobe/main.go`](../cmd/mmapfsprobe/main.go)
+- Probe summary command: [`../cmd/fsprobesummary/main.go`](../cmd/fsprobesummary/main.go)
 
 Run:
 
@@ -26,7 +27,8 @@ go run ./cmd/mmapplatform
 To collect local filesystem evidence for a disposable database path, run:
 
 ```bash
-go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 /path/to/probe.db
+go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 /path/to/probe.db > probe.json
+go run ./cmd/fsprobesummary probe.json > probe-summary.md
 ```
 
 That probe creates a fresh mmap database, inserts fixed-size values, deletes
@@ -36,7 +38,12 @@ punching, and prints value-free JSON with `Stats`, `MmapSpaceStats`,
 filesystem allocation evidence from the actual path you give it, including
 filesystem type, mount path, mount source, and mount options when the platform
 exposes them; it still does not simulate sudden power loss or prove crash
-ordering.
+ordering. `cmd/fsprobesummary` converts one or more saved probe JSON reports
+into a stable Markdown table with one row each for insert, delete, compact, and
+punch phases, including logical bytes, allocated bytes, sparse bytes, free page
+counts, punched pages, filesystem identity, and mount identity. Keep the raw
+JSON as the source of truth and use the Markdown summary for review notes or a
+manual filesystem matrix.
 
 ## Current Matrix
 
@@ -60,6 +67,7 @@ flowchart TD
     P --> H["MmapHolePunchProfile"]
     P --> C["cmd/mmapplatform JSON"]
     P --> F["cmd/mmapfsprobe runtime evidence"]
+    F --> S["cmd/fsprobesummary comparison table"]
 ```
 
 ## What CI Proves
@@ -89,7 +97,7 @@ systems.
 A serious support matrix would need:
 
 - Runtime tests on each supported operating system, not only cross-compilation.
-- More recorded filesystem-specific probe runs for ext4, XFS, APFS, ZFS, tmpfs, and network filesystems.
+- More recorded filesystem-specific probe runs for ext4, XFS, APFS, ZFS, tmpfs, and network filesystems, ideally saved as raw `mmapfsprobe` JSON plus `fsprobesummary` Markdown.
 - Power-fail or VM-kill experiments per filesystem and mount option.
 - Sparse-punch allocation evidence before and after maintenance on each filesystem.
 - Long-running multi-process reader/writer soak runs outside `go test`.

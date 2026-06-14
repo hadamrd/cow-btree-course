@@ -77,6 +77,7 @@ cmd/mmaptrace-demo/  JSONL mmap trace export demonstration
 cmd/mmapinspect/     Read-only mmap audit JSON inspection tool
 cmd/mmappunch/       Sparse-hole maintenance JSON with before/after space stats and optional trace export
 cmd/mmapfsprobe/     Local filesystem probe for mmap logical/allocated space behavior
+cmd/fsprobesummary/  Markdown summary for mmap filesystem probe JSON reports
 cmd/mmapplatform/    JSON platform capability report for mmap mechanics
 cmd/benchsummary/    Markdown summary for Go benchmark output
 docs/           Research chapters
@@ -99,5 +100,5 @@ docs/           Research chapters
 13. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
 14. Read [`10-respectability-gap-audit.md`](10-respectability-gap-audit.md) for the blunt gap list and next research slices.
 15. Read [`11-benchmarking-and-baselines.md`](11-benchmarking-and-baselines.md), run a benchmark pass, and summarize it with `go run ./cmd/benchsummary bench.out`.
-16. Read [`12-platform-matrix.md`](12-platform-matrix.md), run `go run ./cmd/mmapplatform` to inspect the current build's mmap support envelope, then run `go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 /path/to/probe.db` on a disposable path to collect local filesystem space evidence.
+16. Read [`12-platform-matrix.md`](12-platform-matrix.md), run `go run ./cmd/mmapplatform` to inspect the current build's mmap support envelope, then run `go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 /path/to/probe.db > probe.json` and `go run ./cmd/fsprobesummary probe.json` on a disposable path to collect local filesystem space evidence.
 17. Change the degree in the demos and observe how `Stats` changes.

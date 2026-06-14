@@ -773,6 +773,16 @@ inspected database:
 go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db
 ```
 
+For filesystem-specific sparse allocation experiments, `cmd/mmapfsprobe` creates
+a disposable database on the target path and records insert, delete, compact,
+and sparse-punch phases as value-free JSON. `cmd/fsprobesummary` turns one or
+more saved probe reports into a stable Markdown comparison table:
+
+```bash
+go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 /path/to/probe.db > probe.json
+go run ./cmd/fsprobesummary probe.json > probe-summary.md
+```
+
 Code to read:
 
 - Stats byte-fill fields and reachable-page walk: [`pagebtree/stats.go#L3-L170`](../pagebtree/stats.go#L3-L170)
@@ -782,6 +792,7 @@ Code to read:
 - Audit inspect command: [`cmd/mmapinspect/main.go`](../cmd/mmapinspect/main.go)
 - Audit inspect command tests: [`cmd/mmapinspect/main_test.go`](../cmd/mmapinspect/main_test.go)
 - Mmap space stats API: [`pagebtree/mmap_space.go`](../pagebtree/mmap_space.go), [`pagebtree/mmap_space_unix.go`](../pagebtree/mmap_space_unix.go)
+- Filesystem probe and summary commands: [`cmd/mmapfsprobe/main.go`](../cmd/mmapfsprobe/main.go), [`cmd/fsprobesummary/main.go`](../cmd/fsprobesummary/main.go)
 - Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
 - JSONL exporters: [`pagebtree/mmap_trace_export.go`](../pagebtree/mmap_trace_export.go)
 - JSONL exporter example: [`pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)

@@ -10,7 +10,7 @@ The reference design line is OpenLDAP MDB/LMDB: slotted pages in one mapped file
 - A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages, linked leaves, overflow pages, growable/compactable mmap-backed storage, checked legacy metadata fixtures, offline mmap copy compaction, experimental sparse-hole punching for safe mmap free pages with capability reporting and traceable range/failure events, read-only mmap reader slots with process-start and boot/session owner tags where available, stale-reader cleanup, tunable kernel page-cache advice, bounded branch-routing cache, validation audit reports, cache residency and physical file-space stats, and optional mmap trace events with JSONL export
 - A small `MDBKernelProfile` API that reports which OpenLDAP-style kernel mechanics and byte-balance policies are active on a live tree
 - Copy-on-write writes with stable read-only snapshots
-- Runnable demos and tools in [`cmd/cowbtree`](cmd/cowbtree/), [`cmd/pagebtree-demo`](cmd/pagebtree-demo/), [`cmd/mmapbtree-demo`](cmd/mmapbtree-demo/), [`cmd/mdbkernel-demo`](cmd/mdbkernel-demo/), [`cmd/mmaptrace-demo`](cmd/mmaptrace-demo/), [`cmd/mmapinspect`](cmd/mmapinspect/), [`cmd/mmappunch`](cmd/mmappunch/), [`cmd/mmapfsprobe`](cmd/mmapfsprobe/), [`cmd/mmapreadersoak`](cmd/mmapreadersoak/), [`cmd/mmaptearlab`](cmd/mmaptearlab/), [`cmd/mmapplatform`](cmd/mmapplatform/), and [`cmd/benchsummary`](cmd/benchsummary/)
+- Runnable demos and tools in [`cmd/cowbtree`](cmd/cowbtree/), [`cmd/pagebtree-demo`](cmd/pagebtree-demo/), [`cmd/mmapbtree-demo`](cmd/mmapbtree-demo/), [`cmd/mdbkernel-demo`](cmd/mdbkernel-demo/), [`cmd/mmaptrace-demo`](cmd/mmaptrace-demo/), [`cmd/mmapinspect`](cmd/mmapinspect/), [`cmd/mmappunch`](cmd/mmappunch/), [`cmd/mmapfsprobe`](cmd/mmapfsprobe/), [`cmd/fsprobesummary`](cmd/fsprobesummary/), [`cmd/mmapreadersoak`](cmd/mmapreadersoak/), [`cmd/mmaptearlab`](cmd/mmaptearlab/), [`cmd/mmapplatform`](cmd/mmapplatform/), and [`cmd/benchsummary`](cmd/benchsummary/)
 - Tests that document the behavior and invariants
 - Research notes and diagrams in [`docs/`](docs/)
 
@@ -29,7 +29,8 @@ go run ./cmd/mmapreadersoak --readers 4 --rounds 5 --keys 128 /path/to/soak.db
 go run ./cmd/mmaptearlab --mode metadata /path/to/tear.db
 go run ./cmd/mmaptearlab --mode root /path/to/tear.db
 go run ./cmd/mmapplatform
-go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 /path/to/probe.db
+go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 /path/to/probe.db > probe.json
+go run ./cmd/fsprobesummary probe.json > probe-summary.md
 go run ./cmd/mmapcopycompact /path/to/source.db /path/to/compact.db
 go run ./cmd/mmapcompact /path/to/source.db
 go test ./pagebtree -run '^$' -bench 'Benchmark(PageTree|MmapTree)' -benchmem -benchtime=100x > bench.out
