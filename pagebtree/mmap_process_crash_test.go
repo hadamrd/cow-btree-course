@@ -54,6 +54,43 @@ func TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot(t *testing.T) {
 	}
 }
 
+func TestMmapTxSyncProcessCrashMatrixClassifiesRecoveryRoot(t *testing.T) {
+	if os.Getenv(mmapCrashChildEnv) == "1" {
+		runMmapTxSyncProcessCrashChild(t)
+		return
+	}
+
+	tests := []struct {
+		name        string
+		fault       mmapFaultPoint
+		wantNewRoot bool
+	}{
+		{
+			name:        "before data sync",
+			fault:       mmapFaultBeforeDataSync,
+			wantNewRoot: false,
+		},
+		{
+			name:        "after metadata write",
+			fault:       mmapFaultAfterMetaWrite,
+			wantNewRoot: true,
+		},
+		{
+			name:        "before metadata sync",
+			fault:       mmapFaultBeforeMetaSync,
+			wantNewRoot: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "course.db")
+			runMmapTxSyncProcessCrash(t, path, tt.fault)
+			assertMmapProcessCrashRecoveryRoot(t, path, tt.fault, tt.wantNewRoot)
+		})
+	}
+}
+
 func TestMmapGrowthProcessCrashMatrixClassifiesOldRoot(t *testing.T) {
 	if os.Getenv(mmapCrashChildEnv) == "1" {
 		runMmapGrowthProcessCrashChild(t)
@@ -201,6 +238,12 @@ func runMmapSyncProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
 	runMmapProcessCrashChild(t, path, fault, "^TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot$", "sync")
 }
 
+func runMmapTxSyncProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
+	t.Helper()
+
+	runMmapProcessCrashChild(t, path, fault, "^TestMmapTxSyncProcessCrashMatrixClassifiesRecoveryRoot$", "tx-sync")
+}
+
 func runMmapGrowthProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
 	t.Helper()
 
@@ -293,6 +336,44 @@ func runMmapSyncProcessCrashChild(t *testing.T) {
 		t.Fatalf("child Sync before process crash: %v", err)
 	}
 	t.Fatalf("child Sync completed without hitting fault %s", fault)
+}
+
+func runMmapTxSyncProcessCrashChild(t *testing.T) {
+	t.Helper()
+
+	path := os.Getenv(mmapCrashPathEnv)
+	fault := mmapFaultPoint(os.Getenv(mmapCrashFaultEnv))
+	if path == "" || fault == "" {
+		t.Fatalf("missing tx-sync crash child env path=%q fault=%q", path, fault)
+	}
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap tx-sync child create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial tx-sync child Sync: %v", err)
+	}
+
+	tx := tree.BeginReadWrite()
+	tx.Put("bravo", []byte("two"))
+	if changed := tx.Commit(); !changed {
+		t.Fatalf("tx-sync child transaction commit changed = false, want true")
+	}
+	if got, ok := tree.Get("bravo"); !ok || string(got) != "two" {
+		t.Fatalf("tx-sync child live Get(bravo) = %q, %v; want two, true", got, ok)
+	}
+
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			os.Exit(mmapCrashChildExitCode)
+		}
+		return nil
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("tx-sync child Sync before process crash: %v", err)
+	}
+	t.Fatalf("tx-sync child Sync completed without hitting fault %s", fault)
 }
 
 func runMmapGrowthProcessCrashChild(t *testing.T) {

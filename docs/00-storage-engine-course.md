@@ -350,6 +350,14 @@ sequenceDiagram
 The dirty-page tracker is page-ID based. It sorts dirty page IDs and coalesces
 adjacent runs before syncing.
 
+Read-write transaction `Commit` uses the same copy-on-write batch publication
+path as direct writes, but it is still a logical publish. The mmap durability
+boundary remains `Sync`. `TestMmapTxSyncProcessCrashMatrixClassifiesRecoveryRoot`
+commits a transaction, kills a child writer during the following `Sync`, and
+then reopens the same file from the parent process. A crash before dirty data
+sync recovers the old root. A crash after metadata bytes are written recovers
+the new root.
+
 `MmapOptions.TraceHook` can observe this path without parsing logs. A traced
 sync emits `mmap-sync-begin`, one `mmap-sync-data-range` event per coalesced
 dirty data-page run, `mmap-sync-data-synced`, `mmap-sync-meta-published`, and
@@ -368,6 +376,7 @@ Code to read:
 - Per-range `msync`: [`pagebtree/mmap.go#L602-L613`](../pagebtree/mmap.go#L602-L613)
 - Metadata page sync: [`pagebtree/mmap.go#L617-L635`](../pagebtree/mmap.go#L617-L635)
 - Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
+- Transaction process-crash sync proof: [`pagebtree/mmap_process_crash_test.go#L57-L91`](../pagebtree/mmap_process_crash_test.go#L57-L91)
 
 ## Module 10: Dual Checked Metadata Pages
 
@@ -764,8 +773,9 @@ Serious pieces in this repository:
   checksums, truncation, and tree/overflow-bearing pages, then requires any
   accepted image to pass `Tree.Check`.
 - Process-exit crash probes that kill a child writer at sync-publication,
-  mmap-growth, compact-shrink, large-freelist spill, and large-reclaim spill
-  fault points, then reopen the same database from a fresh process.
+  transaction-sync-publication, mmap-growth, compact-shrink, large-freelist
+  spill, and large-reclaim spill fault points, then reopen the same database
+  from a fresh process.
 - Reproducible microbenchmarks for page and mmap get, seek/next, forward and
   reverse bounded cursor, bounded range, insert, delete, reopen, and sync paths.
   Run a short local pass with
@@ -778,13 +788,15 @@ Still research or incomplete compared with a production engine:
   reporting, panic rollback, and half-open range delete, and read-write
   transactions add read-your-writes `Get`, `RangeBetween`, range delete,
   transaction cursor delete, stable begin-revision reads, rollback, optimistic
-  revision-conflict detection, and one-revision commit, but full
-  durability/crash-order transaction contracts remain research work.
+  revision-conflict detection, one-revision commit, and a process-exit crash
+  proof for commit followed by mmap `Sync`. Explicit durable-commit APIs,
+  concurrency stress, and filesystem-specific fsync guarantees remain research
+  work.
 - No sparse-file hole punching.
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with true power-fail fault injection;
-  sync publication, mmap growth, compact shrink, large-freelist spill, and
-  large-reclaim spill have process-exit probes.
+  sync publication, transaction sync publication, mmap growth, compact shrink,
+  large-freelist spill, and large-reclaim spill have process-exit probes.
 - No pluggable comparator or locale/collation layer; byte-key APIs use the
   persisted bytewise page order.
 - Insertion and delete redistribution use byte-aware split-point selection, and

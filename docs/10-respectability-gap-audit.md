@@ -30,12 +30,37 @@ What is credible today:
   metadata-page reclaim decisions.
 - Snapshot-backed cursors for incremental ordered reads, including forward and
   reverse half-open bounded cursors plus tree-owned point delete.
+- Process-exit crash probes for direct sync publication and transaction commit
+  followed by mmap sync publication.
 - A persisted mmap key-order identifier for the current bytewise page ordering.
 - Runtime profile flags for the active byte-balance policy: byte-aware split
   points, byte-aware delete redistribution, byte-fit merge checks, and the
   normalized low-fill repair threshold.
 - Reproducible Go microbenchmarks for page and mmap get, seek/next, forward and
   reverse bounded cursor, range, insert, delete, reopen, and sync paths.
+
+## Respectable-Engine Bar
+
+The project should be judged against concrete storage-engine families, not
+against vague database vocabulary:
+
+- OpenLDAP MDB/LMDB-style mmap engines need checked metadata pages, strict
+  data-before-meta publication, one serialized writer, lock-free readers,
+  reader watermarks, and careful page recycling. This repo now implements and
+  tests a visible subset of that shape, including mmap, dual metadata pages,
+  reader tables, reclaim metadata, and child-process crash probes.
+- Berkeley DB JE/OpenDJ-style engines pay for a different design: append-only
+  logs, replay, cleaner work, Java heap cache policy, and log-file lifecycle.
+  This repo deliberately does not implement that log-cleaner architecture; it
+  uses in-place mmap pages plus copy-on-write root publication.
+- SQLite/WiredTiger/RocksDB-class maturity includes long-lived compatibility
+  fixtures, deep corruption corpora, documented fsync assumptions, concurrency
+  stress, benchmark history, operational tooling, and release discipline. This
+  repo has tests and traces, but it is still far from that operational bar.
+
+The useful grind is therefore not "add buzzwords." It is proving each mechanism
+at a boundary: page layout, search, COW mutation, reader pinning, recycling,
+metadata publication, crash recovery, and workload behavior.
 
 ## P0 Gaps
 
@@ -44,8 +69,8 @@ storage-engine artifact.
 
 | Gap | Why it matters | Current state | Next useful slice |
 | --- | --- | --- | --- |
-| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication, growth, compact-shrink, large-freelist spill, large-reclaim spill, and obsolete metadata-generation reclaim images. `TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot` kills a child writer at sync-publication fault points and reopens the same database from a fresh process. `TestMmapGrowthProcessCrashMatrixClassifiesOldRoot` does the same for growth file-size, directory-sync, and pre-remap fault points, all recovering the old root. `TestMmapCompactShrinkProcessCrashMatrixClassifiesCompactedRoot` does the same for compact-shrink file-size, directory-sync, and pre-remap fault points, reopening live keys from the compacted root. `TestMmapLargeFreelistProcessCrashMatrixClassifiesRecoveryRoot` does the same for large-freelist spill publication, preserving old metadata before data sync and persisted reusable-page records after metadata write. `TestMmapLargeReclaimProcessCrashMatrixClassifiesReaderPinnedRetiredPages` keeps a live read-only parent handle while killing the child writer at large-reclaim publication points, proving persisted retired records remain pinned by a surviving reader watermark. | True power-fail testing is still outside the local harness. |
-| Transaction batching | Real engines commit a unit of work, not one implicit root publish per call. | Advanced: `WriteBatch` stages point `Put`/`Delete` operations and half-open `DeleteRange`, hides them until `Commit`, and publishes one tree revision across memory and mmap trees. `BeginReadWrite` adds a small transaction facade with stable begin-revision reads, read-your-writes `Get`, transaction-visible `RangeBetween`, transaction cursors with staged `Delete`, range delete expansion over the staged view, rollback, byte-key wrappers, optimistic revision-conflict detection through `ErrTxConflict`, and commit through the same batch machinery. `CommitDetailed` reports per-operation old values, returns explicit invalid-commit errors, and restores the pre-commit tree state if staged replay panics before publication. `Sync` remains the mmap durability boundary. Tree-owned cursor delete outside a transaction is still point-wise and publishes immediately. | Add a fuller ACID durability/crash-order contract and workload-tested conflict/concurrency semantics. |
+| Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication, growth, compact-shrink, large-freelist spill, large-reclaim spill, and obsolete metadata-generation reclaim images. `TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot` kills a child writer at sync-publication fault points and reopens the same database from a fresh process. `TestMmapTxSyncProcessCrashMatrixClassifiesRecoveryRoot` does the same after a committed read-write transaction, proving transaction publication still uses the same old-root/new-root mmap sync boundary. `TestMmapGrowthProcessCrashMatrixClassifiesOldRoot` does the same for growth file-size, directory-sync, and pre-remap fault points, all recovering the old root. `TestMmapCompactShrinkProcessCrashMatrixClassifiesCompactedRoot` does the same for compact-shrink file-size, directory-sync, and pre-remap fault points, reopening live keys from the compacted root. `TestMmapLargeFreelistProcessCrashMatrixClassifiesRecoveryRoot` does the same for large-freelist spill publication, preserving old metadata before data sync and persisted reusable-page records after metadata write. `TestMmapLargeReclaimProcessCrashMatrixClassifiesReaderPinnedRetiredPages` keeps a live read-only parent handle while killing the child writer at large-reclaim publication points, proving persisted retired records remain pinned by a surviving reader watermark. | True power-fail testing, torn-write simulation, and filesystem-specific fsync matrices are still outside the local harness. |
+| Transaction batching | Real engines commit a unit of work, not one implicit root publish per call. | Advanced: `WriteBatch` stages point `Put`/`Delete` operations and half-open `DeleteRange`, hides them until `Commit`, and publishes one tree revision across memory and mmap trees. `BeginReadWrite` adds a small transaction facade with stable begin-revision reads, read-your-writes `Get`, transaction-visible `RangeBetween`, transaction cursors with staged `Delete`, range delete expansion over the staged view, rollback, byte-key wrappers, optimistic revision-conflict detection through `ErrTxConflict`, and commit through the same batch machinery. `CommitDetailed` reports per-operation old values, returns explicit invalid-commit errors, and restores the pre-commit tree state if staged replay panics before publication. `Sync` remains the mmap durability boundary, and the tx process-crash test now verifies committed transaction changes recover as old-root before dirty data sync and new-root after metadata bytes are written. Tree-owned cursor delete outside a transaction is still point-wise and publishes immediately. | Add a fuller ACID contract: explicit durable commit API, concurrent workload stress, abort/crash matrices around multi-operation conflicts, and documented fsync guarantees per filesystem. |
 | Cursor API | Real B+tree users need `seek`/`next` control, not only callback scans. | Advanced: snapshot-backed cursors support `First`, `Seek`, `Next`, `Last`, `Prev`, half-open `CursorBetween(start,end)` bounds, and tree-owned point `Delete` while keeping cursor iteration on the old snapshot. | Explore richer cursor-write semantics inside explicit transactions. |
 | Comparator and key model | Production B+trees need an explicit key-ordering contract before prefix compression, duplicate keys, or locale-aware indexes. | Started: page cells store byte strings and compare bytewise; public `PutBytes`/`GetBytes`/`DeleteBytes`/`RangeBytes`/cursor byte-key APIs expose opaque byte keys; mmap metadata persists the bytewise key-order identifier and rejects unknown requested or persisted orders; `pagebtree/testdata/mmap-v2-legacy-zero-key-order.db` proves reopen compatibility with the pre-key-order metadata word. | Add a real pluggable comparator boundary, broader old-format fixture coverage, and a page-format path for prefix compression. |
 | Fuzz and model checking | Handwritten tests miss malformed-page combinations and delete/split corner cases. | Started: `FuzzPageTreeMatchesSortedMapModel` compares `pagebtree` with a sorted-map oracle across put, delete, cursor delete, batch, batch range delete, read-write transaction, transaction cursor delete, get, range, cursor, bounded cursor, reverse bounded cursor, and `Check` operations. `FuzzMmapTreeMatchesSortedMapModelAcrossReopen` adds mmap sync/close/reopen cycles, batch range delete, read-write transaction, transaction cursor delete, and overflow-heavy values. `FuzzMmapMalformedPageGeneratorRejectsOrChecks` mutates mmap file bytes, metadata, page headers, checksums, truncation, and tree/overflow-bearing pages, then requires any accepted image to pass `Check`. | Extend model checking to longer process-crash/reopen probes, minimized malformed-page corpora, and semantic corruption oracles. |
@@ -174,15 +199,20 @@ an image taken after both metadata slots advance recomputes the obsolete chain
 as reusable during recovery. The process-exit sync matrix kills a child writer
 at the same sync-publication fault points, then reopens the same database from a
 fresh process and classifies old-root versus new-root recovery. The process-exit
-growth matrix applies the same child-process pattern to file-size,
-directory-sync, and pre-remap growth boundaries, all of which recover the old
-root because growth does not publish metadata. The process-exit compact-shrink
-matrix kills a child writer at file-size, directory-sync, and pre-remap shrink
-boundaries, then reopens all live keys from the compacted root and checks the
-compacted file geometry. The large-freelist process-exit matrix covers
-old-metadata recovery before data sync and persisted freelist reuse after
-metadata write or before metadata sync. The large-reclaim process-exit matrix
-keeps a live read-only parent handle, kills the child writer at large-reclaim
-publication points, and verifies that persisted retired records remain pinned
-by that surviving reader after writable recovery and a follow-up write. The
-remaining crash-work is true power-fail probing outside the local harness.
+transaction sync matrix commits a read-write transaction, kills the child writer
+during the following mmap `Sync`, and classifies recovery with the same rule:
+before-data-sync reopens the old root and after metadata bytes are written
+reopens the new root. The process-exit growth matrix applies the same
+child-process pattern to file-size, directory-sync, and pre-remap growth
+boundaries, all of which recover the old root because growth does not publish
+metadata. The process-exit compact-shrink matrix kills a child writer at
+file-size, directory-sync, and pre-remap shrink boundaries, then reopens all
+live keys from the compacted root and checks the compacted file geometry. The
+large-freelist process-exit matrix covers old-metadata recovery before data sync
+and persisted freelist reuse after metadata write or before metadata sync. The
+large-reclaim process-exit matrix keeps a live read-only parent handle, kills
+the child writer at large-reclaim publication points, and verifies that
+persisted retired records remain pinned by that surviving reader after writable
+recovery and a follow-up write. The remaining crash-work is true power-fail
+probing outside the local harness, torn-sector simulation, and
+filesystem-specific sync-order evidence.
