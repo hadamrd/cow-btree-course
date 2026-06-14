@@ -59,20 +59,29 @@ The mapped file can grow and explicitly compact. `MmapOptions.MaxPages` sets the
 
 `Compact` is intentionally conservative. It first refuses to run while any in-process snapshot or registered mmap reader-table slot is active. Then it reclaims safe retired pages, lowers `nextPage` only across a contiguous suffix of free page IDs, persists the compacted metadata, truncates the file, syncs the file-size change and parent directory, and remaps the file down to the remaining capacity. If metadata publication fails, the temporary in-memory compaction state is restored before the error is returned. Like growth, shrink remapping acquires the replacement mapping before releasing the old mapping, so a failed replacement `mmap` does not leave the handle pointing at unmapped bytes; it also restores the previous file size before returning the failure. It can also release unused mapped capacity beyond `nextPage`, such as an oversized initial `MaxPages`. It never moves live pages, so interior reusable pages remain in the freelist for future writes.
 
-Offline copy compaction is the safer next step before online vacuum. `CopyCompactMmap(src, dst, options)` opens the source as a read-only mmap snapshot, validates it with `Check`, creates a brand-new destination file, copies only live key/value records in sorted bytewise order through `RangeBytes`, validates the destination, runs destination `Compact`, and returns file-size/page-count statistics. The destination path and its `.writer` and `.readers` sidecars must not already exist; this API refuses to overwrite instead of acting like an in-place repair tool. The command wrapper is:
+Offline copy compaction is the safer next step before online vacuum. `CopyCompactMmap(src, dst, options)` opens the source as a read-only mmap snapshot, validates it with `Check`, creates a brand-new destination file, copies only live key/value records in sorted bytewise order through `RangeBytes`, validates the destination, runs destination `Compact`, and returns file-size/page-count statistics. The destination path and its `.writer` and `.readers` sidecars must not already exist; this API refuses to overwrite instead of acting like an in-place repair tool. The command wrapper writes a separate replacement candidate:
 
 ```bash
 go run ./cmd/mmapcopycompact source.db compact.db
 ```
 
-This reclaims interior free pages because it builds a fresh tree whose page IDs are assigned only for live records. It is still offline: callers must decide when to quiesce writes and atomically swap the compacted file into service. It also does not punch holes inside the original file and does not relocate pages inside an active mapping.
+`CompactMmapFile(path, options)` layers a guarded offline swap on top. It takes the source `.writer` mutex before copying so no writer can publish new roots during the copy. After the compact temporary file is ready, it takes an exclusive lock on the database file; active mmap readers hold shared locks, so the swap is rejected while readers are still open. It then resets the reader sidecar, renames the compact file over the source file, removes the temporary writer sidecar, and syncs the directory. The command wrapper is:
+
+```bash
+go run ./cmd/mmapcompact source.db
+```
+
+This reclaims interior free pages because it builds a fresh tree whose page IDs are assigned only for live records. It is still offline: the swap refuses active readers and writers instead of relocating pages under them. It also does not punch holes inside the original file and does not move pages inside an active mapping.
 
 Code to read:
 
 - Offline copy-compaction API: [`../pagebtree/copy_compact.go#L23-L104`](../pagebtree/copy_compact.go#L23-L104)
+- Guarded replacement API: [`../pagebtree/compact_replace_unix.go#L12-L70`](../pagebtree/compact_replace_unix.go#L12-L70)
 - Refuse-overwrite path checks: [`../pagebtree/copy_compact.go#L106-L132`](../pagebtree/copy_compact.go#L106-L132)
 - Command wrapper: [`../cmd/mmapcopycompact/main.go#L10-L25`](../cmd/mmapcopycompact/main.go#L10-L25)
-- Copy-compaction tests: [`../pagebtree/mmap_test.go#L1993-L2085`](../pagebtree/mmap_test.go#L1993-L2085)
+- Replacement command wrapper: [`../cmd/mmapcompact/main.go#L10-L25`](../cmd/mmapcompact/main.go#L10-L25)
+- Copy-compaction tests: [`../pagebtree/mmap_test.go#L1993-L2086`](../pagebtree/mmap_test.go#L1993-L2086)
+- Replacement tests: [`../pagebtree/mmap_test.go#L2088-L2196`](../pagebtree/mmap_test.go#L2088-L2196)
 
 ## Why Mmap Helps
 
@@ -250,7 +259,7 @@ This keeps the storage lab honest: the mmap implementation has one writer at a t
 
 This chapter makes the project more serious, but it is still not a production database:
 
-- freelist pages are reclaimed conservatively after both metadata slots advance, and offline copy compaction can create a smaller replacement file, but there is still no online vacuum that moves live pages in place or punches sparse holes
+- freelist pages are reclaimed conservatively after both metadata slots advance, and guarded offline compaction can create and swap in a smaller replacement file, but there is still no online vacuum that moves live pages in place or punches sparse holes
 - `Sync` flushes dirty data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
 - file creation, mapped file growth, and compaction sync file-size or directory-entry changes, but the project still does not model every filesystem or storage-device ordering edge case
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed and validated for format, page size, degree, bounds, layout, routing, freelist safety, and key-count consistency, but there is no page-level repair
@@ -259,6 +268,6 @@ This chapter makes the project more serious, but it is still not a production da
 - byte-full leaf rewrites can spill cells to overflow pages, and key-underfull leaves and branches can merge or redistribute with siblings, but sibling redistribution is still key-count based rather than byte-balanced
 - `Get`, branch range traversal, and bounded leaf scans search slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries
 - `Delete` removes records, borrows before descending into minimum-fill branches, merges or redistributes underfull leaves and branches, and collapses simple roots
-- `Compact` can truncate unused capacity and trailing free pages, and `CopyCompactMmap` can copy live records into a fresh compact file, but there is no online vacuum that moves live pages inside an active database or punches sparse holes for interior free pages
+- `Compact` can truncate unused capacity and trailing free pages, `CopyCompactMmap` can copy live records into a fresh compact file, and `CompactMmapFile` can swap that file in while rejecting active readers/writers, but there is no online vacuum that moves live pages inside an active database or punches sparse holes for interior free pages
 
 The goal is to make mmap concrete without burying the reader under every database-engine concern at once.

@@ -2085,6 +2085,116 @@ func TestCopyCompactMmapRejectsExistingDestination(t *testing.T) {
 	}
 }
 
+func TestCompactMmapFileReplacesDatabaseWithSmallerFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "source.db")
+
+	src, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 512})
+	if err != nil {
+		t.Fatalf("OpenMmap source: %v", err)
+	}
+	for i := range 180 {
+		src.PutBytes([]byte(fmt.Sprintf("key-%03d", i)), []byte(fmt.Sprintf("value-%03d", i)))
+	}
+	for i := 0; i < 180; i += 2 {
+		if _, ok := src.DeleteBytes([]byte(fmt.Sprintf("key-%03d", i))); !ok {
+			t.Fatalf("DeleteBytes key-%03d = false", i)
+		}
+	}
+	if err := src.Close(); err != nil {
+		t.Fatalf("Close source: %v", err)
+	}
+	sourceBytes := fileSize(t, path)
+
+	result, err := CompactMmapFile(path, MmapOptions{Degree: 2})
+	if err != nil {
+		t.Fatalf("CompactMmapFile: %v", err)
+	}
+	if result.Keys != 90 {
+		t.Fatalf("result.Keys = %d, want 90", result.Keys)
+	}
+	if result.SourceFileBytes != sourceBytes {
+		t.Fatalf("result.SourceFileBytes = %d, want %d", result.SourceFileBytes, sourceBytes)
+	}
+	if got := fileSize(t, path); got != result.DestinationFileBytes {
+		t.Fatalf("file size after replacement = %d, want result destination size %d", got, result.DestinationFileBytes)
+	}
+	if result.DestinationFileBytes >= result.SourceFileBytes {
+		t.Fatalf("destination file did not compact: source=%d destination=%d", result.SourceFileBytes, result.DestinationFileBytes)
+	}
+	tempArtifacts, err := filepath.Glob(filepath.Join(dir, ".source.db.compact-*"))
+	if err != nil {
+		t.Fatalf("Glob temp artifacts: %v", err)
+	}
+	if len(tempArtifacts) != 0 {
+		t.Fatalf("leftover compact temp artifacts: %v", tempArtifacts)
+	}
+
+	reopened, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly compacted source: %v", err)
+	}
+	defer reopened.Close()
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("compacted source Check: %v", err)
+	}
+	if got := reopened.Len(); got != 90 {
+		t.Fatalf("compacted source Len = %d, want 90", got)
+	}
+	for i := range 180 {
+		key := []byte(fmt.Sprintf("key-%03d", i))
+		got, ok := reopened.GetBytes(key)
+		if i%2 == 0 {
+			if ok {
+				t.Fatalf("deleted key %s unexpectedly survived with value %q", key, got)
+			}
+			continue
+		}
+		want := []byte(fmt.Sprintf("value-%03d", i))
+		if !ok || !bytes.Equal(got, want) {
+			t.Fatalf("GetBytes(%s) = %q, %v; want %q, true", key, got, ok, want)
+		}
+	}
+}
+
+func TestCompactMmapFileRejectsActiveReader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.db")
+	src, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap source: %v", err)
+	}
+	src.Put("alpha", []byte("one"))
+	if err := src.Close(); err != nil {
+		t.Fatalf("Close source: %v", err)
+	}
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly source: %v", err)
+	}
+	defer reader.Close()
+
+	if _, err := CompactMmapFile(path, MmapOptions{Degree: 2}); !errors.Is(err, ErrActiveReaders) {
+		t.Fatalf("CompactMmapFile with active reader error = %v, want ErrActiveReaders", err)
+	}
+}
+
+func TestCompactMmapFileRejectsOpenWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.db")
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	defer writer.Close()
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Sync(); err != nil {
+		t.Fatalf("Sync writer: %v", err)
+	}
+
+	if _, err := CompactMmapFile(path, MmapOptions{Degree: 2}); !errors.Is(err, ErrDatabaseLocked) {
+		t.Fatalf("CompactMmapFile with open writer error = %v, want ErrDatabaseLocked", err)
+	}
+}
+
 func TestMmapCompactWaitsForActiveReaders(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

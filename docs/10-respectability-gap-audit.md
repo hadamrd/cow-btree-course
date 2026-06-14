@@ -20,7 +20,9 @@ What is credible today:
 - Kernel page-cache cooperation through mmap advice, file advice on Linux,
   exact warm-up, exact range prefetch, and cache-residency stats.
 - Offline mmap copy compaction that copies live records into a fresh smaller
-  file without overwriting existing destination artifacts.
+  file without overwriting existing destination artifacts, plus a guarded
+  offline replacement path that rejects active readers and writers before
+  renaming the compact file into place.
 - A bounded derived branch-routing cache that does not duplicate raw page bytes.
 - Opt-in mmap trace events for sync phases, recovery candidate accept/reject
   decisions, growth remaps, compact shrinks, stale reader cleanup, and obsolete
@@ -52,7 +54,7 @@ research frontier.
 | --- | --- | --- | --- |
 | Byte-balanced pages | Variable-size records make key-count balancing weak. | Split/delete decisions are mostly degree/key-count based, with overflow fallback for byte pressure. | Track page byte fill and split/redistribute by byte occupancy. |
 | Prefix compression | Interior separators and leaf keys waste space without compression. | Keys are stored plainly in every cell. | Add an optional page-local prefix-compressed leaf format version. |
-| Online vacuum / page relocation | Tail compaction cannot reclaim interior holes to the filesystem. | Started: `Compact` trims only a contiguous free suffix and never moves live pages; `CopyCompactMmap` now provides an offline replacement-file path that copies live records from a read-only source snapshot into a fresh compact mmap tree and refuses to overwrite existing destination artifacts. | Add atomic replacement guidance and then attempt online page relocation or sparse-hole experiments. |
+| Online vacuum / page relocation | Tail compaction cannot reclaim interior holes to the filesystem. | Started: `Compact` trims only a contiguous free suffix and never moves live pages; `CopyCompactMmap` copies live records into a fresh compact mmap tree; `CompactMmapFile` takes the writer mutex, rejects active mmap readers via exclusive source-file lock, resets the reader sidecar, and renames the compact file into place. | Attempt online page relocation or sparse-hole experiments. |
 | Sparse-file punching | Reusable interior pages remain allocated by the filesystem. | Interior free pages stay inside the file. | Experiment with hole punching for page-size-aligned free extents while preserving mmap semantics. |
 | Multi-process robustness | Reader tables need stronger owner identity than PID alone. | Slots use PID, revision, and token, with stale PID cleanup and fail-closed validation. | Include boot/session identity or start time to reduce PID reuse ambiguity. |
 | Observability | A serious engine should explain stalls, reclaim pressure, and recovery decisions. | Started: `MmapOptions.TraceHook` emits structured `MmapTraceEvent` records for sync phases, recovery candidate accept/reject decisions, growth remap geometry, compact shrink geometry, stale reader cleanup counts, and obsolete metadata-page reclaim decisions. Stats still expose counters, and `MmapCacheStats` exposes kernel residency. | Add slow sync range events, event examples/exporter guidance, and trace coverage for failure/rollback paths. |
@@ -105,17 +107,25 @@ The new copy-compaction path is deliberately offline:
 - It validates and tail-compacts the destination before returning file-size and
   mapped-page statistics.
 - `cmd/mmapcopycompact` exposes the same path for experiments.
+- `CompactMmapFile(path, options)` adds the guarded replacement workflow:
+  source writer mutex, compact temp file, exclusive source-file lock to reject
+  active readers, reader-sidecar reset, database-file rename, and directory sync.
+- `cmd/mmapcompact` exposes the replacement path.
 
 This closes the first useful step toward vacuuming: interior free pages can be
-removed from a replacement file. It does not yet solve online relocation,
-atomic file replacement, or sparse-hole punching inside the active database.
+removed from a replacement file and that file can now be swapped in while
+refusing active readers/writers. It does not yet solve online relocation or
+sparse-hole punching inside the active database.
 
 Code to read:
 
 - API and result contract: [`../pagebtree/copy_compact.go#L15-L104`](../pagebtree/copy_compact.go#L15-L104)
 - Destination safety checks: [`../pagebtree/copy_compact.go#L106-L142`](../pagebtree/copy_compact.go#L106-L142)
+- Guarded replacement path: [`../pagebtree/compact_replace_unix.go#L12-L70`](../pagebtree/compact_replace_unix.go#L12-L70)
 - CLI wrapper: [`../cmd/mmapcopycompact/main.go#L10-L25`](../cmd/mmapcopycompact/main.go#L10-L25)
-- Tests: [`../pagebtree/mmap_test.go#L1993-L2085`](../pagebtree/mmap_test.go#L1993-L2085)
+- Replacement CLI wrapper: [`../cmd/mmapcompact/main.go#L10-L25`](../cmd/mmapcompact/main.go#L10-L25)
+- Copy tests: [`../pagebtree/mmap_test.go#L1993-L2086`](../pagebtree/mmap_test.go#L1993-L2086)
+- Replacement tests: [`../pagebtree/mmap_test.go#L2088-L2196`](../pagebtree/mmap_test.go#L2088-L2196)
 
 ## Recommended Next Grind
 

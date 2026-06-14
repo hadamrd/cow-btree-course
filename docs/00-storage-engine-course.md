@@ -462,8 +462,12 @@ There are two different compaction ideas in the repository:
   read-only, walks live records in sorted order, writes them into a new mmap
   tree, validates the result, and trims the destination. This can reclaim
   interior free pages because the replacement file receives a fresh page-ID
-  layout. It is not an online vacuum; the caller still has to control writer
-  quiescence and file replacement.
+  layout.
+- Guarded offline replacement: `CompactMmapFile(path, options)` takes the
+  source writer mutex, builds a compact temporary copy, rejects the final swap
+  while active mmap readers hold shared file locks, then renames the compact
+  file over the source. It is still not online vacuum because it refuses active
+  readers and writers instead of relocating pages underneath them.
 
 ```mermaid
 flowchart LR
@@ -472,7 +476,8 @@ flowchart LR
     S --> W["OpenMmap new destination"]
     W --> C["PutBytes into fresh tree"]
     C --> K["Check + Compact destination"]
-    K --> N["smaller replacement file"]
+    K --> X["exclusive source file lock"]
+    X --> N["rename smaller replacement file"]
 ```
 
 Code to read:
@@ -482,8 +487,11 @@ Code to read:
 - Compaction refuses active readers and trims only safe tail pages: [`pagebtree/tree.go#L257-L275`](../pagebtree/tree.go#L257-L275)
 - Tail compaction mechanics: [`pagebtree/mmap.go#L408-L482`](../pagebtree/mmap.go#L408-L482)
 - Offline copy-compaction API: [`pagebtree/copy_compact.go#L23-L104`](../pagebtree/copy_compact.go#L23-L104)
+- Guarded replacement API: [`pagebtree/compact_replace_unix.go#L12-L70`](../pagebtree/compact_replace_unix.go#L12-L70)
 - Copy-compaction command: [`cmd/mmapcopycompact/main.go#L10-L25`](../cmd/mmapcopycompact/main.go#L10-L25)
-- Copy-compaction behavior tests: [`pagebtree/mmap_test.go#L1993-L2085`](../pagebtree/mmap_test.go#L1993-L2085)
+- Compact-replacement command: [`cmd/mmapcompact/main.go#L10-L25`](../cmd/mmapcompact/main.go#L10-L25)
+- Copy-compaction behavior tests: [`pagebtree/mmap_test.go#L1993-L2086`](../pagebtree/mmap_test.go#L1993-L2086)
+- Compact-replacement behavior tests: [`pagebtree/mmap_test.go#L2088-L2196`](../pagebtree/mmap_test.go#L2088-L2196)
 - Persisted reclaim recovery: [`pagebtree/mmap.go#L1099-L1151`](../pagebtree/mmap.go#L1099-L1151)
 
 ## Module 13: Reader Tables and MVCC Watermarks
