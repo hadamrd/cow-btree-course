@@ -3061,6 +3061,66 @@ func TestMmapTraceHookReportsGrowthRemap(t *testing.T) {
 	}
 }
 
+func TestMmapTraceHookReportsGrowthFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 4,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer func() {
+		tree.arena.faultInjector = nil
+		_ = tree.Close()
+	}()
+
+	oldMaxPages := tree.arena.maxPages
+	oldNextPage := tree.nextPage
+	newMaxPages := oldMaxPages * 2
+	forced := fmt.Errorf("forced %s fault", mmapFaultBeforeRemap)
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == mmapFaultBeforeRemap {
+			return forced
+		}
+		return nil
+	}
+
+	events = nil
+	err = tree.remapMmap(newMaxPages)
+	if !errors.Is(err, forced) {
+		t.Fatalf("remapMmap error = %v, want forced fault", err)
+	}
+
+	failed := findTraceEvent(events, MmapTraceGrowthFailed, tree.Revision())
+	if failed == nil {
+		t.Fatalf("missing growth failure event in %+v", events)
+	}
+	if failed.Reason != forced.Error() {
+		t.Fatalf("growth failure reason = %q, want %q", failed.Reason, forced.Error())
+	}
+	if failed.OldMaxPages != oldMaxPages || failed.NewMaxPages != newMaxPages {
+		t.Fatalf("growth failure max pages = old:%d new:%d, want old:%d new:%d", failed.OldMaxPages, failed.NewMaxPages, oldMaxPages, newMaxPages)
+	}
+	if failed.OldNextPage != oldNextPage || failed.NewNextPage != tree.nextPage {
+		t.Fatalf("growth failure next page = old:%d new:%d, want old:%d new:%d", failed.OldNextPage, failed.NewNextPage, oldNextPage, tree.nextPage)
+	}
+	if failed.FileSizeBytes != int64((newMaxPages+metaPageCount)*PageSize) {
+		t.Fatalf("growth failure file size = %d, want %d", failed.FileSizeBytes, int64((newMaxPages+metaPageCount)*PageSize))
+	}
+	if traceKindIndex(events, MmapTraceGrowthBegin) < 0 {
+		t.Fatalf("missing growth begin event in %+v", events)
+	}
+	if traceKindIndex(events, MmapTraceGrowthEnd) >= 0 {
+		t.Fatalf("unexpected growth end event in %+v", events)
+	}
+}
+
 func TestMmapTraceHookReportsCompactShrink(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 	var events []MmapTraceEvent
@@ -3105,6 +3165,75 @@ func TestMmapTraceHookReportsCompactShrink(t *testing.T) {
 	}
 	if end.FileSizeBytes != int64((tree.arena.maxPages+metaPageCount)*PageSize) {
 		t.Fatalf("compact file size = %d, want %d", end.FileSizeBytes, int64((tree.arena.maxPages+metaPageCount)*PageSize))
+	}
+}
+
+func TestMmapTraceHookReportsCompactFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 32,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer func() {
+		tree.arena.faultInjector = nil
+		_ = tree.Close()
+	}()
+
+	for i := 0; i < 8; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	appendFreeTailPage(t, tree)
+	appendFreeTailPage(t, tree)
+	oldMaxPages := tree.arena.maxPages
+	oldNextPage := tree.nextPage
+	newNextPage := tree.trailingFreeNextPage()
+	newMaxPages := int(newNextPage - firstTreePageID)
+	if newMaxPages < minMmapPageCount {
+		newMaxPages = minMmapPageCount
+	}
+	forced := fmt.Errorf("forced %s fault", mmapFaultBeforeRemap)
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == mmapFaultBeforeRemap {
+			return forced
+		}
+		return nil
+	}
+
+	events = nil
+	err = tree.Compact()
+	if !errors.Is(err, forced) {
+		t.Fatalf("Compact error = %v, want forced fault", err)
+	}
+
+	failed := findTraceEvent(events, MmapTraceCompactFailed, tree.Revision())
+	if failed == nil {
+		t.Fatalf("missing compact failure event in %+v", events)
+	}
+	if failed.Reason != forced.Error() {
+		t.Fatalf("compact failure reason = %q, want %q", failed.Reason, forced.Error())
+	}
+	if failed.OldMaxPages != oldMaxPages || failed.NewMaxPages != newMaxPages {
+		t.Fatalf("compact failure max pages = old:%d new:%d, want old:%d new:%d", failed.OldMaxPages, failed.NewMaxPages, oldMaxPages, newMaxPages)
+	}
+	if failed.OldNextPage != oldNextPage || failed.NewNextPage != newNextPage {
+		t.Fatalf("compact failure next page = old:%d new:%d, want old:%d new:%d", failed.OldNextPage, failed.NewNextPage, oldNextPage, newNextPage)
+	}
+	if failed.FileSizeBytes != int64((newMaxPages+metaPageCount)*PageSize) {
+		t.Fatalf("compact failure file size = %d, want %d", failed.FileSizeBytes, int64((newMaxPages+metaPageCount)*PageSize))
+	}
+	if traceKindIndex(events, MmapTraceCompactBegin) < 0 {
+		t.Fatalf("missing compact begin event in %+v", events)
+	}
+	if traceKindIndex(events, MmapTraceCompactEnd) >= 0 {
+		t.Fatalf("unexpected compact end event in %+v", events)
 	}
 }
 

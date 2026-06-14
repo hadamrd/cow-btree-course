@@ -358,37 +358,51 @@ func (t *Tree) remapMmap(newMaxPages int) error {
 	oldSize := int64(len(t.arena.data))
 	t.emitMmapTraceResize(MmapTraceGrowthBegin, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, newSize)
 	if err := t.arena.file.Truncate(newSize); err != nil {
+		t.emitMmapTraceResizeFailure(MmapTraceGrowthFailed, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, newSize, err)
 		return err
 	}
 	if err := t.arena.syncFileSize(); err != nil {
-		return t.arena.restoreFileSize(oldSize, err)
+		err = t.arena.restoreFileSize(oldSize, err)
+		t.emitMmapTraceResizeFailure(MmapTraceGrowthFailed, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, newSize, err)
+		return err
 	}
 
 	if err := t.arena.injectFault(mmapFaultBeforeRemap); err != nil {
-		return t.arena.restoreFileSize(oldSize, err)
+		err = t.arena.restoreFileSize(oldSize, err)
+		t.emitMmapTraceResizeFailure(MmapTraceGrowthFailed, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, newSize, err)
+		return err
 	}
 
 	data, err := mmapBytes(int(t.arena.file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		return t.arena.restoreFileSize(oldSize, err)
+		err = t.arena.restoreFileSize(oldSize, err)
+		t.emitMmapTraceResizeFailure(MmapTraceGrowthFailed, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, newSize, err)
+		return err
 	}
 	oldData := t.arena.data
 	if err := munmapBytes(oldData); err != nil {
 		_ = munmapBytes(data)
 		if restoreErr := t.arena.file.Truncate(oldSize); restoreErr != nil {
-			return errors.Join(err, restoreErr)
+			err = errors.Join(err, restoreErr)
+			t.emitMmapTraceResizeFailure(MmapTraceGrowthFailed, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, newSize, err)
+			return err
 		}
 		if syncErr := t.arena.syncFileSize(); syncErr != nil {
-			return errors.Join(err, syncErr)
+			err = errors.Join(err, syncErr)
+			t.emitMmapTraceResizeFailure(MmapTraceGrowthFailed, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, newSize, err)
+			return err
 		}
+		t.emitMmapTraceResizeFailure(MmapTraceGrowthFailed, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, newSize, err)
 		return err
 	}
 	t.arena.data = data
 	t.arena.maxPages = newMaxPages
 	if err := t.arena.advise(t.arena.accessPattern); err != nil {
+		t.emitMmapTraceResizeFailure(MmapTraceGrowthFailed, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, int64(len(t.arena.data)), err)
 		return err
 	}
 	if err := t.rebindMmapPages(); err != nil {
+		t.emitMmapTraceResizeFailure(MmapTraceGrowthFailed, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, int64(len(t.arena.data)), err)
 		return err
 	}
 	t.emitMmapTraceResize(MmapTraceGrowthEnd, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, int64(len(t.arena.data)))
@@ -459,16 +473,19 @@ func (t *Tree) compactMmapTail() error {
 	restoreFreelistPages, err := t.prepareMetaFreelistPages()
 	if err != nil {
 		restoreState()
+		t.emitMmapTraceResizeFailure(MmapTraceCompactFailed, oldMaxPages, newMaxPages, oldNextPage, trimmedNextPage, newSize, err)
 		return err
 	}
 	if err := t.arena.syncDataPages(t.nextPage, nil); err != nil {
 		restoreFreelistPages()
 		restoreState()
+		t.emitMmapTraceResizeFailure(MmapTraceCompactFailed, oldMaxPages, newMaxPages, oldNextPage, trimmedNextPage, newSize, err)
 		return err
 	}
 	if err := t.publishMeta(); err != nil {
 		restoreFreelistPages()
 		restoreState()
+		t.emitMmapTraceResizeFailure(MmapTraceCompactFailed, oldMaxPages, newMaxPages, oldNextPage, trimmedNextPage, newSize, err)
 		return err
 	}
 	t.reclaimObsoleteMetaFreelistPages()
@@ -477,6 +494,7 @@ func (t *Tree) compactMmapTail() error {
 		return nil
 	}
 	if err := t.shrinkMmap(newMaxPages); err != nil {
+		t.emitMmapTraceResizeFailure(MmapTraceCompactFailed, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, newSize, err)
 		return err
 	}
 	t.emitMmapTraceResize(MmapTraceCompactEnd, oldMaxPages, t.arena.maxPages, oldNextPage, t.nextPage, int64(len(t.arena.data)))

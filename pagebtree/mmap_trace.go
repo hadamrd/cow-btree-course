@@ -17,8 +17,10 @@ const (
 	MmapTraceReclaimObsoleteMetadataPages MmapTraceEventKind = "mmap-reclaim-obsolete-metadata-pages"
 	MmapTraceGrowthBegin                  MmapTraceEventKind = "mmap-growth-begin"
 	MmapTraceGrowthEnd                    MmapTraceEventKind = "mmap-growth-end"
+	MmapTraceGrowthFailed                 MmapTraceEventKind = "mmap-growth-failed"
 	MmapTraceCompactBegin                 MmapTraceEventKind = "mmap-compact-begin"
 	MmapTraceCompactEnd                   MmapTraceEventKind = "mmap-compact-end"
+	MmapTraceCompactFailed                MmapTraceEventKind = "mmap-compact-failed"
 	MmapTraceReaderTableCleanup           MmapTraceEventKind = "mmap-reader-table-cleanup"
 )
 

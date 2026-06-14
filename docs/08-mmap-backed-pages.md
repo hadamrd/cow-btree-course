@@ -161,8 +161,8 @@ Counters answer "how much"; trace events answer "why did this path happen?" The 
 - `mmap-recovery-candidate-rejected` when a metadata candidate fails checksum, slot, bounds, reachable-page, freelist, reclaim, leaf-link, or length validation
 - `mmap-recovery-candidate-accepted` when recovery chooses the root that will serve reads
 - `mmap-reclaim-obsolete-metadata-pages` when old freelist/reclaim metadata pages become reusable after neither checked metadata slot references them
-- `mmap-growth-begin` and `mmap-growth-end` around successful growth remapping, with old/new mapped capacity and file size
-- `mmap-compact-begin` and `mmap-compact-end` around successful tail compaction, with old/new `nextPage`, capacity, and file size
+- `mmap-growth-begin`, `mmap-growth-end`, and `mmap-growth-failed` around growth remapping, with old/new mapped capacity and file size
+- `mmap-compact-begin`, `mmap-compact-end`, and `mmap-compact-failed` around tail compaction, with old/new `nextPage`, capacity, and file size
 - `mmap-reader-table-cleanup` when stale dead-PID reader-table slots are explicitly cleared
 
 Each event carries stable revision/page geometry: root page ID, `nextPage`, mapped capacity, old/new geometry for growth and compaction, logical length, dirty/free/retired counts, reclaimed-page count for reclaim events, cleared-slot count for reader cleanup, metadata slot, file-size bytes when a remap is involved, and a rejection or failure reason when one exists. Dirty data-range events also carry half-open `StartPage`/`EndPage` boundaries matching the coalesced logical page IDs passed to `msync`, plus `DurationNanos` for that range flush. A hook should return quickly and should not call back into the same tree; use it to append to a test buffer, increment a probe, or hand off to an external logger.

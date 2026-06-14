@@ -24,9 +24,9 @@ What is credible today:
   offline replacement path that rejects active readers and writers before
   renaming the compact file into place.
 - A bounded derived branch-routing cache that does not duplicate raw page bytes.
-- Opt-in mmap trace events for sync phases, recovery candidate accept/reject
-  decisions, growth remaps, compact shrinks, stale reader cleanup, and obsolete
-  metadata-page reclaim decisions.
+- Opt-in mmap trace events for sync phases and failures, recovery candidate
+  accept/reject decisions, growth and compact remap success/failure geometry,
+  stale reader cleanup, and obsolete metadata-page reclaim decisions.
 - Snapshot-backed cursors for incremental ordered reads.
 - A persisted mmap key-order identifier for the current bytewise page ordering.
 - Reproducible Go microbenchmarks for page and mmap get, seek/next, range,
@@ -57,7 +57,7 @@ research frontier.
 | Online vacuum / page relocation | Tail compaction cannot reclaim interior holes to the filesystem. | Started: `Compact` trims only a contiguous free suffix and never moves live pages; `CopyCompactMmap` copies live records into a fresh compact mmap tree; `CompactMmapFile` takes the writer mutex, rejects active mmap readers via exclusive source-file lock, resets the reader sidecar, and renames the compact file into place. | Attempt online page relocation or sparse-hole experiments. |
 | Sparse-file punching | Reusable interior pages remain allocated by the filesystem. | Interior free pages stay inside the file. | Experiment with hole punching for page-size-aligned free extents while preserving mmap semantics. |
 | Multi-process robustness | Reader tables need stronger owner identity than PID alone. | Slots use PID, revision, and token, with stale PID cleanup and fail-closed validation. | Include boot/session identity or start time to reduce PID reuse ambiguity. |
-| Observability | A serious engine should explain stalls, reclaim pressure, and recovery decisions. | Started: `MmapOptions.TraceHook` emits structured `MmapTraceEvent` records for sync phases, timed per-range dirty data-page flushes, sync failures, recovery candidate accept/reject decisions, growth remap geometry, compact shrink geometry, stale reader cleanup counts, and obsolete metadata-page reclaim decisions. `MmapTraceJSONLExporter` and `cmd/mmaptrace-demo` provide a small JSONL export path for experiments. Stats still expose counters, and `MmapCacheStats` exposes kernel residency. | Add trace coverage for growth/compact/freelist/reclaim rollback paths. |
+| Observability | A serious engine should explain stalls, reclaim pressure, and recovery decisions. | Started: `MmapOptions.TraceHook` emits structured `MmapTraceEvent` records for sync phases, timed per-range dirty data-page flushes, sync failures, recovery candidate accept/reject decisions, growth and compact remap success/failure geometry, stale reader cleanup counts, and obsolete metadata-page reclaim decisions. `MmapTraceJSONLExporter` and `cmd/mmaptrace-demo` provide a small JSONL export path for experiments. Stats still expose counters, and `MmapCacheStats` exposes kernel residency. | Add trace coverage for freelist/reclaim rollback paths. |
 | Benchmarks | Without benchmarks, optimization claims are weak. | Started: `pagebtree/bench_test.go` covers page and mmap point `Get`, cursor seek/next, bounded range scans, sequential insert/delete, mmap sync-after-put, mmap delete+sync, and mmap reopen validation. | Add benchstat comparison scripts, larger workload profiles, and CI/manual baseline guidance. |
 
 ## P2 Gaps
