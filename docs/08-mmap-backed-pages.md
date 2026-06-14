@@ -213,6 +213,21 @@ go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap
 
 This is useful when studying recovery fallback. If the newest metadata page points at a torn root page, a trace hook can show the newest candidate rejected with a checksum or invariant reason and the older candidate accepted. That is more precise than a counter saying "one open succeeded."
 
+`cmd/mmaptearlab` makes that fallback easier to inspect without editing test
+helpers. It creates two synced roots, tears either the newest checked metadata
+page or the newest root page, reopens the database, and prints JSON with the
+older/newer root IDs, recovered revision/root, old-key/new-key visibility, and a
+`fell_back_to_older_root` boolean:
+
+```bash
+go run ./cmd/mmaptearlab --mode metadata tear.db
+go run ./cmd/mmaptearlab --mode root tear.db
+```
+
+This is a targeted torn-image simulation. It proves checksum/invariant fallback
+behavior for those two images, not a real power-fail campaign across storage
+devices.
+
 For a bounded multi-process reader-table exercise, `cmd/mmapreadersoak` seeds an mmap database, starts read-only child processes, mutates the same tree through a writer while those children hold reader-table slots, then releases the children and prints JSON evidence for active reader counts, pinned retired pages, free pages while pinned, and final reclaim:
 
 ```bash
@@ -325,7 +340,7 @@ This keeps the storage lab honest: the mmap implementation has one writer at a t
 This chapter makes the project more serious, but it is still not a production database:
 
 - freelist pages are reclaimed conservatively after both metadata slots advance, guarded offline compaction can create and swap in a smaller replacement file, and `PunchFreeMmapPages` can ask supported filesystems to sparse-punch safe free extents, but there is still no online vacuum that moves live pages in place
-- `Sync` flushes dirty data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
+- `Sync` flushes dirty data pages before metadata, and reopen can fall back from torn newest metadata/root images to an older valid root, but there is no complete crash-safe write-order protocol or WAL
 - file creation, mapped file growth, and compaction sync file-size or directory-entry changes, but the project still does not model every filesystem or storage-device ordering edge case
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed and validated for format, page size, degree, bounds, layout, routing, freelist safety, and key-count consistency, but there is no page-level repair
 - the reader table now lets read-only mmap handles coexist with a writer, pin recycling, clean stale or detectably reused owner slots, reject malformed existing sidecars, preserve externally pinned retired pages across writer close/reopen, and run bounded multi-process reader soak experiments, but it is intentionally simpler than LMDB's production lock-table implementation
