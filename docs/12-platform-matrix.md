@@ -15,12 +15,26 @@ The executable source of truth is `pagebtree.MmapPlatformProfile()`:
 - Other Unix fallback: [`../pagebtree/platform_profile_unix_other.go`](../pagebtree/platform_profile_unix_other.go)
 - Non-Unix stub: [`../pagebtree/platform_profile_unsupported.go`](../pagebtree/platform_profile_unsupported.go)
 - JSON command: [`../cmd/mmapplatform/main.go`](../cmd/mmapplatform/main.go)
+- Runtime filesystem probe: [`../cmd/mmapfsprobe/main.go`](../cmd/mmapfsprobe/main.go)
 
 Run:
 
 ```bash
 go run ./cmd/mmapplatform
 ```
+
+To collect local filesystem evidence for a disposable database path, run:
+
+```bash
+go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 /path/to/probe.db
+```
+
+That probe creates a fresh mmap database, inserts fixed-size values, deletes
+half the keys to create reusable pages, syncs, tail-compacts, attempts sparse
+punching, and prints value-free JSON with `Stats`, `MmapSpaceStats`,
+`MmapPlatformProfile`, and `MmapHolePunchStats` for each phase. It reports
+filesystem allocation evidence from the actual path you give it; it still does
+not simulate sudden power loss or prove crash ordering.
 
 ## Current Matrix
 
@@ -43,6 +57,7 @@ flowchart TD
     U --> O["other unix: PID-only tokens"]
     P --> H["MmapHolePunchProfile"]
     P --> C["cmd/mmapplatform JSON"]
+    P --> F["cmd/mmapfsprobe runtime evidence"]
 ```
 
 ## What CI Proves
@@ -72,7 +87,7 @@ systems.
 A serious support matrix would need:
 
 - Runtime tests on each supported operating system, not only cross-compilation.
-- Filesystem-specific notes for ext4, XFS, APFS, ZFS, tmpfs, and network filesystems.
+- More recorded filesystem-specific probe runs for ext4, XFS, APFS, ZFS, tmpfs, and network filesystems.
 - Power-fail or VM-kill experiments per filesystem and mount option.
 - Sparse-punch allocation evidence before and after maintenance on each filesystem.
 - Long-running multi-process reader/writer soak runs outside `go test`.
