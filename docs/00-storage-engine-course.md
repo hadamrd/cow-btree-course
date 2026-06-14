@@ -356,8 +356,10 @@ The mmap durability boundary remains `Sync`.
 `TestMmapWriteBatchCommitSyncProcessCrashMatrixClassifiesRecoveryRoot` stages a
 multi-operation batch through `CommitSyncDetailed`, kills the child writer
 inside the sync boundary, and reopens the same file from the parent process.
-`TestMmapTxSyncProcessCrashMatrixClassifiesRecoveryRoot` does the same after a
-transaction commit followed by `Sync`. In both cases, a crash before dirty data
+`TestMmapReadWriteTxCommitSyncProcessCrashMatrixClassifiesRecoveryRoot` does
+the same through transaction `CommitSyncDetailed`, while
+`TestMmapTxSyncProcessCrashMatrixClassifiesRecoveryRoot` covers transaction
+`Commit` followed by a separate `Sync`. In all cases, a crash before dirty data
 sync recovers the old root. A crash after metadata bytes are written recovers
 the new root.
 
@@ -959,10 +961,10 @@ Serious pieces in this repository:
   checksums, truncation, and tree/overflow-bearing pages, then requires any
   accepted image to pass `Tree.Check`.
 - Process-exit crash probes that kill a child writer at sync-publication,
-  write-batch commit-sync, transaction-sync-publication, mmap-growth,
-  compact-shrink, large-freelist spill, large-reclaim spill, legacy
-  metadata-upgrade, and obsolete freelist metadata-generation boundaries, then
-  reopen the same database from a fresh process.
+  write-batch commit-sync, transaction commit-sync, transaction-sync-publication,
+  mmap-growth, compact-shrink, large-freelist spill, large-reclaim spill,
+  legacy metadata-upgrade, and obsolete freelist metadata-generation boundaries,
+  then reopen the same database from a fresh process.
 - Reproducible microbenchmarks for page and mmap get, seek/next, forward and
   reverse bounded cursor, bounded range, insert, delete, reopen, and sync paths.
   Run a short local pass with
@@ -978,8 +980,9 @@ Still research or incomplete compared with a production engine:
   transactions add read-your-writes `Get`, `RangeBetween`, range delete,
   transaction cursor delete, stable begin-revision reads, rollback, optimistic
   revision-conflict detection, and one-revision commit. Batch `CommitSync` and
-  transaction commit followed by mmap `Sync` both have process-exit crash
-  proofs. `CommitSync` and `CommitSyncDetailed` provide explicit
+  transaction `CommitSync` both have process-exit crash proofs; transaction
+  commit followed by a separate mmap `Sync` is covered too. `CommitSync` and
+  `CommitSyncDetailed` provide explicit
   commit-then-sync helpers, but
   concurrency stress and filesystem-specific fsync guarantees remain research
   work.

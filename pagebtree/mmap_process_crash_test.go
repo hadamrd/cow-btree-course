@@ -140,6 +140,43 @@ func TestMmapWriteBatchCommitSyncProcessCrashMatrixClassifiesRecoveryRoot(t *tes
 	}
 }
 
+func TestMmapReadWriteTxCommitSyncProcessCrashMatrixClassifiesRecoveryRoot(t *testing.T) {
+	if os.Getenv(mmapCrashChildEnv) == "1" {
+		runMmapTxCommitSyncProcessCrashChild(t)
+		return
+	}
+
+	tests := []struct {
+		name        string
+		fault       mmapFaultPoint
+		wantNewRoot bool
+	}{
+		{
+			name:        "before data sync",
+			fault:       mmapFaultBeforeDataSync,
+			wantNewRoot: false,
+		},
+		{
+			name:        "after metadata write",
+			fault:       mmapFaultAfterMetaWrite,
+			wantNewRoot: true,
+		},
+		{
+			name:        "before metadata sync",
+			fault:       mmapFaultBeforeMetaSync,
+			wantNewRoot: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "course.db")
+			runMmapTxCommitSyncProcessCrash(t, path, tt.fault)
+			assertMmapTxCommitSyncProcessCrashRecovered(t, path, tt.fault, tt.wantNewRoot)
+		})
+	}
+}
+
 func TestMmapGrowthProcessCrashMatrixClassifiesOldRoot(t *testing.T) {
 	if os.Getenv(mmapCrashChildEnv) == "1" {
 		runMmapGrowthProcessCrashChild(t)
@@ -513,6 +550,12 @@ func runMmapBatchCommitSyncProcessCrash(t *testing.T, path string, fault mmapFau
 	runMmapProcessCrashChild(t, path, fault, "^TestMmapWriteBatchCommitSyncProcessCrashMatrixClassifiesRecoveryRoot$", "batch-sync")
 }
 
+func runMmapTxCommitSyncProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
+	t.Helper()
+
+	runMmapProcessCrashChild(t, path, fault, "^TestMmapReadWriteTxCommitSyncProcessCrashMatrixClassifiesRecoveryRoot$", "tx-commit-sync")
+}
+
 func runMmapGrowthProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
 	t.Helper()
 
@@ -847,6 +890,39 @@ func runMmapBatchCommitSyncProcessCrashChild(t *testing.T) {
 	t.Fatalf("batch-sync child CommitSyncDetailed completed without hitting fault %s", fault)
 }
 
+func runMmapTxCommitSyncProcessCrashChild(t *testing.T) {
+	t.Helper()
+
+	path := os.Getenv(mmapCrashPathEnv)
+	fault := mmapFaultPoint(os.Getenv(mmapCrashFaultEnv))
+	if path == "" || fault == "" {
+		t.Fatalf("missing tx-commit-sync crash child env path=%q fault=%q", path, fault)
+	}
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap tx-commit-sync child create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	tree.Put("remove", []byte("old"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial tx-commit-sync child Sync: %v", err)
+	}
+
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			os.Exit(mmapCrashChildExitCode)
+		}
+		return nil
+	}
+	tx := tree.BeginReadWrite()
+	tx.Put("bravo", []byte("two"))
+	tx.Delete("remove")
+	if _, err := tx.CommitSyncDetailed(); err != nil {
+		t.Fatalf("tx-commit-sync child CommitSyncDetailed before process crash: %v", err)
+	}
+	t.Fatalf("tx-commit-sync child CommitSyncDetailed completed without hitting fault %s", fault)
+}
+
 func runMmapGrowthProcessCrashChild(t *testing.T) {
 	t.Helper()
 
@@ -1119,6 +1195,41 @@ func assertMmapBatchCommitSyncProcessCrashRecovered(t *testing.T, path string, f
 	}
 	if !okRemove || string(gotRemove) != "old" {
 		t.Fatalf("Get(remove) after batch-sync process crash at %s = %q, %v; want old, true", fault, gotRemove, okRemove)
+	}
+}
+
+func assertMmapTxCommitSyncProcessCrashRecovered(t *testing.T, path string, fault mmapFaultPoint, wantNewRoot bool) {
+	t.Helper()
+
+	recovered, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after tx-commit-sync process crash at %s: %v", fault, err)
+	}
+	defer recovered.Close()
+
+	if err := recovered.Check(); err != nil {
+		t.Fatalf("Check after tx-commit-sync process crash at %s: %v", fault, err)
+	}
+	if got, ok := recovered.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("Get(alpha) after tx-commit-sync process crash at %s = %q, %v; want one, true", fault, got, ok)
+	}
+
+	gotBravo, okBravo := recovered.Get("bravo")
+	gotRemove, okRemove := recovered.Get("remove")
+	if wantNewRoot {
+		if !okBravo || string(gotBravo) != "two" {
+			t.Fatalf("Get(bravo) after tx-commit-sync process crash at %s = %q, %v; want two, true", fault, gotBravo, okBravo)
+		}
+		if okRemove {
+			t.Fatalf("Get(remove) after tx-commit-sync process crash at %s = %q, true; want deleted", fault, gotRemove)
+		}
+		return
+	}
+	if okBravo {
+		t.Fatalf("Get(bravo) after tx-commit-sync process crash at %s = %q, true; want old root without bravo", fault, gotBravo)
+	}
+	if !okRemove || string(gotRemove) != "old" {
+		t.Fatalf("Get(remove) after tx-commit-sync process crash at %s = %q, %v; want old, true", fault, gotRemove, okRemove)
 	}
 }
 
