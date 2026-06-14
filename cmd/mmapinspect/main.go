@@ -29,6 +29,7 @@ type inspectReport struct {
 	ReachablePageIDs  []pagebtree.PageID                 `json:"reachable_page_ids"`
 	FreePageIDs       []pagebtree.PageID                 `json:"free_page_ids"`
 	RetiredPageIDs    []pagebtree.PageID                 `json:"retired_page_ids"`
+	MetadataPageIDs   []pagebtree.PageID                 `json:"metadata_page_ids,omitempty"`
 	LeafLinksChecked  bool                               `json:"leaf_links_checked"`
 	LeafLinksSkipped  bool                               `json:"leaf_links_skipped"`
 	ReaderStats       *pagebtree.MmapReaderStats         `json:"reader_stats,omitempty"`
@@ -256,6 +257,7 @@ func inspectFromAudit(audit pagebtree.AuditReport, profile pagebtree.MDBKernelPr
 		ReachablePageIDs:  audit.ReachablePageIDs,
 		FreePageIDs:       audit.FreePageIDs,
 		RetiredPageIDs:    audit.RetiredPageIDs,
+		MetadataPageIDs:   audit.MetadataPageIDs,
 		PageSummaries:     audit.PageSummaries,
 		LeafLinksChecked:  audit.LeafLinksChecked,
 		LeafLinksSkipped:  audit.LeafLinksSkipped,

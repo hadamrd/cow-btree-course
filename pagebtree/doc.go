@@ -58,8 +58,8 @@
 // routing invariants, non-root leaf/branch minimum fill, overflow chains,
 // length, and freelist safety. It validates leaf links only when no active
 // reader is delaying leaf-link repair. Audit runs that same validation path
-// and returns a report with Stats plus sorted reachable, free, and retired page
-// IDs, value-free page summaries with role/kind/occupancy/routing hints,
+// and returns a report with Stats plus sorted reachable, free, retired, and
+// metadata page IDs, value-free page summaries with role/kind/occupancy/routing hints,
 // whether leaf-link validation was checked or skipped, and the exact validation
 // error if the tree is not valid.
 // Mmap-backed ranges prefetch a configurable bounded window of exact next leaf

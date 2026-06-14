@@ -12,6 +12,7 @@ type AuditReport struct {
 	ReachablePageIDs []PageID
 	FreePageIDs      []PageID
 	RetiredPageIDs   []PageID
+	MetadataPageIDs  []PageID
 	PageSummaries    []PageSummary
 	LeafLinksChecked bool
 	LeafLinksSkipped bool
@@ -32,6 +33,7 @@ type PageSummary struct {
 	Separators      int      `json:"separators,omitempty"`
 	Children        []PageID `json:"children,omitempty"`
 	NextPage        PageID   `json:"next_page,omitempty"`
+	MetadataRecords int      `json:"metadata_records,omitempty"`
 	BytesUsed       int      `json:"bytes_used,omitempty"`
 	BytesFree       int      `json:"bytes_free,omitempty"`
 	BytesCapacity   int      `json:"bytes_capacity,omitempty"`
@@ -67,6 +69,7 @@ func (t *Tree) Audit() AuditReport {
 	report.Stats = auditBaseStats(t)
 	report.FreePageIDs = sortedPageIDsFromSlice(t.free)
 	report.RetiredPageIDs = sortedRetiredPageIDs(t.retired)
+	report.MetadataPageIDs = append([]PageID(nil), t.metaFreelistPages...)
 
 	if t.root == 0 {
 		report.PageSummaries = t.pageSummaries(nil)
@@ -201,9 +204,12 @@ func sortedRetiredPageIDs(retired []retiredPage) []PageID {
 }
 
 func (t *Tree) pageSummaries(reachable map[PageID]bool) []PageSummary {
-	summaries := make([]PageSummary, 0, len(reachable)+len(t.free)+len(t.retired))
+	summaries := make([]PageSummary, 0, len(reachable)+len(t.free)+len(t.retired)+len(t.metaFreelistPages))
 	for _, id := range sortedPageIDs(reachable) {
 		summaries = append(summaries, summarizePage(id, t.pages[id], "reachable", 0))
+	}
+	for _, id := range t.metaFreelistPages {
+		summaries = append(summaries, summarizePage(id, t.pages[id], "metadata", 0))
 	}
 	for _, id := range sortedPageIDsFromSlice(t.free) {
 		summaries = append(summaries, summarizePage(id, t.pages[id], "free", 0))
@@ -246,6 +252,14 @@ func summarizePage(id PageID, p *page, role string, retiredRevision uint64) Page
 	case p.isOverflow():
 		summary.NextPage = p.overflowNext()
 		summary.BytesUsed = p.overflowBytesUsed()
+	case p.flags()&flagFreelist != 0:
+		summary.NextPage = p.freelistNext()
+		summary.MetadataRecords = p.freelistCount()
+		summary.BytesUsed = freelistPayloadOffset + p.freelistCount()*8
+	case p.flags()&flagReclaim != 0:
+		summary.NextPage = p.reclaimNext()
+		summary.MetadataRecords = p.reclaimCount()
+		summary.BytesUsed = reclaimPayloadOffset + p.reclaimCount()*reclaimRecordSize
 	default:
 		summary.BytesUsed = PageSize
 	}

@@ -194,12 +194,14 @@ For a one-shot read-only integrity snapshot, `cmd/mmapinspect` opens the
 database with `OpenMmapReadOnly`, runs `Audit`, and prints indented JSON with
 the validity bit, validation error if any, stats, persisted `key_order`,
 `key_order_name`, `key_comparator`, `key_comparator_name`, reachable page IDs,
-free page IDs, retired page IDs, and leaf-link validation state. `--readers`
+free page IDs, retired page IDs, metadata page IDs for persisted
+freelist/reclaim chains, and leaf-link validation state. `--readers`
 adds reader-table slot statistics, including active/stale slots and oldest
 pinned revision. `--cache` adds `mincore`-backed mapped/resident page counts,
 and `--space` adds `stat(2)` logical-vs-allocated file-space counts plus the
-hole-punch capability profile for sparse experiments. `--pages` adds value-free page summaries with role, kind, byte
-occupancy, branch children, and next-page hints. `--keys N` adds a bounded first/last key
+hole-punch capability profile for sparse experiments. `--pages` adds value-free
+page summaries with role, kind, byte occupancy, branch children, metadata record
+counts, and next-page hints. `--keys N` adds a bounded first/last key
 sample in the recovered comparator order without dumping values. `--trace
 TRACE.jsonl` reads value-free trace output, counts event kinds, keeps a bounded
 ordered timeline of the first storage phases, summarizes dirty data-page ranges,

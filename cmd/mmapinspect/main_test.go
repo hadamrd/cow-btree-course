@@ -303,6 +303,37 @@ func TestRunPrintsPageSummaries(t *testing.T) {
 	}
 }
 
+func TestRunPrintsMetadataPageSummaries(t *testing.T) {
+	path := copyInspectFixture(t, "mmap-v2-chained-freelist.db")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--pages", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if len(report.MetadataPageIDs) < 2 {
+		t.Fatalf("MetadataPageIDs = %v, want chained freelist metadata pages", report.MetadataPageIDs)
+	}
+	metadataSummaries := 0
+	for _, summary := range report.PageSummaries {
+		if summary.Role != "metadata" {
+			continue
+		}
+		metadataSummaries++
+		if summary.Kind != "freelist" || summary.MetadataRecords == 0 {
+			t.Fatalf("metadata summary = %+v, want freelist metadata records", summary)
+		}
+	}
+	if metadataSummaries != len(report.MetadataPageIDs) {
+		t.Fatalf("metadata summaries = %d, want MetadataPageIDs count %d", metadataSummaries, len(report.MetadataPageIDs))
+	}
+}
+
 func TestRunCorrelatesTraceJSONL(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "inspect.db")
@@ -425,6 +456,20 @@ func TestRunCorrelatesTraceJSONL(t *testing.T) {
 	if summary.HasFailures {
 		t.Fatalf("HasFailures = true, reasons=%v", summary.FailureReasons)
 	}
+}
+
+func copyInspectFixture(t *testing.T, name string) string {
+	t.Helper()
+	source := filepath.Join("..", "..", "pagebtree", "testdata", name)
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatalf("ReadFile fixture %s: %v", source, err)
+	}
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile fixture copy: %v", err)
+	}
+	return path
 }
 
 func TestRunCorrelatesTracePunchFailures(t *testing.T) {

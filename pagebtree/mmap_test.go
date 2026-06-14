@@ -6817,6 +6817,35 @@ func TestMmapTreeOpensLegacyV2ChainedFreelistFixture(t *testing.T) {
 	if err := reopened.Check(); err != nil {
 		t.Fatalf("legacy chained fixture Check before reuse: %v", err)
 	}
+	audit := reopened.Audit()
+	if !audit.Valid() {
+		t.Fatalf("legacy chained fixture Audit error = %v", audit.Error)
+	}
+	if len(audit.MetadataPageIDs) != chainPages {
+		t.Fatalf("Audit MetadataPageIDs = %v, want %d freelist metadata pages", audit.MetadataPageIDs, chainPages)
+	}
+	if audit.MetadataPageIDs[0] != record.freeRoot {
+		t.Fatalf("Audit MetadataPageIDs[0] = %d, want freelist root %d", audit.MetadataPageIDs[0], record.freeRoot)
+	}
+	metadataSummaries := 0
+	for _, summary := range audit.PageSummaries {
+		if summary.Role != "metadata" {
+			continue
+		}
+		metadataSummaries++
+		if summary.Kind != "freelist" {
+			t.Fatalf("metadata summary = %+v, want freelist kind", summary)
+		}
+		if summary.MetadataRecords == 0 {
+			t.Fatalf("metadata summary = %+v, want metadata record count", summary)
+		}
+		if summary.NextPage != 0 && !slices.Contains(audit.MetadataPageIDs, summary.NextPage) {
+			t.Fatalf("metadata summary next page %d not in MetadataPageIDs %v", summary.NextPage, audit.MetadataPageIDs)
+		}
+	}
+	if metadataSummaries != chainPages {
+		t.Fatalf("metadata summaries = %d, want %d", metadataSummaries, chainPages)
+	}
 
 	before := reopened.Stats()
 	reopened.Put("key-new", []byte("new-value"))
