@@ -80,6 +80,7 @@ cmd/mmappunch/       Sparse-hole maintenance JSON with before/after space stats 
 cmd/mmapfsprobe/     Local filesystem probe for mmap logical/allocated space behavior
 cmd/fsprobesummary/  Markdown summary for mmap filesystem probe JSON reports
 cmd/mmaptxworkload/  Bounded mmap transaction commit/delete/conflict workload with optional trace export
+cmd/mmaptxsummary/   Markdown summary for mmap transaction workload JSON reports
 cmd/mmapplatform/    JSON platform capability report for mmap mechanics
 cmd/benchsummary/    Markdown summary for Go benchmark output
 docs/probes/    Redacted recorded filesystem probe artifacts and generated summary
@@ -98,7 +99,7 @@ docs/           Research chapters
 8. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
 9. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, reader-table recycling, kernel page-cache behavior, Linux file-advice coordination, derived branch-routing cache behavior, exact reachable-page warm-up, tunable exact-page prefetch advice, residency and file-space stats, sparse-hole capability reporting, and trace events.
 10. Run `go run ./cmd/mmaptrace-demo > mmap-trace.jsonl` to inspect value-free JSONL trace events from a small mmap write/delete/compact workload.
-11. Run `go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --trace tx-trace.jsonl --redact-path /path/to/txworkload.db` and summarize it with `go run ./cmd/mmaptracesummary tx-trace.jsonl` to inspect commit-sync, staged-delete, reader-pinned reclaim pressure, and transaction-conflict events.
+11. Run `go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --trace tx-trace.jsonl --redact-path /path/to/txworkload.db > tx-report.json`, summarize the JSON report with `go run ./cmd/mmaptxsummary tx-report.json`, and summarize the trace with `go run ./cmd/mmaptracesummary tx-trace.jsonl` to inspect commit-sync, staged-delete, reader-pinned reclaim pressure, and transaction-conflict events.
 12. Run `go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db` to print read-only audit JSON plus reader-table, cache-residency, file-space, sparse-hole capability, page-summary, bounded key-sample, and trace-correlation sections.
 13. Run `go run ./cmd/mmappunch --trace punch-trace.jsonl /path/to/source.db` to execute sparse-hole maintenance, print before/after file-space evidence, and write value-free maintenance trace events.
 14. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.

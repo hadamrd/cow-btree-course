@@ -209,7 +209,8 @@ local database and trace paths from the JSON report while still writing the
 trace file at the supplied path:
 
 ```bash
-go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --trace tx-trace.jsonl --redact-path txworkload.db
+go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --trace tx-trace.jsonl --redact-path txworkload.db > tx-report.json
+go run ./cmd/mmaptxsummary tx-report.json
 go run ./cmd/mmaptracesummary tx-trace.jsonl
 ```
 
@@ -296,6 +297,7 @@ Code to read:
 - JSONL trace demo command: [`../cmd/mmaptrace-demo/main.go`](../cmd/mmaptrace-demo/main.go)
 - JSONL trace summary command: [`../cmd/mmaptracesummary/main.go`](../cmd/mmaptracesummary/main.go)
 - Transaction workload command: [`../cmd/mmaptxworkload/main.go`](../cmd/mmaptxworkload/main.go)
+- Transaction workload summary: [`../cmd/mmaptxsummary/main.go`](../cmd/mmaptxsummary/main.go)
 - Hook option: [`../pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
 - Dirty range coalescing and range callbacks: [`../pagebtree/mmap.go#L540-L588`](../pagebtree/mmap.go#L540-L588)
 - Sync phase and range emissions: [`../pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)

@@ -808,13 +808,14 @@ still uses the real database and trace paths internally, but omits them from the
 report:
 
 ```bash
-go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --trace tx-trace.jsonl --redact-path txworkload.db
+go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --trace tx-trace.jsonl --redact-path txworkload.db > tx-report.json
+go run ./cmd/mmaptxsummary tx-report.json
 go run ./cmd/mmaptracesummary tx-trace.jsonl
 ```
 
 This is not a concurrency scheduler or an ACID stress rig. It is a small
 repeatable input for studying the sync path, conflict abort path, reader-table
-reclaim pressure, and trace summary output together.
+reclaim pressure, report summary output, and trace summary output together.
 
 For an operator-style read-only validation snapshot, `cmd/mmapinspect` opens an
 mmap database through `OpenMmapReadOnly`, runs `Audit`, and writes indented JSON
@@ -880,6 +881,7 @@ Code to read:
 - JSONL trace demo command: [`cmd/mmaptrace-demo/main.go`](../cmd/mmaptrace-demo/main.go)
 - JSONL trace summary command: [`cmd/mmaptracesummary/main.go`](../cmd/mmaptracesummary/main.go)
 - Transaction workload command: [`cmd/mmaptxworkload/main.go`](../cmd/mmaptxworkload/main.go)
+- Transaction workload summary: [`cmd/mmaptxsummary/main.go`](../cmd/mmaptxsummary/main.go)
 - Hook option on mmap open: [`pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
 - Sync trace emissions: [`pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)
 - Recovery trace emissions: [`pagebtree/mmap.go#L937-L1051`](../pagebtree/mmap.go#L937-L1051)
