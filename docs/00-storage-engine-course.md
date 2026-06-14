@@ -193,8 +193,8 @@ the new key/value is inserted there. If it overflows by key count, the leaf is
 split at the legal position closest to half of the encoded leaf-cell bytes, and
 the first key of the right leaf becomes the separator inserted into the parent.
 
-Branches split similarly, but a branch split promotes the middle separator
-upward and creates a new right branch.
+Branches split similarly, but a branch split promotes the legal separator that
+best balances encoded branch-cell bytes across the left and right branch pages.
 
 ```mermaid
 flowchart TD
@@ -211,18 +211,18 @@ flowchart TD
 ```
 
 The code still favors clarity over byte-perfect production balancing. It has a
-degree-based maximum key count, uses a byte-aware split point for leaf overflow,
-and has additional overflow handling for large values that do not fit well
-inside a leaf page. Branch splits and delete redistribution are still mostly
-key-count based.
+degree-based maximum key count, uses byte-aware split points for leaf and branch
+overflow, and has additional overflow handling for large values that do not fit
+well inside a leaf page. Delete redistribution is still mostly key-count based.
 
 Code to read:
 
 - Leaf insert and split: [`pagebtree/insert.go#L26-L56`](../pagebtree/insert.go#L26-L56)
 - Byte-aware leaf split-point selection: [`pagebtree/insert.go#L58-L108`](../pagebtree/insert.go#L58-L108)
 - Branch descent and split: [`pagebtree/insert.go#L110-L146`](../pagebtree/insert.go#L110-L146)
+- Byte-aware branch split-point selection: [`pagebtree/insert.go#L148-L185`](../pagebtree/insert.go#L148-L185)
 - New root after split: [`pagebtree/tree.go#L83-L91`](../pagebtree/tree.go#L83-L91)
-- Leaf rewrite with overflow fallback: [`pagebtree/insert.go#L158-L182`](../pagebtree/insert.go#L158-L182)
+- Leaf rewrite with overflow fallback: [`pagebtree/insert.go#L197-L221`](../pagebtree/insert.go#L197-L221)
 
 ## Module 6: Delete, Merge, Redistribution, and Root Collapse
 
@@ -762,8 +762,8 @@ Still research or incomplete compared with a production engine:
   large-reclaim spill have process-exit probes.
 - No pluggable comparator or locale/collation layer; byte-key APIs use the
   persisted bytewise page order.
-- Leaf insertion has byte-aware split-point selection, but deletion still has
-  no byte-balanced redistribution across variable-size records.
+- Insertion has byte-aware leaf and branch split-point selection, but deletion
+  still has no byte-balanced redistribution across variable-size records.
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.
 - No benchstat baseline history or CI performance gate yet.

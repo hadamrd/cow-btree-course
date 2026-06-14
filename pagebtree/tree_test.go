@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -146,6 +147,16 @@ func TestLeafSplitBalancesEncodedBytes(t *testing.T) {
 	}
 	if left.slottedBytesUsed() < right.slottedBytesUsed() {
 		t.Fatalf("left leaf bytes = %d, right leaf bytes = %d; want large records kept on heavier left side", left.slottedBytesUsed(), right.slottedBytesUsed())
+	}
+}
+
+func TestBranchSplitBalancesEncodedBytes(t *testing.T) {
+	largeA := "a" + strings.Repeat("x", 1000)
+	largeB := "b" + strings.Repeat("x", 1000)
+	keys := []string{largeA, largeB, "c", "d", "e", "f"}
+
+	if got, want := branchSplitIndex(keys, 3), 2; got != want {
+		t.Fatalf("branch split index = %d, want %d for byte-balanced separators", got, want)
 	}
 }
 

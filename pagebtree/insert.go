@@ -128,7 +128,7 @@ func (t *Tree) insertBranch(pageID PageID, key string, value []byte) ([]byte, bo
 		return old, replaced, nil
 	}
 
-	mid := len(keys) / 2
+	mid := branchSplitIndex(keys, t.degree)
 	promoted := keys[mid]
 
 	rightKeys := append([]string(nil), keys[mid+1:]...)
@@ -143,6 +143,45 @@ func (t *Tree) insertBranch(pageID PageID, key string, value []byte) ([]byte, bo
 	mustWriteBranchParts(p, leftKeys, leftChildren)
 	mustWriteBranchParts(right, rightKeys, rightChildren)
 	return old, replaced, &splitResult{separator: promoted, right: rightID}
+}
+
+func branchSplitIndex(keys []string, degree int) int {
+	if len(keys) < 3 {
+		return len(keys) / 2
+	}
+	minKeys := max(1, degree-1)
+	lo := max(minKeys, len(keys)-1-maxKeys(degree))
+	hi := min(maxKeys(degree), len(keys)-1-minKeys)
+	if lo > hi {
+		return len(keys) / 2
+	}
+
+	prefix := make([]int, len(keys)+1)
+	for i, key := range keys {
+		prefix[i+1] = prefix[i] + branchCellBytes(key)
+	}
+	best := lo
+	bestDistance := absInt(branchPageBytes(prefix, best) - branchPageBytesSuffix(prefix, best+1))
+	for i := lo + 1; i <= hi; i++ {
+		distance := absInt(branchPageBytes(prefix, i) - branchPageBytesSuffix(prefix, i+1))
+		if distance < bestDistance {
+			best = i
+			bestDistance = distance
+		}
+	}
+	return best
+}
+
+func branchPageBytes(prefix []int, keyCount int) int {
+	return pageHeaderSize + prefix[keyCount]
+}
+
+func branchPageBytesSuffix(prefix []int, start int) int {
+	return pageHeaderSize + prefix[len(prefix)-1] - prefix[start]
+}
+
+func branchCellBytes(key string) int {
+	return slotSize + len(key) + 8
 }
 
 func insertAt[T any](values *[]T, index int, value T) {

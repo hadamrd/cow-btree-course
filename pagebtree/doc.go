@@ -125,7 +125,7 @@
 // invalidations, evictions, range-prefetch window, range-prefetch hint-call
 // count, and exact pages covered by those hints, plus mmap warm-up hint-call
 // and page counts. Stats also reports reachable leaf, branch, and overflow page
-// counts plus used/free/capacity byte counts. Leaf insertion uses encoded cell
-// byte footprints to choose split points, while deletion redistribution remains
-// key-count based.
+// counts plus used/free/capacity byte counts. Insertion uses encoded cell byte
+// footprints to choose leaf and branch split points, while deletion
+// redistribution remains key-count based.
 package pagebtree
