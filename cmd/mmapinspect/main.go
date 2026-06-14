@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,10 @@ import (
 
 	"github.com/hadamrd/cow-btree-course/pagebtree"
 )
+
+// Trace next_page includes the two checked metadata pages; Stats.AllocatedPages
+// counts only database pages after them.
+const inspectMmapMetaPages = 2
 
 type inspectReport struct {
 	Valid             bool                        `json:"valid"`
@@ -28,6 +33,7 @@ type inspectReport struct {
 	CacheStats        *pagebtree.MmapCacheStats   `json:"cache_stats,omitempty"`
 	KeySample         *inspectKeySample           `json:"key_sample,omitempty"`
 	PageSummaries     []pagebtree.PageSummary     `json:"page_summaries,omitempty"`
+	TraceSummary      *inspectTraceSummary        `json:"trace_summary,omitempty"`
 }
 
 type inspectKeySample struct {
@@ -37,12 +43,32 @@ type inspectKeySample struct {
 	Truncated bool     `json:"truncated"`
 }
 
+type inspectTraceSummary struct {
+	Path                       string           `json:"path"`
+	Events                     int              `json:"events"`
+	KindCounts                 map[string]int   `json:"kind_counts"`
+	DirtyDataRanges            int              `json:"dirty_data_ranges"`
+	DirtyDataPages             int              `json:"dirty_data_pages"`
+	MaxDirtyRangePages         int              `json:"max_dirty_range_pages"`
+	MaxDirtyRangeDurationNanos int64            `json:"max_dirty_range_duration_nanos"`
+	LastRevision               uint64           `json:"last_revision,omitempty"`
+	LastRoot                   pagebtree.PageID `json:"last_root,omitempty"`
+	LastNextPage               pagebtree.PageID `json:"last_next_page,omitempty"`
+	LastMaxPages               int              `json:"last_max_pages,omitempty"`
+	MatchesCurrentRevision     bool             `json:"matches_current_revision"`
+	MatchesCurrentRoot         bool             `json:"matches_current_root"`
+	MatchesCurrentNextPage     bool             `json:"matches_current_next_page"`
+	HasFailures                bool             `json:"has_failures"`
+	FailureReasons             []string         `json:"failure_reasons,omitempty"`
+}
+
 type inspectOptions struct {
 	path           string
 	readers        bool
 	cache          bool
 	pages          bool
 	keySampleLimit int
+	tracePath      string
 }
 
 func main() {
@@ -88,6 +114,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		sample := inspectKeys(tree, options.keySampleLimit)
 		report.KeySample = &sample
 	}
+	if options.tracePath != "" {
+		summary, err := inspectTrace(options.tracePath, report.Stats)
+		if err != nil {
+			fmt.Fprintf(stderr, "mmap inspect: trace: %v\n", err)
+			return 1
+		}
+		report.TraceSummary = &summary
+	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(report); err != nil {
@@ -111,6 +145,12 @@ func parseArgs(args []string) (inspectOptions, error) {
 			options.cache = true
 		case "--pages":
 			options.pages = true
+		case "--trace":
+			i++
+			if i >= len(args) {
+				return inspectOptions{}, fmt.Errorf("--trace expects a JSONL path")
+			}
+			options.tracePath = args[i]
 		case "--keys":
 			i++
 			if i >= len(args) {
@@ -128,6 +168,13 @@ func parseArgs(args []string) (inspectOptions, error) {
 					return inspectOptions{}, fmt.Errorf("--keys expects a positive limit: %w", err)
 				}
 				options.keySampleLimit = limit
+				continue
+			}
+			if strings.HasPrefix(arg, "--trace=") {
+				options.tracePath = strings.TrimPrefix(arg, "--trace=")
+				if options.tracePath == "" {
+					return inspectOptions{}, fmt.Errorf("--trace expects a JSONL path")
+				}
 				continue
 			}
 			if len(arg) > 0 && arg[0] == '-' {
@@ -157,7 +204,7 @@ func parsePositiveLimit(raw string) (int, error) {
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintf(stderr, "usage: mmapinspect [--readers] [--cache] [--pages] [--keys N] DB.db\n")
+	fmt.Fprintf(stderr, "usage: mmapinspect [--readers] [--cache] [--pages] [--keys N] [--trace TRACE.jsonl] DB.db\n")
 }
 
 func inspectFromAudit(audit pagebtree.AuditReport, profile pagebtree.MDBKernelProfile) inspectReport {
@@ -201,4 +248,82 @@ func inspectKeys(tree *pagebtree.Tree, limit int) inspectKeySample {
 		return true
 	})
 	return sample
+}
+
+func inspectTrace(path string, stats pagebtree.Stats) (inspectTraceSummary, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return inspectTraceSummary{}, err
+	}
+	defer file.Close()
+
+	summary := inspectTraceSummary{
+		Path:       path,
+		KindCounts: make(map[string]int),
+	}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lineNumber := 0
+	for scanner.Scan() {
+		lineNumber++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var event pagebtree.MmapTraceEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			return inspectTraceSummary{}, fmt.Errorf("line %d: %w", lineNumber, err)
+		}
+		summary.add(event)
+	}
+	if err := scanner.Err(); err != nil {
+		return inspectTraceSummary{}, err
+	}
+	summary.MatchesCurrentRevision = summary.LastRevision == stats.Revision
+	summary.MatchesCurrentRoot = summary.LastRoot == stats.Root
+	currentNextPage := pagebtree.PageID(stats.AllocatedPages + inspectMmapMetaPages)
+	summary.MatchesCurrentNextPage = summary.LastNextPage == currentNextPage
+	return summary, nil
+}
+
+func (s *inspectTraceSummary) add(event pagebtree.MmapTraceEvent) {
+	s.Events++
+	s.KindCounts[string(event.Kind)]++
+	if event.Revision != 0 {
+		s.LastRevision = event.Revision
+	}
+	if event.Root != 0 {
+		s.LastRoot = event.Root
+	}
+	if event.NextPage != 0 {
+		s.LastNextPage = event.NextPage
+	}
+	if event.NewNextPage != 0 {
+		s.LastNextPage = event.NewNextPage
+	}
+	if event.MaxPages != 0 {
+		s.LastMaxPages = event.MaxPages
+	}
+	if event.NewMaxPages != 0 {
+		s.LastMaxPages = event.NewMaxPages
+	}
+	if event.Kind == pagebtree.MmapTraceSyncDataRange {
+		pages := int(event.EndPage - event.StartPage)
+		if event.EndPage > event.StartPage {
+			s.DirtyDataRanges++
+			s.DirtyDataPages += pages
+			if pages > s.MaxDirtyRangePages {
+				s.MaxDirtyRangePages = pages
+			}
+		}
+		if event.DurationNanos > s.MaxDirtyRangeDurationNanos {
+			s.MaxDirtyRangeDurationNanos = event.DurationNanos
+		}
+	}
+	if strings.Contains(string(event.Kind), "failed") || event.Kind == pagebtree.MmapTraceRecoveryCandidateRejected {
+		s.HasFailures = true
+		if event.Reason != "" {
+			s.FailureReasons = append(s.FailureReasons, event.Reason)
+		}
+	}
 }

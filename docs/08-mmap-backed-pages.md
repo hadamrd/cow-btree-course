@@ -183,10 +183,13 @@ adds reader-table slot statistics, including active/stale slots and oldest
 pinned revision. `--cache` adds `mincore`-backed mapped/resident page counts.
 `--pages` adds value-free page summaries with role, kind, byte occupancy,
 branch children, and next-page hints. `--keys N` adds a bounded first/last key
-sample in the recovered comparator order without dumping values:
+sample in the recovered comparator order without dumping values. `--trace
+TRACE.jsonl` reads value-free trace output, counts event kinds, summarizes dirty
+data-page ranges, lists failure reasons, and checks whether the last traced
+revision/root/nextPage geometry matches the inspected file:
 
 ```bash
-go run ./cmd/mmapinspect --readers --cache --pages --keys=4 source.db
+go run ./cmd/mmapinspect --readers --cache --pages --keys=4 --trace mmap-trace.jsonl source.db
 ```
 
 This is useful when studying recovery fallback. If the newest metadata page points at a torn root page, a trace hook can show the newest candidate rejected with a checksum or invariant reason and the older candidate accepted. That is more precise than a counter saying "one open succeeded."

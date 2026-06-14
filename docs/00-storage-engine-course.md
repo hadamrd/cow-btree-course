@@ -732,10 +732,14 @@ linked-leaf validation state.
 page-cache residency counts. `--pages` adds value-free page summaries with
 role, kind, byte occupancy, branch children, and next-page hints. `--keys N`
 adds a bounded first/last key sample in the recovered comparator order without
-dumping values:
+dumping values. `--trace TRACE.jsonl` reads value-free trace JSONL, counts
+events by kind, summarizes dirty data-page ranges, records the last traced
+revision/root/nextPage/maxPages geometry, reports trace failure reasons, and
+checks whether the last traced revision/root/nextPage matches the inspected
+database:
 
 ```bash
-go run ./cmd/mmapinspect --readers --cache --pages --keys=4 /path/to/source.db
+go run ./cmd/mmapinspect --readers --cache --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db
 ```
 
 Code to read:
@@ -895,8 +899,8 @@ Still research or incomplete compared with a production engine:
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.
 - No benchstat baseline history or CI performance gate yet.
-- No production-grade tracing pipeline beyond the synchronous mmap trace hook
-  and small JSONL exporter.
+- No production-grade tracing pipeline beyond lightweight sync/async JSONL
+  export and read-only inspect correlation.
 - No multi-database catalog, duplicate keys, or persisted comparator plugins.
 - No portability story beyond the Unix mmap path and non-Unix stubs.
 

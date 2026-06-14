@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -258,6 +259,82 @@ func TestRunPrintsPageSummaries(t *testing.T) {
 	}
 }
 
+func TestRunCorrelatesTraceJSONL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "inspect.db")
+	tracePath := filepath.Join(dir, "trace.jsonl")
+	var trace bytes.Buffer
+	exporter := pagebtree.NewMmapTraceJSONLExporter(&trace)
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{
+		Degree:    2,
+		MaxPages:  8,
+		TraceHook: exporter.Hook(),
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	for i := range 120 {
+		tree.Put(fmt.Sprintf("key-%03d", i), []byte(fmt.Sprintf("value-%03d", i)))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after put: %v", err)
+	}
+	for i := range 100 {
+		tree.Delete(fmt.Sprintf("key-%03d", i))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after delete: %v", err)
+	}
+	if err := tree.Compact(); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := exporter.Err(); err != nil {
+		t.Fatalf("trace exporter Err: %v", err)
+	}
+	if err := os.WriteFile(tracePath, trace.Bytes(), 0o644); err != nil {
+		t.Fatalf("write trace: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--trace", tracePath, path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.TraceSummary == nil {
+		t.Fatalf("TraceSummary = nil, want section with --trace")
+	}
+	summary := report.TraceSummary
+	if summary.Path != tracePath {
+		t.Fatalf("TraceSummary.Path = %q, want %q", summary.Path, tracePath)
+	}
+	if summary.Events == 0 {
+		t.Fatalf("TraceSummary.Events = 0, want trace events")
+	}
+	for _, kind := range []string{"mmap-sync-end", "mmap-growth-begin", "mmap-compact-end"} {
+		if summary.KindCounts[kind] == 0 {
+			t.Fatalf("TraceSummary.KindCounts[%q] = 0 in %#v", kind, summary.KindCounts)
+		}
+	}
+	if summary.DirtyDataRanges == 0 || summary.DirtyDataPages == 0 {
+		t.Fatalf("dirty range summary = ranges %d pages %d, want nonzero", summary.DirtyDataRanges, summary.DirtyDataPages)
+	}
+	if !summary.MatchesCurrentRevision || !summary.MatchesCurrentRoot || !summary.MatchesCurrentNextPage {
+		t.Fatalf("trace/current match flags = revision %v root %v nextPage %v, summary=%+v stats=%+v",
+			summary.MatchesCurrentRevision, summary.MatchesCurrentRoot, summary.MatchesCurrentNextPage, *summary, report.Stats)
+	}
+	if summary.HasFailures {
+		t.Fatalf("HasFailures = true, reasons=%v", summary.FailureReasons)
+	}
+}
+
 func TestRunRejectsWrongArgumentCount(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run(nil, &stdout, &stderr)
@@ -269,6 +346,35 @@ func TestRunRejectsWrongArgumentCount(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "usage:") {
 		t.Fatalf("stderr = %q, want usage", stderr.String())
+	}
+}
+
+func TestRunRejectsMalformedTraceJSONL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "inspect.db")
+	tracePath := filepath.Join(dir, "bad-trace.jsonl")
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 16})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	tree.Put("key", []byte("value"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := os.WriteFile(tracePath, []byte("{bad json}\n"), 0o644); err != nil {
+		t.Fatalf("write malformed trace: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--trace", tracePath, path}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run exit = %d, want 1", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "trace") || !strings.Contains(stderr.String(), "line 1") {
+		t.Fatalf("stderr = %q, want trace line error", stderr.String())
 	}
 }
 
