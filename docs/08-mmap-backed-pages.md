@@ -73,7 +73,11 @@ go run ./cmd/mmapcopycompact source.db compact.db
 go run ./cmd/mmapcompact source.db
 ```
 
-This reclaims interior free pages because it builds a fresh tree whose page IDs are assigned only for live records. It is still offline: the swap refuses active readers and writers instead of relocating pages under them. It is different from `PunchFreeMmapPages`: copy compaction rewrites live records into a smaller replacement file, while hole punching leaves the active file size and page IDs unchanged and only asks the filesystem to release physical blocks behind safe free extents.
+This reclaims interior free pages because it builds a fresh tree whose page IDs are assigned only for live records. It is still offline: the swap refuses active readers and writers instead of relocating pages under them. It is different from `PunchFreeMmapPages`: copy compaction rewrites live records into a smaller replacement file, while hole punching leaves the active file size and page IDs unchanged and only asks the filesystem to release physical blocks behind safe free extents. The `mmappunch` command is the active-file maintenance wrapper around that API. It opens the database through the normal writer path, runs sparse-hole maintenance, and prints JSON with the hole-punch profile, before/after `MmapSpaceStats`, punch stats, and an unsupported error string when the build has no platform primitive:
+
+```bash
+go run ./cmd/mmappunch source.db
+```
 
 Code to read:
 
@@ -84,6 +88,7 @@ Code to read:
 - Sparse-hole trace emission helpers: [`../pagebtree/mmap_trace_unix.go`](../pagebtree/mmap_trace_unix.go)
 - Refuse-overwrite path checks: [`../pagebtree/copy_compact.go#L106-L132`](../pagebtree/copy_compact.go#L106-L132)
 - Command wrapper: [`../cmd/mmapcopycompact/main.go#L10-L25`](../cmd/mmapcopycompact/main.go#L10-L25)
+- Sparse-hole command wrapper: [`../cmd/mmappunch/main.go`](../cmd/mmappunch/main.go)
 - Replacement command wrapper: [`../cmd/mmapcompact/main.go#L10-L25`](../cmd/mmapcompact/main.go#L10-L25)
 - Copy-compaction tests: [`../pagebtree/mmap_test.go#L1993-L2086`](../pagebtree/mmap_test.go#L1993-L2086)
 - Replacement tests: [`../pagebtree/mmap_test.go#L2088-L2196`](../pagebtree/mmap_test.go#L2088-L2196)
