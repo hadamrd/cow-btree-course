@@ -77,9 +77,9 @@ If you add new write operations, keep that discipline. Any helper that mutates a
 only keys. `Stats` reports reachable leaf, branch, and overflow page counts,
 total reachable page capacity/free bytes, and used-byte buckets for leaves,
 branches, and overflow pages. Leaf and branch insertion now use that same
-concern when choosing split points, and leaf delete redistribution reuses the
-leaf split policy. Branch delete redistribution remains intentionally key-count
-based.
+concern when choosing split points, and delete redistribution uses byte-aware
+split points for both leaf and branch pages. The remaining simplification is
+that repair is still triggered by key counts rather than byte occupancy.
 
 ## Page-backed Tree
 

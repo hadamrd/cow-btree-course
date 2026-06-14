@@ -8,9 +8,8 @@ import "slices"
 // search path before changing page bytes. It merges or redistributes underfull
 // leaf siblings, borrows before descending into minimum-fill branches when a
 // sibling can lend, merges or redistributes underfull branch siblings, then
-// rebuilds branch separators and collapses a one-child root. Leaf
-// redistribution uses encoded cell byte footprints; branch redistribution is
-// still key-count based.
+// rebuilds branch separators and collapses a one-child root. Leaf and branch
+// redistribution choose split points with encoded cell byte footprints.
 func (t *Tree) Delete(key string) ([]byte, bool) {
 	old, deleted, changed := t.deleteStaged(key)
 	if changed {
@@ -218,7 +217,7 @@ func (t *Tree) mergeUnderfullBranch(children []PageID, index int) []PageID {
 			leftID := t.copyPage(children[index-1])
 			left = t.pages[leftID]
 			children[index-1] = leftID
-			split := len(mergedChildren) / 2
+			split := t.branchChildSplitIndex(mergedChildren)
 			t.writeBranchChildren(left, mergedChildren[:split])
 			t.writeBranchChildren(child, mergedChildren[split:])
 			return children
@@ -237,13 +236,48 @@ func (t *Tree) mergeUnderfullBranch(children []PageID, index int) []PageID {
 			rightID := t.copyPage(children[index+1])
 			right = t.pages[rightID]
 			children[index+1] = rightID
-			split := len(mergedChildren) / 2
+			split := t.branchChildSplitIndex(mergedChildren)
 			t.writeBranchChildren(child, mergedChildren[:split])
 			t.writeBranchChildren(right, mergedChildren[split:])
 			return children
 		}
 	}
 	return children
+}
+
+func (t *Tree) branchChildSplitIndex(children []PageID) int {
+	if len(children) < 2 {
+		return len(children)
+	}
+	minChildren := max(1, t.degree)
+	lo := max(minChildren, len(children)-(maxKeys(t.degree)+1))
+	hi := min(maxKeys(t.degree)+1, len(children)-minChildren)
+	if lo > hi {
+		return len(children) / 2
+	}
+
+	best := lo
+	bestDistance := absInt(t.branchChildrenBytes(children[:lo]) - t.branchChildrenBytes(children[lo:]))
+	for split := lo + 1; split <= hi; split++ {
+		distance := absInt(t.branchChildrenBytes(children[:split]) - t.branchChildrenBytes(children[split:]))
+		if distance < bestDistance {
+			best = split
+			bestDistance = distance
+		}
+	}
+	return best
+}
+
+func (t *Tree) branchChildrenBytes(children []PageID) int {
+	bytes := pageHeaderSize
+	for _, child := range children[1:] {
+		key, ok := t.firstKey(child)
+		if !ok {
+			continue
+		}
+		bytes += branchCellBytes(key)
+	}
+	return bytes
 }
 
 func (t *Tree) writeBranchChildren(p *page, children []PageID) {

@@ -458,6 +458,43 @@ func TestDeleteRedistributesUnderfullBranchWhenMergeCannotFit(t *testing.T) {
 	snapshot.Close()
 }
 
+func TestDeleteBranchRedistributionBalancesEncodedBytes(t *testing.T) {
+	tree := New(3)
+	leafIDs := make([]PageID, 0, 7)
+	for i := 0; i < 7; i++ {
+		id := PageID(i + 1)
+		key := fmt.Sprintf("key-%02d", i)
+		if i >= 4 {
+			key += strings.Repeat("x", 1000)
+		}
+		leaf := tree.newPage(id, flagLeaf)
+		tree.pages[id] = leaf
+		tree.writeLeafEntries(leaf, []leafEntry{{key: key, value: []byte("value")}})
+		leafIDs = append(leafIDs, id)
+	}
+	leftBranchID := PageID(20)
+	childBranchID := PageID(21)
+	leftBranch := tree.newPage(leftBranchID, flagBranch)
+	childBranch := tree.newPage(childBranchID, flagBranch)
+	tree.pages[leftBranchID] = leftBranch
+	tree.pages[childBranchID] = childBranch
+	tree.writeBranchChildren(leftBranch, leafIDs[:5])
+	tree.writeBranchChildren(childBranch, leafIDs[5:])
+
+	children := tree.mergeUnderfullBranch([]PageID{leftBranchID, childBranchID}, 1)
+	if len(children) != 2 {
+		t.Fatalf("children after branch redistribution = %v, want two branches", children)
+	}
+	redistributedLeft := tree.pages[children[0]]
+	redistributedChild := tree.pages[children[1]]
+	if got, want := int(redistributedLeft.slotCount()), 3; got != want {
+		t.Fatalf("left redistributed branch keys = %d, want %d for byte-balanced split", got, want)
+	}
+	if got, want := int(redistributedChild.slotCount()), 2; got != want {
+		t.Fatalf("right redistributed branch keys = %d, want %d for byte-balanced split", got, want)
+	}
+}
+
 func TestDeleteBorrowsBranchChildBeforeDescent(t *testing.T) {
 	tree := New(3)
 	seedBranchRedistributionAfterDeleteTree(tree)
