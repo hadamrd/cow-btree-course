@@ -6727,6 +6727,52 @@ func TestMmapTreeOpensLegacyZeroKeyOrderFixture(t *testing.T) {
 	}
 }
 
+func TestMmapTreeOpensLegacyV1InlineFreelistFixture(t *testing.T) {
+	path := copyMmapFixture(t, "testdata/mmap-v1-inline-freelist.db")
+	_, record := newestMetaPage(t, path)
+	if record.version != 1 {
+		t.Fatalf("legacy fixture metadata version = %d, want 1", record.version)
+	}
+	if len(record.free) == 0 {
+		t.Fatalf("legacy fixture inline free list is empty")
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap legacy v1 inline-freelist fixture: %v", err)
+	}
+	defer reopened.Close()
+
+	if profile := reopened.MDBKernelProfile(); profile.KeyOrder != KeyOrderBytewise {
+		t.Fatalf("legacy v1 fixture KeyOrder = %d, want bytewise", profile.KeyOrder)
+	}
+	if stats := reopened.Stats(); stats.FreePages != len(record.free) {
+		t.Fatalf("legacy v1 fixture FreePages = %d, want %d", stats.FreePages, len(record.free))
+	}
+	if got, ok := reopened.Get("key-19"); !ok || string(got) != "value-19" {
+		t.Fatalf("legacy v1 fixture Get(key-19) = %q, %v; want value-19, true", got, ok)
+	}
+	if _, ok := reopened.Get("key-00"); ok {
+		t.Fatalf("legacy v1 fixture found deleted key-00")
+	}
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("legacy v1 fixture Check before reuse: %v", err)
+	}
+
+	before := reopened.Stats()
+	reopened.Put("key-new", []byte("new-value"))
+	after := reopened.Stats()
+	if after.ReusedPages <= before.ReusedPages {
+		t.Fatalf("legacy v1 fixture ReusedPages after Put = %d, want above %d", after.ReusedPages, before.ReusedPages)
+	}
+	if got, ok := reopened.Get("key-new"); !ok || string(got) != "new-value" {
+		t.Fatalf("legacy v1 fixture Get(key-new) = %q, %v; want new-value, true", got, ok)
+	}
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("legacy v1 fixture Check after reuse: %v", err)
+	}
+}
+
 func TestOpenMmapRejectsUnsupportedKeyOrderOption(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

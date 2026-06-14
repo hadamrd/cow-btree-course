@@ -5,8 +5,15 @@ metadata pages use the pre-key-order layout: the checksum-covered key-order word
 is zero. `OpenMmap` treats zero as bytewise order for compatibility with clean
 older images.
 
-Regenerate it from the repository root with:
+`mmap-v1-inline-freelist.db` is a real mmap database image with reusable page IDs
+encoded directly in the metadata page's inline freelist area and the checked
+metadata version rewritten to 1. It proves the reader can still open a pre-reclaim
+metadata image, recover the inline reusable pages, and reuse one after a new
+write.
+
+Regenerate them from the repository root with:
 
 ```bash
 go run ./pagebtree/testdata/generate_legacy_zero_key_order.go
+go run ./pagebtree/testdata/generate_legacy_v1_inline_freelist.go
 ```
