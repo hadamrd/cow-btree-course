@@ -213,6 +213,14 @@ go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap
 
 This is useful when studying recovery fallback. If the newest metadata page points at a torn root page, a trace hook can show the newest candidate rejected with a checksum or invariant reason and the older candidate accepted. That is more precise than a counter saying "one open succeeded."
 
+For a bounded multi-process reader-table exercise, `cmd/mmapreadersoak` seeds an mmap database, starts read-only child processes, mutates the same tree through a writer while those children hold reader-table slots, then releases the children and prints JSON evidence for active reader counts, pinned retired pages, free pages while pinned, and final reclaim:
+
+```bash
+go run ./cmd/mmapreadersoak --readers 4 --rounds 5 --keys 128 soak.db
+```
+
+This is not a substitute for a production soak lab or power-fail rig, but it gives the reader a repeatable local way to watch the reader-table watermark mechanic keep old copy-on-write pages out of the freelist until external readers exit.
+
 The timeline is intentionally capped. It is for seeing the opening shape of a
 trace, such as sync begin, dirty ranges, metadata publish, compaction, and punch
 phases, while the aggregate counters remain the primary view for very large
@@ -320,7 +328,7 @@ This chapter makes the project more serious, but it is still not a production da
 - `Sync` flushes dirty data pages before metadata, and reopen can fall back from a torn newest root to an older valid root, but there is no complete crash-safe write-order protocol or WAL
 - file creation, mapped file growth, and compaction sync file-size or directory-entry changes, but the project still does not model every filesystem or storage-device ordering edge case
 - metadata pages, reachable tree pages, and reachable overflow pages are checksummed and validated for format, page size, degree, bounds, layout, routing, freelist safety, and key-count consistency, but there is no page-level repair
-- the reader table now lets read-only mmap handles coexist with a writer, pin recycling, clean stale or detectably reused owner slots, reject malformed existing sidecars, and preserve externally pinned retired pages across writer close/reopen, but it is intentionally simpler than LMDB's production lock-table implementation
+- the reader table now lets read-only mmap handles coexist with a writer, pin recycling, clean stale or detectably reused owner slots, reject malformed existing sidecars, preserve externally pinned retired pages across writer close/reopen, and run bounded multi-process reader soak experiments, but it is intentionally simpler than LMDB's production lock-table implementation
 - overflow pages are linear chains, not a compact extent/tree structure
 - insertion and delete redistribution choose byte-aware leaf and branch split points, byte-full leaf rewrites can spill cells to overflow pages, leaf/branch repair can trigger on configurable low byte occupancy at minimum key count, and merge decisions require combined bytes to fit in one page; `Stats` reports reachable page byte fill and the normalized repair-fill percent, but repair still lacks mature occupancy-target heuristics
 - `Get`, branch range traversal, and bounded leaf scans search slot directories directly, but insertion and deletion still rewrite copied pages from decoded entries
