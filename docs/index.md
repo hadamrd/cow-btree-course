@@ -74,6 +74,7 @@ cmd/pagebtree-demo/  Page-backed CoW demonstration
 cmd/mmapbtree-demo/  Mmap persistence demonstration
 cmd/mdbkernel-demo/  OpenLDAP-style mmap kernel profile demonstration
 cmd/mmaptrace-demo/  JSONL mmap trace export demonstration
+cmd/mmaptracesummary/ Markdown summary for value-free mmap trace JSONL
 cmd/mmapinspect/     Read-only mmap audit JSON inspection tool
 cmd/mmappunch/       Sparse-hole maintenance JSON with before/after space stats and optional trace export
 cmd/mmapfsprobe/     Local filesystem probe for mmap logical/allocated space behavior

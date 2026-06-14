@@ -757,7 +757,13 @@ growth and compaction geometry:
 
 ```bash
 go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
+go run ./cmd/mmaptracesummary mmap-trace.jsonl > mmap-trace-summary.md
 ```
+
+`cmd/mmaptracesummary` is the standalone trace-review path. It reads value-free
+trace JSONL from files or stdin, prints Markdown event-kind counts, dirty-range
+and sparse-punch aggregates, failure reasons, and a bounded ordered timeline.
+Use `--limit N` to keep long workloads readable while still counting all events.
 
 For an operator-style read-only validation snapshot, `cmd/mmapinspect` opens an
 mmap database through `OpenMmapReadOnly`, runs `Audit`, and writes indented JSON
@@ -807,6 +813,7 @@ Code to read:
 - JSONL exporters: [`pagebtree/mmap_trace_export.go`](../pagebtree/mmap_trace_export.go)
 - JSONL exporter example: [`pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)
 - JSONL trace demo command: [`cmd/mmaptrace-demo/main.go`](../cmd/mmaptrace-demo/main.go)
+- JSONL trace summary command: [`cmd/mmaptracesummary/main.go`](../cmd/mmaptracesummary/main.go)
 - Hook option on mmap open: [`pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
 - Sync trace emissions: [`pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)
 - Recovery trace emissions: [`pagebtree/mmap.go#L937-L1051`](../pagebtree/mmap.go#L937-L1051)

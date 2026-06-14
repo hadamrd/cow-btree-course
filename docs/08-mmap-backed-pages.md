@@ -188,7 +188,14 @@ For simple experiments, `NewMmapTraceJSONLExporter` adapts the hook to newline-d
 
 ```bash
 go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
+go run ./cmd/mmaptracesummary mmap-trace.jsonl > mmap-trace-summary.md
 ```
+
+`cmd/mmaptracesummary` reads one or more trace JSONL files, or stdin, and writes
+a stable Markdown review artifact with event-kind counts, dirty data range
+totals, sparse-punch totals, failure reasons, and a bounded timeline. It does
+not need the database file; use `mmapinspect --trace` when you also want to
+correlate the trace's last root/revision with a recovered database image.
 
 For a one-shot read-only integrity snapshot, `cmd/mmapinspect` opens the
 database with `OpenMmapReadOnly`, runs `Audit`, and prints indented JSON with
@@ -253,6 +260,7 @@ Code to read:
 - JSONL exporters: [`../pagebtree/mmap_trace_export.go`](../pagebtree/mmap_trace_export.go)
 - JSONL exporter example: [`../pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)
 - JSONL trace demo command: [`../cmd/mmaptrace-demo/main.go`](../cmd/mmaptrace-demo/main.go)
+- JSONL trace summary command: [`../cmd/mmaptracesummary/main.go`](../cmd/mmaptracesummary/main.go)
 - Hook option: [`../pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
 - Dirty range coalescing and range callbacks: [`../pagebtree/mmap.go#L540-L588`](../pagebtree/mmap.go#L540-L588)
 - Sync phase and range emissions: [`../pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)
