@@ -39,6 +39,7 @@ type MmapTraceEvent struct {
 	OldMaxPages        int
 	NewMaxPages        int
 	FileSizeBytes      int64
+	DurationNanos      int64
 	Length             int
 	DirtyPages         int
 	FreePages          int

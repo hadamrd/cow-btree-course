@@ -344,16 +344,17 @@ dirty data-page run, `mmap-sync-data-synced`, `mmap-sync-meta-published`, and
 `mmap-sync-end`. Phase events carry the revision, root page, `nextPage`, dirty
 count, free count, retired count, and mapped capacity as structured fields.
 Range events also carry the half-open `StartPage`/`EndPage` page-id interval
-that was successfully passed through `msync`.
+that was successfully passed through `msync`, plus `DurationNanos` for that
+range flush.
 
 Code to read:
 
 - `Tree.Sync` chooses mmap sync: [`pagebtree/tree.go#L256-L267`](../pagebtree/tree.go#L256-L267)
-- mmap sync order and trace phases: [`pagebtree/mmap.go#L1284-L1301`](../pagebtree/mmap.go#L1284-L1301)
-- Dirty data-page sync: [`pagebtree/mmap.go#L539-L580`](../pagebtree/mmap.go#L539-L580)
-- Per-range `msync`: [`pagebtree/mmap.go#L596-L608`](../pagebtree/mmap.go#L596-L608)
+- mmap sync order and trace phases: [`pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)
+- Dirty data-page sync: [`pagebtree/mmap.go#L540-L588`](../pagebtree/mmap.go#L540-L588)
+- Per-range `msync`: [`pagebtree/mmap.go#L602-L613`](../pagebtree/mmap.go#L602-L613)
 - Metadata page sync: [`pagebtree/mmap.go#L617-L635`](../pagebtree/mmap.go#L617-L635)
-- Trace event API: [`pagebtree/mmap_trace.go#L3-L50`](../pagebtree/mmap_trace.go#L3-L50)
+- Trace event API: [`pagebtree/mmap_trace.go#L3-L51`](../pagebtree/mmap_trace.go#L3-L51)
 
 ## Module 10: Dual Checked Metadata Pages
 
@@ -601,8 +602,10 @@ let you separate "dirty data pages flushed" from "metadata published." If old
 freelist/reclaim metadata pages become reusable only after both alternating
 metadata slots move past them, the reclaim trace event marks that decision.
 Growth and compaction events carry old/new mapped capacity, old/new `nextPage`,
-and resulting file size. Reader cleanup events report how many dead-PID slots
-were cleared from the sidecar reader table.
+and resulting file size. Dirty sync range events carry `StartPage`, `EndPage`,
+and `DurationNanos`, so slow write stalls can be tied back to concrete page-id
+intervals. Reader cleanup events report how many dead-PID slots were cleared
+from the sidecar reader table.
 
 The hook is synchronous and should stay lightweight. In a real product you
 would adapt it to an event exporter or structured logger. In this research lab,
@@ -613,11 +616,11 @@ Code to read:
 
 - Stats byte-fill fields and reachable-page walk: [`pagebtree/stats.go#L3-L170`](../pagebtree/stats.go#L3-L170)
 - Stats byte-fill tests: [`pagebtree/tree_test.go#L78-L117`](../pagebtree/tree_test.go#L78-L117), [`pagebtree/mmap_test.go#L53-L93`](../pagebtree/mmap_test.go#L53-L93)
-- Trace event API: [`pagebtree/mmap_trace.go#L3-L47`](../pagebtree/mmap_trace.go#L3-L47)
+- Trace event API: [`pagebtree/mmap_trace.go#L3-L51`](../pagebtree/mmap_trace.go#L3-L51)
 - Hook option on mmap open: [`pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
-- Sync trace emissions: [`pagebtree/mmap.go#L1278-L1299`](../pagebtree/mmap.go#L1278-L1299)
+- Sync trace emissions: [`pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)
 - Recovery trace emissions: [`pagebtree/mmap.go#L937-L1051`](../pagebtree/mmap.go#L937-L1051)
-- Reclaim trace emission: [`pagebtree/mmap.go#L1405-L1435`](../pagebtree/mmap.go#L1405-L1435)
+- Reclaim trace emission: [`pagebtree/mmap.go#L1408-L1438`](../pagebtree/mmap.go#L1408-L1438)
 - Growth trace emissions: [`pagebtree/mmap.go#L346-L394`](../pagebtree/mmap.go#L346-L394)
 - Compact trace emissions: [`pagebtree/mmap.go#L408-L482`](../pagebtree/mmap.go#L408-L482)
 - Reader cleanup trace emission: [`pagebtree/reader_table_unix.go#L262-L272`](../pagebtree/reader_table_unix.go#L262-L272)

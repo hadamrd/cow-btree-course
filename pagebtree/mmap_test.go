@@ -3792,6 +3792,9 @@ func TestMmapTraceHookReportsDirtyDataSyncRanges(t *testing.T) {
 			if event.Revision != tree.Revision() {
 				t.Fatalf("data sync range revision = %d, want %d", event.Revision, tree.Revision())
 			}
+			if event.DurationNanos <= 0 {
+				t.Fatalf("data sync range duration = %d, want positive duration in %+v", event.DurationNanos, event)
+			}
 		}
 	}
 	if len(observed) == 0 {

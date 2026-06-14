@@ -165,16 +165,16 @@ Counters answer "how much"; trace events answer "why did this path happen?" The 
 - `mmap-compact-begin` and `mmap-compact-end` around successful tail compaction, with old/new `nextPage`, capacity, and file size
 - `mmap-reader-table-cleanup` when stale dead-PID reader-table slots are explicitly cleared
 
-Each event carries stable revision/page geometry: root page ID, `nextPage`, mapped capacity, old/new geometry for growth and compaction, logical length, dirty/free/retired counts, reclaimed-page count for reclaim events, cleared-slot count for reader cleanup, metadata slot, file-size bytes when a remap is involved, and a rejection reason when one exists. Dirty data-range events also carry half-open `StartPage`/`EndPage` boundaries matching the coalesced logical page IDs passed to `msync`. A hook should return quickly and should not call back into the same tree; use it to append to a test buffer, increment a probe, or hand off to an external logger.
+Each event carries stable revision/page geometry: root page ID, `nextPage`, mapped capacity, old/new geometry for growth and compaction, logical length, dirty/free/retired counts, reclaimed-page count for reclaim events, cleared-slot count for reader cleanup, metadata slot, file-size bytes when a remap is involved, and a rejection reason when one exists. Dirty data-range events also carry half-open `StartPage`/`EndPage` boundaries matching the coalesced logical page IDs passed to `msync`, plus `DurationNanos` for that range flush. A hook should return quickly and should not call back into the same tree; use it to append to a test buffer, increment a probe, or hand off to an external logger.
 
 This is useful when studying recovery fallback. If the newest metadata page points at a torn root page, a trace hook can show the newest candidate rejected with a checksum or invariant reason and the older candidate accepted. That is more precise than a counter saying "one open succeeded."
 
 Code to read:
 
-- Trace event API: [`../pagebtree/mmap_trace.go#L3-L50`](../pagebtree/mmap_trace.go#L3-L50)
+- Trace event API: [`../pagebtree/mmap_trace.go#L3-L51`](../pagebtree/mmap_trace.go#L3-L51)
 - Hook option: [`../pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
-- Dirty range coalescing and range callbacks: [`../pagebtree/mmap.go#L539-L580`](../pagebtree/mmap.go#L539-L580)
-- Sync phase and range emissions: [`../pagebtree/mmap.go#L1284-L1301`](../pagebtree/mmap.go#L1284-L1301)
+- Dirty range coalescing and range callbacks: [`../pagebtree/mmap.go#L540-L588`](../pagebtree/mmap.go#L540-L588)
+- Sync phase and range emissions: [`../pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)
 - Recovery candidate emissions: [`../pagebtree/mmap.go#L937-L1051`](../pagebtree/mmap.go#L937-L1051)
 - Obsolete metadata-page reclaim event: [`../pagebtree/mmap.go#L1408-L1438`](../pagebtree/mmap.go#L1408-L1438)
 - Growth trace emissions: [`../pagebtree/mmap.go#L346-L394`](../pagebtree/mmap.go#L346-L394)

@@ -19,13 +19,14 @@ func (t *Tree) emitMmapTraceReclaimed(kind MmapTraceEventKind, reclaimedPages in
 	t.traceHook(event)
 }
 
-func (t *Tree) emitMmapTraceDataRange(startPage, endPage PageID) {
+func (t *Tree) emitMmapTraceDataRange(startPage, endPage PageID, durationNanos int64) {
 	if t == nil || t.traceHook == nil {
 		return
 	}
 	event := t.mmapTraceEvent(MmapTraceSyncDataRange, nil, -1, "")
 	event.StartPage = startPage
 	event.EndPage = endPage
+	event.DurationNanos = durationNanos
 	t.traceHook(event)
 }
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -536,7 +537,7 @@ func (t *Tree) shrinkMmap(newMaxPages int) error {
 	return t.rebindMmapPages()
 }
 
-func (a *mmapArena) syncDataPages(nextPage PageID, onRangeSynced func(startPage, endPage PageID)) error {
+func (a *mmapArena) syncDataPages(nextPage PageID, onRangeSynced func(startPage, endPage PageID, durationNanos int64)) error {
 	if a == nil || a.readOnly || nextPage <= firstTreePageID || len(a.dirtyPages) == 0 {
 		return nil
 	}
@@ -567,11 +568,16 @@ func (a *mmapArena) syncDataPages(nextPage PageID, onRangeSynced func(startPage,
 			end++
 			nextIndex++
 		}
+		started := time.Now()
 		if err := a.syncDataPageRange(start, end); err != nil {
 			return err
 		}
 		if onRangeSynced != nil {
-			onRangeSynced(start, end)
+			durationNanos := time.Since(started).Nanoseconds()
+			if durationNanos <= 0 {
+				durationNanos = 1
+			}
+			onRangeSynced(start, end, durationNanos)
 		}
 		startIndex = nextIndex
 	}
