@@ -17,15 +17,17 @@
 // experiments can distinguish kernel page-cache behavior from Go-side routing
 // reuse.
 // Put and Delete publish new roots through copy-on-write. PutBytes, GetBytes,
-// DeleteBytes, RangeBytes, and SeekBytes expose the same page format for opaque
-// byte keys ordered lexicographically by byte value. WriteBatch stages multiple
-// point Put/Delete operations, keeps the current root hidden until Commit, then
-// publishes one new revision if any staged operation changed the tree.
+// DeleteBytes, RangeBytes, CursorBytesBetween, and SeekBytes expose the same
+// page format for opaque byte keys ordered lexicographically by byte value.
+// WriteBatch stages multiple point Put/Delete operations, keeps the current
+// root hidden until Commit, then publishes one new revision if any staged
+// operation changed the tree.
 // CommitDetailed reports per-operation old values and explicit invalid commit
 // errors, and restores the pre-commit tree state if a staged mutation panics
 // before publication. Snapshots and cursors keep reading their older roots. A
 // cursor opened from Tree owns a snapshot and must be closed to release the
-// reader pin; a cursor opened from Snapshot borrows that snapshot and does not
+// reader pin; CursorBetween adds a half-open upper bound for incremental range
+// reads. A cursor opened from Snapshot borrows that snapshot and does not
 // register another reader. Leaf sibling-link repair is deferred while a
 // snapshot or cursor is active, because rewriting those headers in place would
 // mutate bytes visible to the old root.

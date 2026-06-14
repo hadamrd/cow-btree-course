@@ -104,6 +104,18 @@ func (s *Snapshot) RangeBytesBetween(start []byte, end []byte, visit func([]byte
 	})
 }
 
+// CursorBytesBetween opens a read cursor over opaque byte keys greater than or
+// equal to start and less than end.
+func (t *Tree) CursorBytesBetween(start []byte, end []byte) *Cursor {
+	return t.CursorBetween(keyFromBytes(start), keyFromBytes(end))
+}
+
+// CursorBytesBetween opens a read cursor over this snapshot's opaque byte keys
+// greater than or equal to start and less than end.
+func (s *Snapshot) CursorBytesBetween(start []byte, end []byte) *Cursor {
+	return s.CursorBetween(keyFromBytes(start), keyFromBytes(end))
+}
+
 // SeekBytes positions the cursor at the first opaque byte key greater than or
 // equal to key.
 func (c *Cursor) SeekBytes(key []byte) bool {

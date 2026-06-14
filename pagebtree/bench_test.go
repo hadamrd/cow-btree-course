@@ -73,6 +73,28 @@ func BenchmarkPageTreeRangeBetween(b *testing.B) {
 	benchmarkIntSink = total
 }
 
+func BenchmarkPageTreeCursorBetween(b *testing.B) {
+	tree, keys := benchmarkPageTree(b, benchmarkKeyCount)
+
+	total := 0
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		start := (i * benchmarkRangeWidth) % (benchmarkKeyCount - benchmarkRangeWidth)
+		end := start + benchmarkRangeWidth
+		cursor := tree.CursorBetween(keys[start], keys[end])
+		for cursor.Valid() {
+			total++
+			if !cursor.Next() {
+				break
+			}
+		}
+		cursor.Close()
+	}
+	b.ReportMetric(float64(total)/float64(b.N), "keys/op")
+	benchmarkIntSink = total
+}
+
 func BenchmarkPageTreePutSequential(b *testing.B) {
 	keys := benchmarkKeys(b.N)
 	value := benchmarkValue()
@@ -134,6 +156,28 @@ func BenchmarkMmapTreeRangeBetween(b *testing.B) {
 			total++
 			return true
 		})
+	}
+	b.ReportMetric(float64(total)/float64(b.N), "keys/op")
+	benchmarkIntSink = total
+}
+
+func BenchmarkMmapTreeCursorBetween(b *testing.B) {
+	tree, keys := benchmarkMmapTree(b, benchmarkKeyCount)
+
+	total := 0
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		start := (i * benchmarkRangeWidth) % (benchmarkKeyCount - benchmarkRangeWidth)
+		end := start + benchmarkRangeWidth
+		cursor := tree.CursorBetween(keys[start], keys[end])
+		for cursor.Valid() {
+			total++
+			if !cursor.Next() {
+				break
+			}
+		}
+		cursor.Close()
 	}
 	b.ReportMetric(float64(total)/float64(b.N), "keys/op")
 	benchmarkIntSink = total

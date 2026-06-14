@@ -103,6 +103,75 @@ func TestCursorFirstAndEnd(t *testing.T) {
 	}
 }
 
+func TestTreeCursorBetweenStopsAtExclusiveEnd(t *testing.T) {
+	tree := New(3)
+	for i := 0; i < 14; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	cursor := tree.CursorBetween("key-05", "key-09")
+	defer cursor.Close()
+
+	var got []string
+	for cursor.Valid() {
+		got = append(got, cursor.Key())
+		if !cursor.Next() {
+			break
+		}
+	}
+	want := []string{"key-05", "key-06", "key-07", "key-08"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("CursorBetween keys = %v, want %v", got, want)
+	}
+	if got := tree.Stats().ActiveReaders; got != 1 {
+		t.Fatalf("active readers with bounded cursor = %d, want 1", got)
+	}
+
+	cursor.Close()
+	if got := tree.Stats().ActiveReaders; got != 0 {
+		t.Fatalf("active readers after bounded cursor close = %d, want 0", got)
+	}
+}
+
+func TestSnapshotCursorBetweenBorrowsSnapshotAndReadsOldBounds(t *testing.T) {
+	tree := New(3)
+	for i := 0; i < 14; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	snapshot := tree.Snapshot()
+	if got := tree.Stats().ActiveReaders; got != 1 {
+		t.Fatalf("active readers after snapshot = %d, want 1", got)
+	}
+
+	tree.Put("key-06", []byte("new-value-06"))
+	tree.Delete("key-07")
+	cursor := snapshot.CursorBetween("key-06", "key-08")
+
+	var got []string
+	var values []string
+	for cursor.Valid() {
+		got = append(got, cursor.Key())
+		values = append(values, string(cursor.Value()))
+		if !cursor.Next() {
+			break
+		}
+	}
+	wantKeys := []string{"key-06", "key-07"}
+	wantValues := []string{"value-06", "value-07"}
+	if fmt.Sprint(got) != fmt.Sprint(wantKeys) || fmt.Sprint(values) != fmt.Sprint(wantValues) {
+		t.Fatalf("snapshot CursorBetween keys/values = %v/%v, want %v/%v", got, values, wantKeys, wantValues)
+	}
+
+	cursor.Close()
+	if got := tree.Stats().ActiveReaders; got != 1 {
+		t.Fatalf("active readers after borrowed bounded cursor close = %d, want snapshot still pinned", got)
+	}
+	snapshot.Close()
+	if got := tree.Stats().ActiveReaders; got != 0 {
+		t.Fatalf("active readers after snapshot close = %d, want 0", got)
+	}
+}
+
 func TestSnapshotCursorDoesNotRegisterAnotherReader(t *testing.T) {
 	tree := New(2)
 	tree.Put("alpha", []byte("one"))

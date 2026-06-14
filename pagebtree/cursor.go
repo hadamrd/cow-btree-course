@@ -14,6 +14,10 @@ type Cursor struct {
 	stack    []cursorFrame
 	key      string
 	value    []byte
+	lower    string
+	end      string
+	hasLower bool
+	hasEnd   bool
 	valid    bool
 	closed   bool
 }
@@ -31,10 +35,26 @@ func (t *Tree) Cursor() *Cursor {
 	return newCursor(t.Snapshot(), true)
 }
 
+// CursorBetween opens a read cursor over keys greater than or equal to start
+// and less than end. The returned cursor is positioned at the first key in the
+// half-open interval, or invalid if the interval is empty.
+func (t *Tree) CursorBetween(start, end string) *Cursor {
+	if t == nil {
+		return &Cursor{closed: true}
+	}
+	return newCursorBetween(t.Snapshot(), true, start, end)
+}
+
 // Cursor opens a read cursor over this snapshot without registering another
 // reader.
 func (s *Snapshot) Cursor() *Cursor {
 	return newCursor(s, false)
+}
+
+// CursorBetween opens a read cursor over this snapshot's keys greater than or
+// equal to start and less than end without registering another reader.
+func (s *Snapshot) CursorBetween(start, end string) *Cursor {
+	return newCursorBetween(s, false, start, end)
 }
 
 func newCursor(snapshot *Snapshot, owned bool) *Cursor {
@@ -50,10 +70,26 @@ func newCursor(snapshot *Snapshot, owned bool) *Cursor {
 	return cursor
 }
 
+func newCursorBetween(snapshot *Snapshot, owned bool, start, end string) *Cursor {
+	cursor := newCursor(snapshot, owned)
+	cursor.lower = start
+	cursor.end = end
+	cursor.hasLower = true
+	cursor.hasEnd = true
+	if start >= end {
+		return cursor
+	}
+	cursor.First()
+	return cursor
+}
+
 // First positions the cursor at the first key.
 func (c *Cursor) First() bool {
 	if !c.usable() {
 		return false
+	}
+	if c.hasLower {
+		return c.Seek(c.lower)
 	}
 	c.stack = c.stack[:0]
 	return c.descendLeft(c.root)
@@ -63,6 +99,12 @@ func (c *Cursor) First() bool {
 func (c *Cursor) Seek(key string) bool {
 	if !c.usable() {
 		return false
+	}
+	if c.hasLower && key < c.lower {
+		key = c.lower
+	}
+	if c.hasEnd && key >= c.end {
+		return c.invalidate()
 	}
 	c.stack = c.stack[:0]
 	for id := c.root; id != 0; {
@@ -159,6 +201,9 @@ func (c *Cursor) loadForward() bool {
 		if p.isLeaf() {
 			if frame.index < int(p.slotCount()) {
 				c.loadLeafSlot(p, frame.index)
+				if c.hasEnd && c.key >= c.end {
+					return c.invalidate()
+				}
 				return true
 			}
 			c.stack = c.stack[:last]

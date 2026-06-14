@@ -747,8 +747,8 @@ Serious pieces in this repository:
   reclaim decisions.
 - Explicit point write batches that publish one revision and can report
   per-operation old values through `CommitDetailed`.
-- A sorted-map model/fuzz target for put, delete, batch, range, cursor, and
-  integrity-check operation streams.
+- A sorted-map model/fuzz target for put, delete, batch, range, cursor,
+  bounded cursor, and integrity-check operation streams.
 - An mmap sorted-map model/fuzz target that injects sync/close/reopen cycles
   and overflow-heavy values.
 - A malformed mmap-image fuzz target that mutates metadata, page headers,
@@ -757,8 +757,8 @@ Serious pieces in this repository:
 - Process-exit crash probes that kill a child writer at sync-publication,
   mmap-growth, compact-shrink, large-freelist spill, and large-reclaim spill
   fault points, then reopen the same database from a fresh process.
-- Reproducible microbenchmarks for page and mmap get, seek/next, bounded range,
-  insert, delete, reopen, and sync paths. Run a short local pass with
+- Reproducible microbenchmarks for page and mmap get, seek/next, bounded cursor,
+  bounded range, insert, delete, reopen, and sync paths. Run a short local pass with
   `go test ./pagebtree -run '^$' -bench 'Benchmark(PageTree|MmapTree)' -benchtime=100x`.
 
 Still research or incomplete compared with a production engine:

@@ -74,6 +74,33 @@ func TestByteKeyAPIsCopyInputAndOutputKeys(t *testing.T) {
 	}
 }
 
+func TestCursorBytesBetweenUsesBytewiseHalfOpenBounds(t *testing.T) {
+	tree := New(2)
+	for _, key := range [][]byte{
+		{0x00, 0x02},
+		{0x00, 0xff},
+		{0x01},
+		{0xff, 0x00},
+	} {
+		tree.PutBytes(key, append([]byte("value-"), key...))
+	}
+
+	cursor := tree.CursorBytesBetween([]byte{0x00, 0x80}, []byte{0xff})
+	defer cursor.Close()
+
+	var got [][]byte
+	for cursor.Valid() {
+		got = append(got, cursor.KeyBytes())
+		if !cursor.Next() {
+			break
+		}
+	}
+	want := [][]byte{{0x00, 0xff}, {0x01}}
+	if !equalByteKeySlices(got, want) {
+		t.Fatalf("CursorBytesBetween keys = %x, want %x", got, want)
+	}
+}
+
 func TestSnapshotAndBatchByteKeys(t *testing.T) {
 	tree := New(2)
 	tree.PutBytes([]byte{0x01}, []byte("one"))

@@ -28,13 +28,14 @@ What is credible today:
   accept/reject decisions, growth and compact remap success/failure geometry,
   freelist/reclaim metadata rollback, stale reader cleanup, and obsolete
   metadata-page reclaim decisions.
-- Snapshot-backed cursors for incremental ordered reads.
+- Snapshot-backed cursors for incremental ordered reads, including half-open
+  bounded cursors.
 - A persisted mmap key-order identifier for the current bytewise page ordering.
 - Runtime profile flags for the active byte-balance policy: byte-aware split
   points, byte-aware delete redistribution, byte-fit merge checks, and the
   normalized low-fill repair threshold.
-- Reproducible Go microbenchmarks for page and mmap get, seek/next, range,
-  insert, delete, reopen, and sync paths.
+- Reproducible Go microbenchmarks for page and mmap get, seek/next, bounded
+  cursor, range, insert, delete, reopen, and sync paths.
 
 ## P0 Gaps
 
@@ -45,9 +46,9 @@ storage-engine artifact.
 | --- | --- | --- | --- |
 | Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication, growth, compact-shrink, large-freelist spill, large-reclaim spill, and obsolete metadata-generation reclaim images. `TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot` kills a child writer at sync-publication fault points and reopens the same database from a fresh process. `TestMmapGrowthProcessCrashMatrixClassifiesOldRoot` does the same for growth file-size, directory-sync, and pre-remap fault points, all recovering the old root. `TestMmapCompactShrinkProcessCrashMatrixClassifiesCompactedRoot` does the same for compact-shrink file-size, directory-sync, and pre-remap fault points, reopening live keys from the compacted root. `TestMmapLargeFreelistProcessCrashMatrixClassifiesRecoveryRoot` does the same for large-freelist spill publication, preserving old metadata before data sync and persisted reusable-page records after metadata write. `TestMmapLargeReclaimProcessCrashMatrixClassifiesReaderPinnedRetiredPages` keeps a live read-only parent handle while killing the child writer at large-reclaim publication points, proving persisted retired records remain pinned by a surviving reader watermark. | True power-fail testing is still outside the local harness. |
 | Transaction batching | Real engines commit a unit of work, not one implicit root publish per call. | Started: `WriteBatch` stages point `Put`/`Delete` operations, hides them until `Commit`, and publishes one tree revision across memory and mmap trees. `CommitDetailed` reports per-operation old values, returns explicit invalid-commit errors, and restores the pre-commit tree state if staged replay panics before publication. `Sync` remains the mmap durability boundary. | Add cursor/range-aware write experiments and a fuller ACID transaction boundary. |
-| Cursor API | Real B+tree users need `seek`/`next` control, not only callback scans. | Closed in this pass with snapshot-backed forward cursors. | Extend cursors with bounded end keys, reverse traversal, and delete-through-cursor experiments. |
+| Cursor API | Real B+tree users need `seek`/`next` control, not only callback scans. | Advanced: snapshot-backed forward cursors support `First`, `Seek`, `Next`, and half-open `CursorBetween(start,end)` bounds for both live trees and snapshots. | Extend cursors with reverse traversal and delete-through-cursor experiments. |
 | Comparator and key model | Production B+trees need an explicit key-ordering contract before prefix compression, duplicate keys, or locale-aware indexes. | Started: page cells store byte strings and compare bytewise; public `PutBytes`/`GetBytes`/`DeleteBytes`/`RangeBytes`/cursor byte-key APIs expose opaque byte keys; mmap metadata persists the bytewise key-order identifier and rejects unknown requested or persisted orders; `pagebtree/testdata/mmap-v2-legacy-zero-key-order.db` proves reopen compatibility with the pre-key-order metadata word. | Add a real pluggable comparator boundary, broader old-format fixture coverage, and a page-format path for prefix compression. |
-| Fuzz and model checking | Handwritten tests miss malformed-page combinations and delete/split corner cases. | Started: `FuzzPageTreeMatchesSortedMapModel` compares `pagebtree` with a sorted-map oracle across put, delete, batch, get, range, cursor, and `Check` operations. `FuzzMmapTreeMatchesSortedMapModelAcrossReopen` adds mmap sync/close/reopen cycles and overflow-heavy values. `FuzzMmapMalformedPageGeneratorRejectsOrChecks` mutates mmap file bytes, metadata, page headers, checksums, truncation, and tree/overflow-bearing pages, then requires any accepted image to pass `Check`. | Extend model checking to longer process-crash/reopen probes, minimized malformed-page corpora, and semantic corruption oracles. |
+| Fuzz and model checking | Handwritten tests miss malformed-page combinations and delete/split corner cases. | Started: `FuzzPageTreeMatchesSortedMapModel` compares `pagebtree` with a sorted-map oracle across put, delete, batch, get, range, cursor, bounded cursor, and `Check` operations. `FuzzMmapTreeMatchesSortedMapModelAcrossReopen` adds mmap sync/close/reopen cycles and overflow-heavy values. `FuzzMmapMalformedPageGeneratorRejectsOrChecks` mutates mmap file bytes, metadata, page headers, checksums, truncation, and tree/overflow-bearing pages, then requires any accepted image to pass `Check`. | Extend model checking to longer process-crash/reopen probes, minimized malformed-page corpora, and semantic corruption oracles. |
 
 ## P1 Gaps
 
@@ -62,7 +63,7 @@ research frontier.
 | Sparse-file punching | Reusable interior pages remain allocated by the filesystem. | Interior free pages stay inside the file. | Experiment with hole punching for page-size-aligned free extents while preserving mmap semantics. |
 | Multi-process robustness | Reader tables need stronger owner identity than PID alone. | Slots use PID, revision, and token, with stale PID cleanup and fail-closed validation. | Include boot/session identity or start time to reduce PID reuse ambiguity. |
 | Observability | A serious engine should explain stalls, reclaim pressure, and recovery decisions. | Started: `MmapOptions.TraceHook` emits structured `MmapTraceEvent` records for sync phases, timed per-range dirty data-page flushes, sync failures, recovery candidate accept/reject decisions, growth and compact remap success/failure geometry, freelist/reclaim metadata rollback page spans, stale reader cleanup counts, and obsolete metadata-page reclaim decisions. `MmapTraceJSONLExporter` and `cmd/mmaptrace-demo` provide a small JSONL export path for experiments. Stats still expose counters, and `MmapCacheStats` exposes kernel residency. | Add workload trace examples, trace redaction guidance, and optional asynchronous export experiments. |
-| Benchmarks | Without benchmarks, optimization claims are weak. | Started: `pagebtree/bench_test.go` covers page and mmap point `Get`, cursor seek/next, bounded range scans, sequential insert/delete, mmap sync-after-put, mmap delete+sync, and mmap reopen validation. | Add benchstat comparison scripts, larger workload profiles, and CI/manual baseline guidance. |
+| Benchmarks | Without benchmarks, optimization claims are weak. | Started: `pagebtree/bench_test.go` covers page and mmap point `Get`, cursor seek/next, bounded cursor scans, bounded range scans, sequential insert/delete, mmap sync-after-put, mmap delete+sync, and mmap reopen validation. | Add benchstat comparison scripts, larger workload profiles, and CI/manual baseline guidance. |
 
 ## P2 Gaps
 
@@ -83,7 +84,9 @@ The new cursor is intentionally forward-only and snapshot-backed:
   reader pin.
 - `Snapshot.Cursor()` borrows an existing snapshot and does not register another
   reader.
-- `First()` positions at the first key.
+- `CursorBetween(start,end)` opens a half-open bounded cursor and positions it
+  at the first key inside the interval.
+- `First()` positions at the first key, or the lower bound for bounded cursors.
 - `Seek(key)` positions at the first key greater than or equal to `key`.
 - `Next()` advances one key at a time.
 - `Key()` and `Value()` expose the current record, with `Value()` returning a
