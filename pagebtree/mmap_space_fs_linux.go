@@ -2,12 +2,29 @@
 
 package pagebtree
 
-import "golang.org/x/sys/unix"
+import (
+	"os"
+	"path/filepath"
 
-func mmapFilesystemIdentity(path string) (string, int64, error) {
+	"golang.org/x/sys/unix"
+)
+
+func mmapFilesystemIdentity(path string) (mmapFilesystemEvidence, error) {
 	var stat unix.Statfs_t
 	if err := unix.Statfs(path, &stat); err != nil {
-		return "", 0, err
+		return mmapFilesystemEvidence{}, err
 	}
-	return "", stat.Type, nil
+	evidence := mmapFilesystemEvidence{FilesystemTypeID: stat.Type}
+	mountInfo, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return evidence, nil
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		parsed := parseLinuxMountInfo(abs, string(mountInfo))
+		if parsed.MountPath != "" {
+			parsed.FilesystemTypeID = evidence.FilesystemTypeID
+			return parsed, nil
+		}
+	}
+	return evidence, nil
 }

@@ -12,6 +12,17 @@ type MmapSpaceStats struct {
 	PreferredIOBlockBytes     int64
 	FilesystemType            string
 	FilesystemTypeID          int64
+	MountPath                 string
+	MountSource               string
+	MountOptions              string
+}
+
+type mmapFilesystemEvidence struct {
+	FilesystemType   string
+	FilesystemTypeID int64
+	MountPath        string
+	MountSource      string
+	MountOptions     string
 }
 
 func sparseBytes(logicalBytes, allocatedBytes int64) int64 {

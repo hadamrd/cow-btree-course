@@ -653,7 +653,7 @@ Storage-engine observability has several layers:
   page counts, total reachable page capacity/free bytes, and
   leaf/branch/overflow used-byte buckets. `MmapCacheStats` observes residency
   in the kernel page cache; `MmapSpaceStats` observes logical file bytes versus
-  filesystem-reported allocated bytes plus filesystem type identity where
+  filesystem-reported allocated bytes plus filesystem and mount identity where
   available for sparse-file experiments.
 - Validation reports: `Audit` tells you what the validator actually reached:
   reachable page IDs, reusable page IDs, retired page IDs, linked-leaf check
@@ -670,7 +670,7 @@ flowchart TD
     S["Stats"] --> C["counts: pages, readers, cache hits, byte fill"]
     A["Audit"] --> V["validation evidence: reachable/free/retired page IDs"]
     M["MmapCacheStats"] --> R["kernel residency via mincore"]
-    Z["MmapSpaceStats"] --> Y["logical vs allocated bytes + filesystem identity"]
+    Z["MmapSpaceStats"] --> Y["logical vs allocated bytes + filesystem/mount identity"]
     P["MDBKernelProfile"] --> K["design contract flags"]
     H["MmapHolePunchProfile"] --> B["sparse-punch primitive/support"]
     T["TraceHook"] --> E["decisions: sync ranges, recovery, growth, compact, reclaim"]

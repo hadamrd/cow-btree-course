@@ -2,6 +2,6 @@
 
 package pagebtree
 
-func mmapFilesystemIdentity(path string) (string, int64, error) {
-	return "", 0, nil
+func mmapFilesystemIdentity(path string) (mmapFilesystemEvidence, error) {
+	return mmapFilesystemEvidence{}, nil
 }

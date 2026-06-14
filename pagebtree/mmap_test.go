@@ -4354,6 +4354,9 @@ func TestMmapSpaceStatsReportsLogicalAndAllocatedBytes(t *testing.T) {
 	if stats.FilesystemType == "" && stats.FilesystemTypeID == 0 {
 		t.Fatalf("filesystem identity missing: %+v", stats)
 	}
+	if stats.MountPath == "" {
+		t.Fatalf("MountPath = empty, want measured mount boundary: %+v", stats)
+	}
 }
 
 func TestMemoryTreeMmapSpaceStatsIsEmpty(t *testing.T) {

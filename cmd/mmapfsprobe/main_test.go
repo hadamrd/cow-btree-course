@@ -48,6 +48,9 @@ func TestRunFilesystemProbePrintsSpaceEvidence(t *testing.T) {
 	if report.AfterInsert.Space.FilesystemType == "" && report.AfterInsert.Space.FilesystemTypeID == 0 {
 		t.Fatalf("after insert filesystem identity missing: %+v", report.AfterInsert.Space)
 	}
+	if report.AfterInsert.Space.MountPath == "" {
+		t.Fatalf("after insert mount path missing: %+v", report.AfterInsert.Space)
+	}
 	if report.AfterDelete.Stats.FreePages == 0 {
 		t.Fatalf("after delete free pages = 0, want reusable pages")
 	}

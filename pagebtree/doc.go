@@ -166,7 +166,7 @@
 // advice. MmapCacheStats uses mincore on Unix to show how many mapped OS pages
 // are resident in that kernel cache. MmapSpaceStats uses stat(2) block counts
 // on Unix to compare logical file bytes with filesystem-reported allocated
-// bytes and statfs(2)-backed filesystem identity where available for
+// bytes and statfs(2)-backed filesystem/mount identity where available for
 // sparse-file experiments. Current-tree Get also keeps a small
 // checksum-keyed cache of decoded branch routing metadata. That derived cache
 // is bounded by least-recently-used eviction and can be sized through Options
