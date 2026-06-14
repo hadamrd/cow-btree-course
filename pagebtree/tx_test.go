@@ -1,6 +1,7 @@
 package pagebtree
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -261,6 +262,81 @@ func TestReadWriteTxCursorSeekLastPrevAndByteKeys(t *testing.T) {
 	}
 }
 
+func TestReadWriteTxUsesStableBaseRevisionAndRejectsConflict(t *testing.T) {
+	tree := New(2)
+	tree.Put("alpha", []byte("one"))
+	tree.Put("bravo", []byte("two"))
+	beforeRevision := tree.Revision()
+
+	tx := tree.BeginReadWrite()
+	tx.Put("charlie", []byte("three"))
+	tree.Put("alpha", []byte("outside"))
+	tree.Put("delta", []byte("outside"))
+
+	if got, ok := tx.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("tx Get(alpha) after external write = %q, %v; want stable base one, true", got, ok)
+	}
+	if _, ok := tx.Get("delta"); ok {
+		t.Fatalf("tx Get(delta) after external insert = true; want hidden from stable base")
+	}
+	var got []string
+	tx.RangeBetween("alpha", "echo", func(key string, value []byte) bool {
+		got = append(got, key)
+		return true
+	})
+	want := []string{"alpha", "bravo", "charlie"}
+	if len(got) != len(want) {
+		t.Fatalf("tx RangeBetween after external write = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("tx RangeBetween row %d = %s, want %s; all rows %v", i, got[i], want[i], got)
+		}
+	}
+
+	result, err := tx.CommitDetailed()
+	if !errors.Is(err, ErrTxConflict) {
+		t.Fatalf("tx CommitDetailed conflict error = %v, want ErrTxConflict", err)
+	}
+	if result.Changed {
+		t.Fatalf("conflicted tx Changed = true, want false")
+	}
+	if got := tree.Revision(); got != beforeRevision+2 {
+		t.Fatalf("Revision after conflicted tx = %d, want external writes only %d", got, beforeRevision+2)
+	}
+	if _, ok := tree.Get("charlie"); ok {
+		t.Fatalf("tree Get(charlie) after conflicted tx = true; want tx write discarded")
+	}
+	if got, ok := tree.Get("alpha"); !ok || string(got) != "outside" {
+		t.Fatalf("tree Get(alpha) after conflicted tx = %q, %v; want outside, true", got, ok)
+	}
+}
+
+func TestReadWriteTxRollbackReleasesStableBaseReader(t *testing.T) {
+	tree := New(2)
+	tree.Put("alpha", []byte("one"))
+
+	tx := tree.BeginReadWrite()
+	if got := tree.Stats().ActiveReaders; got != 1 {
+		t.Fatalf("ActiveReaders after BeginReadWrite = %d, want 1", got)
+	}
+	tx.Rollback()
+	if got := tree.Stats().ActiveReaders; got != 0 {
+		t.Fatalf("ActiveReaders after tx Rollback = %d, want 0", got)
+	}
+
+	empty := tree.BeginReadWrite()
+	if got := tree.Stats().ActiveReaders; got != 1 {
+		t.Fatalf("ActiveReaders after empty BeginReadWrite = %d, want 1", got)
+	}
+	if changed := empty.Commit(); changed {
+		t.Fatalf("empty tx Commit changed = true, want false")
+	}
+	if got := tree.Stats().ActiveReaders; got != 0 {
+		t.Fatalf("ActiveReaders after empty tx Commit = %d, want 0", got)
+	}
+}
+
 func TestReadWriteTxRollbackAndEmptyCommitDoNotPublishRevision(t *testing.T) {
 	tree := New(2)
 	tree.Put("alpha", []byte("one"))
@@ -390,5 +466,45 @@ func TestMmapReadWriteTxCursorDeletePersistsAcrossReopen(t *testing.T) {
 	}
 	if got, ok := reopened.Get("key-03-extra"); !ok || string(got) != "staged" {
 		t.Fatalf("reopened Get(key-03-extra) = %q, %v; want staged, true", got, ok)
+	}
+}
+
+func TestMmapReadWriteTxRejectsConflictAndReleasesReader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+
+	tx := tree.BeginReadWrite()
+	tx.Put("bravo", []byte("two"))
+	tree.Put("alpha", []byte("outside"))
+	if got := tree.Stats().ActiveReaders; got != 1 {
+		t.Fatalf("ActiveReaders before conflicted tx Commit = %d, want 1", got)
+	}
+	if got, ok := tx.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("tx Get(alpha) after external mmap write = %q, %v; want stable base one, true", got, ok)
+	}
+	result, err := tx.CommitDetailed()
+	if !errors.Is(err, ErrTxConflict) {
+		t.Fatalf("mmap tx CommitDetailed conflict error = %v, want ErrTxConflict", err)
+	}
+	if result.Changed {
+		t.Fatalf("conflicted mmap tx Changed = true, want false")
+	}
+	if got := tree.Stats().ActiveReaders; got != 0 {
+		t.Fatalf("ActiveReaders after conflicted tx Commit = %d, want 0", got)
+	}
+	if _, ok := tree.Get("bravo"); ok {
+		t.Fatalf("tree Get(bravo) after conflicted mmap tx = true; want tx write discarded")
+	}
+	if got, ok := tree.Get("alpha"); !ok || string(got) != "outside" {
+		t.Fatalf("tree Get(alpha) after conflicted mmap tx = %q, %v; want outside, true", got, ok)
 	}
 }

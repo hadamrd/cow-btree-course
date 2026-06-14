@@ -748,10 +748,11 @@ Serious pieces in this repository:
 - Explicit write batches that publish one revision, support point mutations and
   half-open range deletes, and can report per-operation old values through
   `CommitDetailed`.
-- A small read-write transaction facade with read-your-writes point reads,
-  `RangeBetween` over the staged view, transaction-visible range delete
-  expansion, transaction cursors with staged `Delete`, rollback, and
-  one-revision commit through the batch machinery.
+- A small read-write transaction facade with stable begin-revision reads,
+  read-your-writes point reads, `RangeBetween` over the staged view,
+  transaction-visible range delete expansion, transaction cursors with staged
+  `Delete`, rollback, optimistic revision-conflict detection, and one-revision
+  commit through the batch machinery.
 - A sorted-map model/fuzz target for put, delete, cursor delete, batch, batch
   range delete, read-write transaction, transaction cursor delete, range,
   cursor, bounded cursor, reverse bounded cursor, and integrity-check operation
@@ -776,8 +777,9 @@ Still research or incomplete compared with a production engine:
 - No full ACID transaction API; write batches exist with detailed commit
   reporting, panic rollback, and half-open range delete, and read-write
   transactions add read-your-writes `Get`, `RangeBetween`, range delete,
-  transaction cursor delete, rollback, and one-revision commit, but full
-  isolation/durability contracts remain research work.
+  transaction cursor delete, stable begin-revision reads, rollback, optimistic
+  revision-conflict detection, and one-revision commit, but full
+  durability/crash-order transaction contracts remain research work.
 - No sparse-file hole punching.
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with true power-fail fault injection;

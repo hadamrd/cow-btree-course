@@ -10,6 +10,7 @@ var (
 	ErrTreeClosed  = errors.New("tree is closed")
 	ErrReadOnly    = errors.New("tree is read-only")
 	ErrBatchPanic  = errors.New("write batch commit panicked")
+	ErrTxConflict  = errors.New("read-write transaction conflict")
 )
 
 type batchOpKind uint8

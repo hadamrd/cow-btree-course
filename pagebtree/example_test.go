@@ -2,6 +2,7 @@ package pagebtree_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	"github.com/hadamrd/cow-btree-course/pagebtree"
@@ -133,6 +134,23 @@ func ExampleReadWriteTx_CursorBetween() {
 	fmt.Println(visibleAfterCommit)
 	// Output:
 	// true bravo-value
+	// true
+	// false
+}
+
+func ExampleReadWriteTx_CommitDetailed_conflict() {
+	tree := pagebtree.New(2)
+	tree.Put("alpha", []byte("one"))
+
+	tx := tree.BeginReadWrite()
+	tx.Put("bravo", []byte("two"))
+	tree.Put("alpha", []byte("outside"))
+
+	_, err := tx.CommitDetailed()
+	_, visible := tree.Get("bravo")
+	fmt.Println(errors.Is(err, pagebtree.ErrTxConflict))
+	fmt.Println(visible)
+	// Output:
 	// true
 	// false
 }

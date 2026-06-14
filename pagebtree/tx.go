@@ -13,10 +13,12 @@ type txValue struct {
 // a staged overlay, range deletes expand against that overlay plus the current
 // tree, and Commit publishes through the same copy-on-write batch path.
 type ReadWriteTx struct {
-	tree   *Tree
-	batch  *WriteBatch
-	staged map[string]txValue
-	closed bool
+	tree         *Tree
+	base         *Snapshot
+	baseRevision uint64
+	batch        *WriteBatch
+	staged       map[string]txValue
+	closed       bool
 }
 
 // BeginReadWrite opens a single-use read-write transaction.
@@ -26,6 +28,8 @@ func (t *Tree) BeginReadWrite() *ReadWriteTx {
 		staged: map[string]txValue{},
 	}
 	if t != nil {
+		tx.base = t.Snapshot()
+		tx.baseRevision = t.Revision()
 		tx.batch = t.Batch()
 	}
 	return tx
@@ -42,10 +46,10 @@ func (tx *ReadWriteTx) Get(key string) ([]byte, bool) {
 		}
 		return cloneBytes(value.value), true
 	}
-	if tx.tree == nil {
+	if tx.base == nil {
 		return nil, false
 	}
-	return tx.tree.Get(key)
+	return tx.base.Get(key)
 }
 
 // Put stages an insert or replacement visible to subsequent transaction reads.
@@ -98,8 +102,8 @@ func (tx *ReadWriteTx) RangeBetween(start, end string, visit func(string, []byte
 func (tx *ReadWriteTx) visibleKeysBetween(start, end string) []string {
 	keys := []string{}
 	seen := map[string]bool{}
-	if tx.tree != nil {
-		tx.tree.RangeBetween(start, end, func(key string, value []byte) bool {
+	if tx.base != nil {
+		tx.base.RangeBetween(start, end, func(key string, value []byte) bool {
 			seen[key] = true
 			if staged, ok := tx.staged[key]; ok && staged.deleted {
 				return true
@@ -128,8 +132,7 @@ func (tx *ReadWriteTx) Rollback() {
 	if tx.batch != nil {
 		tx.batch.Rollback()
 	}
-	tx.staged = nil
-	tx.closed = true
+	tx.close()
 }
 
 // Commit applies staged operations and returns true when the tree changed.
@@ -143,9 +146,22 @@ func (tx *ReadWriteTx) CommitDetailed() (BatchCommitResult, error) {
 	if tx == nil || tx.closed || tx.batch == nil {
 		return BatchCommitResult{}, ErrBatchClosed
 	}
-	defer func() {
-		tx.staged = nil
-		tx.closed = true
-	}()
+	defer tx.close()
+	if tx.tree != nil && tx.tree.Revision() != tx.baseRevision {
+		tx.batch.Rollback()
+		return BatchCommitResult{}, ErrTxConflict
+	}
 	return tx.batch.CommitDetailed()
+}
+
+func (tx *ReadWriteTx) close() {
+	if tx == nil {
+		return
+	}
+	if tx.base != nil {
+		tx.base.Close()
+	}
+	tx.staged = nil
+	tx.closed = true
+	tx.base = nil
 }
