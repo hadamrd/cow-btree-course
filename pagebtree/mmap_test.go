@@ -6773,6 +6773,59 @@ func TestMmapTreeOpensLegacyV1InlineFreelistFixture(t *testing.T) {
 	}
 }
 
+func TestMmapTreeOpensLegacyV2ChainedFreelistFixture(t *testing.T) {
+	path := copyMmapFixture(t, "testdata/mmap-v2-chained-freelist.db")
+	_, record := newestMetaPage(t, path)
+	if record.version != 2 {
+		t.Fatalf("legacy chained fixture metadata version = %d, want 2", record.version)
+	}
+	if record.freeRoot == 0 {
+		t.Fatalf("legacy chained fixture has no freelist root")
+	}
+	if record.freeCount <= maxMetaFreePages {
+		t.Fatalf("legacy chained fixture free count = %d, want above inline capacity %d", record.freeCount, maxMetaFreePages)
+	}
+	chainPages, chainRecords := legacyFreelistChainSummary(t, path, record.freeRoot)
+	if chainPages < 2 {
+		t.Fatalf("legacy chained fixture freelist chain pages = %d, want at least 2", chainPages)
+	}
+	if chainRecords != record.freeCount {
+		t.Fatalf("legacy chained fixture freelist records = %d, want %d", chainRecords, record.freeCount)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap legacy v2 chained-freelist fixture: %v", err)
+	}
+	defer reopened.Close()
+
+	if stats := reopened.Stats(); stats.FreePages != record.freeCount {
+		t.Fatalf("legacy chained fixture FreePages = %d, want %d", stats.FreePages, record.freeCount)
+	}
+	if got, ok := reopened.Get("anchor"); !ok || string(got) != "survivor" {
+		t.Fatalf("legacy chained fixture Get(anchor) = %q, %v; want survivor, true", got, ok)
+	}
+	if _, ok := reopened.Get("large"); ok {
+		t.Fatalf("legacy chained fixture found deleted large key")
+	}
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("legacy chained fixture Check before reuse: %v", err)
+	}
+
+	before := reopened.Stats()
+	reopened.Put("key-new", []byte("new-value"))
+	after := reopened.Stats()
+	if after.ReusedPages <= before.ReusedPages {
+		t.Fatalf("legacy chained fixture ReusedPages after Put = %d, want above %d", after.ReusedPages, before.ReusedPages)
+	}
+	if got, ok := reopened.Get("key-new"); !ok || string(got) != "new-value" {
+		t.Fatalf("legacy chained fixture Get(key-new) = %q, %v; want new-value, true", got, ok)
+	}
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("legacy chained fixture Check after reuse: %v", err)
+	}
+}
+
 func TestOpenMmapRejectsUnsupportedKeyOrderOption(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -7395,6 +7448,46 @@ func reclaimChainRecordCount(t *testing.T, path string, pageID PageID) int {
 		id = p.reclaimNext()
 	}
 	return total
+}
+
+func legacyFreelistChainSummary(t *testing.T, path string, pageID PageID) (pages int, records int) {
+	t.Helper()
+
+	seen := map[PageID]bool{}
+	for id := pageID; id != 0; {
+		if seen[id] {
+			t.Fatalf("legacy freelist chain loops through page %d", id)
+		}
+		seen[id] = true
+		p := readFreelistPage(t, path, id)
+		pages++
+		records += p.freelistCount()
+		id = p.freelistNext()
+	}
+	return pages, records
+}
+
+func readFreelistPage(t *testing.T, path string, pageID PageID) *page {
+	t.Helper()
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("OpenFile read freelist page: %v", err)
+	}
+	defer file.Close()
+
+	buf := make([]byte, PageSize)
+	if _, err := file.ReadAt(buf, int64(pageID)*PageSize); err != nil {
+		t.Fatalf("ReadAt freelist page %d: %v", pageID, err)
+	}
+	p := &page{id: pageID, data: buf}
+	if !p.validChecksum() {
+		t.Fatalf("freelist page %d checksum invalid", pageID)
+	}
+	if p.flags() != flagFreelist {
+		t.Fatalf("page %d flags = %x, want freelist", pageID, p.flags())
+	}
+	return p
 }
 
 func readReclaimPage(t *testing.T, path string, pageID PageID) *page {

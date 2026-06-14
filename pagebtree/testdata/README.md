@@ -11,9 +11,15 @@ metadata version rewritten to 1. It proves the reader can still open a pre-recla
 metadata image, recover the inline reusable pages, and reuse one after a new
 write.
 
+`mmap-v2-chained-freelist.db` is a real mmap database image whose checked
+version-2 metadata points at a multi-page `flagFreelist` chain. It proves the
+reader can recover old pre-reclaim freelist pages, validate their checksums, and
+reuse one of the recovered IDs after a later write.
+
 Regenerate them from the repository root with:
 
 ```bash
 go run ./pagebtree/testdata/generate_legacy_zero_key_order.go
 go run ./pagebtree/testdata/generate_legacy_v1_inline_freelist.go
+go run ./pagebtree/testdata/generate_legacy_v2_chained_freelist.go
 ```
