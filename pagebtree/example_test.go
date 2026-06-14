@@ -1,6 +1,7 @@
 package pagebtree_test
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/hadamrd/cow-btree-course/pagebtree"
@@ -131,4 +132,26 @@ func ExampleTree_Cursor() {
 	// bravo bravo-value
 	// charlie charlie-value
 	// delta delta-value
+}
+
+func ExampleMmapTraceJSONLExporter() {
+	var out bytes.Buffer
+	exporter := pagebtree.NewMmapTraceJSONLExporter(&out)
+	hook := exporter.Hook()
+
+	hook(pagebtree.MmapTraceEvent{
+		Kind:          pagebtree.MmapTraceSyncDataRange,
+		Revision:      3,
+		StartPage:     5,
+		EndPage:       7,
+		DurationNanos: 99,
+		MetadataSlot:  -1,
+	})
+	if err := exporter.Err(); err != nil {
+		panic(err)
+	}
+
+	fmt.Print(out.String())
+	// Output:
+	// {"kind":"mmap-sync-data-range","revision":3,"start_page":5,"end_page":7,"duration_nanos":99}
 }

@@ -48,8 +48,9 @@
 // before returning the error. MmapOptions.TraceHook can observe sync phases,
 // timed dirty data-page sync ranges, recovery candidate rejection/acceptance,
 // growth remaps, compact shrinks, stale reader cleanup, and obsolete
-// metadata-page reclaim decisions as structured events. Mmap trees can grow the
-// mapped file when allocation reaches the current capacity.
+// metadata-page reclaim decisions as structured events. MmapTraceJSONLExporter
+// adapts those events to newline-delimited JSON for experiments. Mmap trees can
+// grow the mapped file when allocation reaches the current capacity.
 // New database creation and file-size changes from growth and compaction sync
 // the data file and parent directory. Compact can trim unused mapped capacity
 // and a suffix of already-free page ids when no snapshot is active; if

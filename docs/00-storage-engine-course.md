@@ -354,7 +354,7 @@ Code to read:
 - Dirty data-page sync: [`pagebtree/mmap.go#L540-L588`](../pagebtree/mmap.go#L540-L588)
 - Per-range `msync`: [`pagebtree/mmap.go#L602-L613`](../pagebtree/mmap.go#L602-L613)
 - Metadata page sync: [`pagebtree/mmap.go#L617-L635`](../pagebtree/mmap.go#L617-L635)
-- Trace event API: [`pagebtree/mmap_trace.go#L3-L51`](../pagebtree/mmap_trace.go#L3-L51)
+- Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L108`](../pagebtree/mmap_trace.go#L3-L108)
 
 ## Module 10: Dual Checked Metadata Pages
 
@@ -608,15 +608,36 @@ intervals. Reader cleanup events report how many dead-PID slots were cleared
 from the sidecar reader table.
 
 The hook is synchronous and should stay lightweight. In a real product you
-would adapt it to an event exporter or structured logger. In this research lab,
-it is intentionally just enough to make the kernel visible during tests and
-demos without putting a logging framework in the storage core.
+can start with `NewMmapTraceJSONLExporter`, which writes one lower-snake-field
+JSON object per line and keeps the first write error for later inspection
+through `Err()`. That is intentionally small: it makes the kernel visible during
+tests and demos without putting a logging framework in the storage core.
+
+```go
+exporter := pagebtree.NewMmapTraceJSONLExporter(os.Stdout)
+tree, _ := pagebtree.OpenMmap("trace.db", pagebtree.MmapOptions{
+    TraceHook: exporter.Hook(),
+})
+// mutate, Sync, Close...
+if err := exporter.Err(); err != nil {
+    // exporting failed
+}
+```
+
+The runnable command version emits JSONL only on stdout:
+
+```bash
+go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
+```
 
 Code to read:
 
 - Stats byte-fill fields and reachable-page walk: [`pagebtree/stats.go#L3-L170`](../pagebtree/stats.go#L3-L170)
 - Stats byte-fill tests: [`pagebtree/tree_test.go#L78-L117`](../pagebtree/tree_test.go#L78-L117), [`pagebtree/mmap_test.go#L53-L93`](../pagebtree/mmap_test.go#L53-L93)
-- Trace event API: [`pagebtree/mmap_trace.go#L3-L51`](../pagebtree/mmap_trace.go#L3-L51)
+- Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L108`](../pagebtree/mmap_trace.go#L3-L108)
+- JSONL exporter: [`pagebtree/mmap_trace_export.go#L9-L72`](../pagebtree/mmap_trace_export.go#L9-L72)
+- JSONL exporter example: [`pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)
+- JSONL trace demo command: [`cmd/mmaptrace-demo/main.go#L12-L42`](../cmd/mmaptrace-demo/main.go#L12-L42)
 - Hook option on mmap open: [`pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
 - Sync trace emissions: [`pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)
 - Recovery trace emissions: [`pagebtree/mmap.go#L937-L1051`](../pagebtree/mmap.go#L937-L1051)
@@ -734,8 +755,8 @@ Still research or incomplete compared with a production engine:
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.
 - No benchstat baseline history or CI performance gate yet.
-- No full operational tracing/export integration beyond the synchronous mmap
-  trace hook.
+- No production-grade tracing pipeline beyond the synchronous mmap trace hook
+  and small JSONL exporter.
 - No multi-database catalog, duplicate keys, or comparator plugins.
 - No portability story beyond the Unix mmap path and non-Unix stubs.
 

@@ -7,10 +7,10 @@ The reference design line is OpenLDAP MDB/LMDB: slotted pages in one mapped file
 ## What You Get
 
 - A clean generic B-tree package in [`btree/`](btree/)
-- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages, linked leaves, overflow pages, growable/compactable mmap-backed storage, offline mmap copy compaction, read-only mmap reader slots, stale-reader cleanup, tunable kernel page-cache advice, bounded branch-routing cache, cache residency stats, and optional mmap trace events
+- A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages, linked leaves, overflow pages, growable/compactable mmap-backed storage, offline mmap copy compaction, read-only mmap reader slots, stale-reader cleanup, tunable kernel page-cache advice, bounded branch-routing cache, cache residency stats, and optional mmap trace events with JSONL export
 - A small `MDBKernelProfile` API that reports which OpenLDAP-style kernel mechanics are active on a live tree
 - Copy-on-write writes with stable read-only snapshots
-- Runnable demos in [`cmd/cowbtree`](cmd/cowbtree/), [`cmd/pagebtree-demo`](cmd/pagebtree-demo/), [`cmd/mmapbtree-demo`](cmd/mmapbtree-demo/), and [`cmd/mdbkernel-demo`](cmd/mdbkernel-demo/)
+- Runnable demos in [`cmd/cowbtree`](cmd/cowbtree/), [`cmd/pagebtree-demo`](cmd/pagebtree-demo/), [`cmd/mmapbtree-demo`](cmd/mmapbtree-demo/), [`cmd/mdbkernel-demo`](cmd/mdbkernel-demo/), and [`cmd/mmaptrace-demo`](cmd/mmaptrace-demo/)
 - Tests that document the behavior and invariants
 - Research notes and diagrams in [`docs/`](docs/)
 
@@ -22,6 +22,7 @@ go run ./cmd/cowbtree
 go run ./cmd/pagebtree-demo
 go run ./cmd/mmapbtree-demo
 go run ./cmd/mdbkernel-demo
+go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
 go run ./cmd/mmapcopycompact /path/to/source.db /path/to/compact.db
 go run ./cmd/mmapcompact /path/to/source.db
 go test ./pagebtree -run '^$' -bench 'Benchmark(PageTree|MmapTree)' -benchtime=100x
@@ -98,7 +99,7 @@ Then read the focused chapters in order:
 
 ## Deliberate Scope
 
-This is a research implementation, not a production database. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, linked leaf key/value pages, string and opaque byte-key APIs with metadata-persisted bytewise ordering, lower-bound and bounded range scans, snapshot-backed seek/next cursors, overflow pages, copy-on-write deletion, reader-pinned retired pages, a reusable freelist with checked spill pages for large persisted lists, versioned reclaim metadata for externally pinned retired pages, an LMDB-inspired read-only mmap reader table with stale-reader inspection and fail-closed format validation, a bounded derived branch-routing cache, and an optional growable mmap-backed page file with dirty-page `Sync`, conservative tail `Compact`, offline `CopyCompactMmap`, guarded offline `CompactMmapFile` replacement, file-size/directory sync after remaps, `madvise` plus Linux file-advice access-pattern hints, tunable exact-leaf prefetch, `mincore` cache residency stats, and opt-in trace events for sync, recovery fallback, growth, compaction, reader cleanup, and obsolete metadata-page reclaim decisions. Production-grade crash-order proofs, pluggable comparators, byte-balanced deletion, multi-database catalogs, sparse-file reclamation, online vacuum, and operational tracing/export integration are still open research tracks.
+This is a research implementation, not a production database. The logical `btree` package stores values directly in B-tree nodes. The `pagebtree` package uses fixed-size slotted pages, branch separator keys, child page IDs, linked leaf key/value pages, string and opaque byte-key APIs with metadata-persisted bytewise ordering, lower-bound and bounded range scans, snapshot-backed seek/next cursors, overflow pages, copy-on-write deletion, reader-pinned retired pages, a reusable freelist with checked spill pages for large persisted lists, versioned reclaim metadata for externally pinned retired pages, an LMDB-inspired read-only mmap reader table with stale-reader inspection and fail-closed format validation, a bounded derived branch-routing cache, and an optional growable mmap-backed page file with dirty-page `Sync`, conservative tail `Compact`, offline `CopyCompactMmap`, guarded offline `CompactMmapFile` replacement, file-size/directory sync after remaps, `madvise` plus Linux file-advice access-pattern hints, tunable exact-leaf prefetch, `mincore` cache residency stats, opt-in trace events for sync, recovery fallback, growth, compaction, reader cleanup, and obsolete metadata-page reclaim decisions, plus a small JSONL trace exporter for experiments. Production-grade crash-order proofs, pluggable comparators, byte-balanced deletion, multi-database catalogs, sparse-file reclamation, and online vacuum are still open research tracks.
 
 ## License
 
