@@ -10,6 +10,17 @@ import (
 
 var punchFileRange = punchFileRangeLinux
 
+func mmapHolePunchProfile() MmapHolePunchCapability {
+	return MmapHolePunchCapability{
+		Supported:                 true,
+		Platform:                  "linux",
+		Primitive:                 "fallocate(FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE)",
+		PreservesFileSize:         true,
+		RequiresPageAlignedRanges: true,
+		Experimental:              true,
+	}
+}
+
 func punchFileRangeLinux(file *os.File, startPage, endPage PageID) error {
 	if err := validatePunchRange(startPage, endPage); err != nil {
 		return err

@@ -17,24 +17,25 @@ import (
 const inspectMmapMetaPages = 2
 
 type inspectReport struct {
-	Valid             bool                        `json:"valid"`
-	Error             string                      `json:"error,omitempty"`
-	Stats             pagebtree.Stats             `json:"stats"`
-	KeyOrder          pagebtree.KeyOrder          `json:"key_order"`
-	KeyOrderName      string                      `json:"key_order_name"`
-	KeyComparator     pagebtree.KeyComparatorKind `json:"key_comparator"`
-	KeyComparatorName string                      `json:"key_comparator_name"`
-	ReachablePageIDs  []pagebtree.PageID          `json:"reachable_page_ids"`
-	FreePageIDs       []pagebtree.PageID          `json:"free_page_ids"`
-	RetiredPageIDs    []pagebtree.PageID          `json:"retired_page_ids"`
-	LeafLinksChecked  bool                        `json:"leaf_links_checked"`
-	LeafLinksSkipped  bool                        `json:"leaf_links_skipped"`
-	ReaderStats       *pagebtree.MmapReaderStats  `json:"reader_stats,omitempty"`
-	CacheStats        *pagebtree.MmapCacheStats   `json:"cache_stats,omitempty"`
-	SpaceStats        *pagebtree.MmapSpaceStats   `json:"space_stats,omitempty"`
-	KeySample         *inspectKeySample           `json:"key_sample,omitempty"`
-	PageSummaries     []pagebtree.PageSummary     `json:"page_summaries,omitempty"`
-	TraceSummary      *inspectTraceSummary        `json:"trace_summary,omitempty"`
+	Valid             bool                               `json:"valid"`
+	Error             string                             `json:"error,omitempty"`
+	Stats             pagebtree.Stats                    `json:"stats"`
+	KeyOrder          pagebtree.KeyOrder                 `json:"key_order"`
+	KeyOrderName      string                             `json:"key_order_name"`
+	KeyComparator     pagebtree.KeyComparatorKind        `json:"key_comparator"`
+	KeyComparatorName string                             `json:"key_comparator_name"`
+	ReachablePageIDs  []pagebtree.PageID                 `json:"reachable_page_ids"`
+	FreePageIDs       []pagebtree.PageID                 `json:"free_page_ids"`
+	RetiredPageIDs    []pagebtree.PageID                 `json:"retired_page_ids"`
+	LeafLinksChecked  bool                               `json:"leaf_links_checked"`
+	LeafLinksSkipped  bool                               `json:"leaf_links_skipped"`
+	ReaderStats       *pagebtree.MmapReaderStats         `json:"reader_stats,omitempty"`
+	CacheStats        *pagebtree.MmapCacheStats          `json:"cache_stats,omitempty"`
+	SpaceStats        *pagebtree.MmapSpaceStats          `json:"space_stats,omitempty"`
+	HolePunchProfile  *pagebtree.MmapHolePunchCapability `json:"hole_punch_profile,omitempty"`
+	KeySample         *inspectKeySample                  `json:"key_sample,omitempty"`
+	PageSummaries     []pagebtree.PageSummary            `json:"page_summaries,omitempty"`
+	TraceSummary      *inspectTraceSummary               `json:"trace_summary,omitempty"`
 }
 
 type inspectKeySample struct {
@@ -125,6 +126,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		report.SpaceStats = &stats
+		profile := pagebtree.MmapHolePunchProfile()
+		report.HolePunchProfile = &profile
 	}
 	if options.keySampleLimit > 0 {
 		sample := inspectKeys(tree, options.keySampleLimit)

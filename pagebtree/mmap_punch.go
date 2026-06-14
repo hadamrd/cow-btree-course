@@ -19,6 +19,26 @@ type MmapHolePunchStats struct {
 	PunchedBytes            int64
 }
 
+// MmapHolePunchCapability reports the platform contract behind
+// PunchFreeMmapPages. It describes what this build can request from the
+// filesystem; actual block reclamation is still filesystem dependent.
+type MmapHolePunchCapability struct {
+	Supported                 bool
+	Platform                  string
+	Primitive                 string
+	PreservesFileSize         bool
+	RequiresPageAlignedRanges bool
+	Experimental              bool
+	UnsupportedReason         string
+}
+
+// MmapHolePunchProfile reports the sparse-hole punching capability for this
+// build. The result is process-independent and does not inspect a specific
+// filesystem.
+func MmapHolePunchProfile() MmapHolePunchCapability {
+	return mmapHolePunchProfile()
+}
+
 func coalescedPageRanges(ids []PageID) []pageRange {
 	if len(ids) == 0 {
 		return nil

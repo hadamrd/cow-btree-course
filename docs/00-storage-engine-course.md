@@ -650,6 +650,8 @@ Storage-engine observability has several layers:
 - Profiles: `MDBKernelProfile` tells you which design mechanics are active,
   including mmap/kernel-cache mechanics and the byte-balance policy used by
   split, delete redistribution, merge, and repair decisions.
+  `MmapHolePunchProfile` reports the platform-level sparse-hole primitive or
+  unsupported reason for this build.
 - Trace events: `MmapOptions.TraceHook` tells you which path the engine took.
 
 ```mermaid
@@ -659,6 +661,7 @@ flowchart TD
     M["MmapCacheStats"] --> R["kernel residency via mincore"]
     Z["MmapSpaceStats"] --> Y["logical vs allocated bytes via stat"]
     P["MDBKernelProfile"] --> K["design contract flags"]
+    H["MmapHolePunchProfile"] --> B["sparse-punch primitive/support"]
     T["TraceHook"] --> E["decisions: sync ranges, recovery, growth, compact, reclaim"]
 
     E --> A["sync phases"]
@@ -745,7 +748,7 @@ names for both, reachable page IDs, free page IDs, retired page IDs, and
 linked-leaf validation state.
 `--readers` adds the mmap reader-table slot summary, `--cache` adds kernel
 page-cache residency counts, and `--space` adds logical-vs-allocated file-space
-counts. `--pages` adds value-free page summaries with role, kind, byte
+counts plus the hole-punch capability profile. `--pages` adds value-free page summaries with role, kind, byte
 occupancy, branch children, and next-page hints. `--keys N`
 adds a bounded first/last key sample in the recovered comparator order without
 dumping values. `--trace TRACE.jsonl` reads value-free trace JSONL, counts

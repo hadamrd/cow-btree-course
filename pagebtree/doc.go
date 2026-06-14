@@ -93,7 +93,9 @@
 // reusable mmap pages without changing file length or removing those page IDs
 // from the freelist, and it skips free pages that a still-valid fallback
 // metadata root could recover; trace events expose attempted ranges, aggregate
-// counts, skipped fallback-recoverable pages, and failure reasons. Close returns
+// counts, skipped fallback-recoverable pages, and failure reasons.
+// MmapHolePunchProfile reports the build's sparse-hole primitive or unsupported
+// reason before running an experiment. Close returns
 // ErrActiveReaders for mmap-backed trees while snapshots are active, because
 // those snapshots still read slices backed by the mapping. If close-time Sync
 // fails but the mmap resources are still released, the handle is marked closed

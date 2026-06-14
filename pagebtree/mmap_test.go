@@ -3968,6 +3968,32 @@ func TestMmapPunchFreePagesDoesNotPunchReaderPinnedRetiredPages(t *testing.T) {
 	}
 }
 
+func TestMmapHolePunchProfileReportsCapabilityContract(t *testing.T) {
+	profile := MmapHolePunchProfile()
+	if profile.Platform == "" {
+		t.Fatalf("Platform = empty")
+	}
+	if profile.RequiresPageAlignedRanges != true {
+		t.Fatalf("RequiresPageAlignedRanges = false, want true")
+	}
+	if !profile.Experimental {
+		t.Fatalf("Experimental = false, want true")
+	}
+	if profile.Supported {
+		if profile.Primitive == "" {
+			t.Fatalf("supported Primitive = empty")
+		}
+		if !profile.PreservesFileSize {
+			t.Fatalf("PreservesFileSize = false on supported profile")
+		}
+		if profile.UnsupportedReason != "" {
+			t.Fatalf("UnsupportedReason = %q on supported profile", profile.UnsupportedReason)
+		}
+	} else if profile.UnsupportedReason == "" {
+		t.Fatalf("unsupported profile has empty UnsupportedReason: %+v", profile)
+	}
+}
+
 func TestMmapTraceHookReportsPunchFreePages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})

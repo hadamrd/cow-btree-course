@@ -202,6 +202,12 @@ func TestRunPrintsOptionalSpaceSection(t *testing.T) {
 	if report.SpaceStats.SparseBytes != wantSparseBytes {
 		t.Fatalf("SparseBytes = %d, want max(logical-allocated,0) %d", report.SpaceStats.SparseBytes, wantSparseBytes)
 	}
+	if report.HolePunchProfile == nil {
+		t.Fatalf("HolePunchProfile = nil, want section with --space")
+	}
+	if report.HolePunchProfile.Platform == "" || !report.HolePunchProfile.RequiresPageAlignedRanges {
+		t.Fatalf("HolePunchProfile = %+v, want platform and page-aligned range contract", *report.HolePunchProfile)
+	}
 }
 
 func TestRunPrintsKeySample(t *testing.T) {
