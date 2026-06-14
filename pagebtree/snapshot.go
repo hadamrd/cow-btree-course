@@ -1,13 +1,14 @@
 package pagebtree
 
 type Snapshot struct {
-	tree     *Tree
-	pages    map[PageID]*page
-	root     PageID
-	length   int
-	revision uint64
-	degree   int
-	closed   bool
+	tree          *Tree
+	pages         map[PageID]*page
+	root          PageID
+	length        int
+	revision      uint64
+	degree        int
+	keyComparator func(string, string) int
+	closed        bool
 }
 
 func (s *Snapshot) Len() int {
@@ -28,28 +29,28 @@ func (s *Snapshot) Get(key string) ([]byte, bool) {
 	if s == nil || s.closed {
 		return nil, false
 	}
-	return searchPage(s.pages, s.root, key)
+	return searchPage(s.pages, s.root, key, s.compareKeys)
 }
 
 func (s *Snapshot) Range(visit func(string, []byte) bool) {
 	if s == nil || s.closed {
 		return
 	}
-	rangePage(s.pages, s.root, visit)
+	rangePage(s.pages, s.root, s.compareKeys, visit)
 }
 
 func (s *Snapshot) RangeFrom(start string, visit func(string, []byte) bool) {
 	if s == nil || s.closed {
 		return
 	}
-	rangePageFrom(s.pages, s.root, start, visit)
+	rangePageFrom(s.pages, s.root, start, s.compareKeys, visit)
 }
 
 func (s *Snapshot) RangeBetween(start, end string, visit func(string, []byte) bool) {
 	if s == nil || s.closed {
 		return
 	}
-	rangePageBetween(s.pages, s.root, start, end, visit)
+	rangePageBetween(s.pages, s.root, start, end, s.compareKeys, visit)
 }
 
 func (s *Snapshot) Stats() Stats {
@@ -57,6 +58,13 @@ func (s *Snapshot) Stats() Stats {
 		return Stats{}
 	}
 	return statsForSnapshot(s.pages, s.root, s.length, s.revision, s.degree)
+}
+
+func (s *Snapshot) compareKeys(left, right string) int {
+	if s == nil || s.keyComparator == nil {
+		return compareStrings(left, right)
+	}
+	return s.keyComparator(left, right)
 }
 
 func (s *Snapshot) Close() {

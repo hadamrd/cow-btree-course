@@ -58,6 +58,7 @@ type MmapOptions struct {
 	Degree                   int
 	MaxPages                 int
 	KeyOrder                 KeyOrder
+	KeyComparator            KeyComparator
 	AccessPattern            MmapAccessPattern
 	PageCacheCapacity        int
 	RangePrefetchLeafWindow  int
@@ -107,6 +108,9 @@ const (
 )
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
+	if options.KeyComparator != nil {
+		return nil, fmt.Errorf("%w: custom key comparator is not persisted for mmap trees", ErrMetaInvariant)
+	}
 	keyOrder, err := validateMmapKeyOrder(options.KeyOrder)
 	if err != nil {
 		return nil, err
@@ -191,6 +195,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		nextPage:                 firstTreePageID,
 		degree:                   normalizeDegree(options.Degree),
 		keyOrder:                 keyOrder,
+		keyComparator:            bytewiseKeyComparator,
 		arena:                    arena,
 		pageCache:                newPageCache(options.PageCacheCapacity),
 		rangePrefetchLeafWindow:  normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
@@ -262,6 +267,7 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 		pages:                    map[PageID]*page{},
 		nextPage:                 firstTreePageID,
 		keyOrder:                 KeyOrderBytewise,
+		keyComparator:            bytewiseKeyComparator,
 		arena:                    arena,
 		readOnly:                 true,
 		pageCache:                newPageCache(DefaultPageCacheCapacity),

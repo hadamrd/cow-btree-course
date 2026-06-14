@@ -1611,7 +1611,7 @@ func TestMmapRangeFromStartsAtLowerBoundAndPrefetchesNextLeaves(t *testing.T) {
 		t.Fatalf("RangeFrom did not advise any next leaf pages")
 	}
 
-	startLeaf := leafForKey(tree.pages, tree.root, "key-17")
+	startLeaf := leafForKey(tree.pages, tree.root, "key-17", compareStrings)
 	if startLeaf == 0 {
 		t.Fatalf("leafForKey(key-17) returned 0")
 	}
@@ -6014,6 +6014,26 @@ func TestOpenMmapRejectsUnsupportedKeyOrderOption(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "key order") {
 		t.Fatalf("OpenMmap unsupported key order error = %v, want key-order detail", err)
+	}
+}
+
+func TestOpenMmapRejectsCustomComparator(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:        2,
+		MaxPages:      64,
+		KeyComparator: KeyComparatorFunc(func(left, right string) int { return -strings.Compare(left, right) }),
+	})
+	if err == nil {
+		tree.Close()
+		t.Fatalf("OpenMmap succeeded with custom comparator")
+	}
+	if !errors.Is(err, ErrMetaInvariant) {
+		t.Fatalf("OpenMmap custom comparator error = %v, want ErrMetaInvariant", err)
+	}
+	if !strings.Contains(err.Error(), "custom key comparator") {
+		t.Fatalf("OpenMmap custom comparator error = %v, want custom comparator detail", err)
 	}
 }
 

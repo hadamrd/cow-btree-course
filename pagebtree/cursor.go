@@ -76,7 +76,7 @@ func newCursorBetween(snapshot *Snapshot, owned bool, start, end string) *Cursor
 	cursor.end = end
 	cursor.hasLower = true
 	cursor.hasEnd = true
-	if start >= end {
+	if cursor.compareKeys(start, end) >= 0 {
 		return cursor
 	}
 	cursor.First()
@@ -100,10 +100,10 @@ func (c *Cursor) Seek(key string) bool {
 	if !c.usable() {
 		return false
 	}
-	if c.hasLower && key < c.lower {
+	if c.hasLower && c.compareKeys(key, c.lower) < 0 {
 		key = c.lower
 	}
-	if c.hasEnd && key >= c.end {
+	if c.hasEnd && c.compareKeys(key, c.end) >= 0 {
 		return c.invalidate()
 	}
 	c.stack = c.stack[:0]
@@ -113,11 +113,11 @@ func (c *Cursor) Seek(key string) bool {
 			return c.invalidate()
 		}
 		if p.isLeaf() {
-			index, _ := p.searchSlot(key)
+			index, _ := p.searchSlotWithComparator(key, c.compareKeys)
 			c.stack = append(c.stack, cursorFrame{id: id, index: index})
 			return c.loadForward()
 		}
-		index := branchChildIndex(p, key)
+		index := branchChildIndex(p, key, c.compareKeys)
 		c.stack = append(c.stack, cursorFrame{id: id, index: index})
 		id = p.branchChild(index)
 	}
@@ -239,7 +239,7 @@ func (c *Cursor) descendRight(id PageID) bool {
 }
 
 func (c *Cursor) seekBefore(key string) bool {
-	if c.hasLower && key <= c.lower {
+	if c.hasLower && c.compareKeys(key, c.lower) <= 0 {
 		return c.invalidate()
 	}
 	c.stack = c.stack[:0]
@@ -248,7 +248,7 @@ func (c *Cursor) seekBefore(key string) bool {
 		if p == nil {
 			return c.invalidate()
 		}
-		index, equal := p.searchSlot(key)
+		index, equal := p.searchSlotWithComparator(key, c.compareKeys)
 		if p.isLeaf() {
 			index--
 			c.stack = append(c.stack, cursorFrame{id: id, index: index})
@@ -275,7 +275,7 @@ func (c *Cursor) loadForward() bool {
 		if p.isLeaf() {
 			if frame.index < int(p.slotCount()) {
 				c.loadLeafSlot(p, frame.index)
-				if c.hasEnd && c.key >= c.end {
+				if c.hasEnd && c.compareKeys(c.key, c.end) >= 0 {
 					return c.invalidate()
 				}
 				return true
@@ -303,7 +303,7 @@ func (c *Cursor) loadBackward() bool {
 		if p.isLeaf() {
 			if frame.index >= 0 {
 				c.loadLeafSlot(p, frame.index)
-				if c.hasLower && c.key < c.lower {
+				if c.hasLower && c.compareKeys(c.key, c.lower) < 0 {
 					return c.invalidate()
 				}
 				return true
@@ -318,6 +318,13 @@ func (c *Cursor) loadBackward() bool {
 		c.stack = c.stack[:last]
 	}
 	return c.invalidate()
+}
+
+func (c *Cursor) compareKeys(left, right string) int {
+	if c != nil && c.snapshot != nil {
+		return c.snapshot.compareKeys(left, right)
+	}
+	return compareStrings(left, right)
 }
 
 func (c *Cursor) loadLeafSlot(p *page, index int) {

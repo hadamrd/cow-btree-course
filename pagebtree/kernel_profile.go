@@ -13,6 +13,7 @@ type MDBKernelProfile struct {
 	MaxMappedPages int
 	AccessPattern  MmapAccessPattern
 	KeyOrder       KeyOrder
+	KeyComparator  KeyComparatorKind
 	ReadOnly       bool
 	Closed         bool
 
@@ -62,6 +63,7 @@ func (t *Tree) MDBKernelProfile() MDBKernelProfile {
 		Storage:                       "memory",
 		PageSize:                      PageSize,
 		KeyOrder:                      KeyOrderBytewise,
+		KeyComparator:                 KeyComparatorBytewise,
 		SlottedPages:                  true,
 		BPlusTreePages:                true,
 		CopyOnWrite:                   true,
@@ -80,6 +82,9 @@ func (t *Tree) MDBKernelProfile() MDBKernelProfile {
 	profile.ReadOnly = t.readOnly
 	profile.Closed = t.closed
 	profile.KeyOrder = normalizeKeyOrder(t.keyOrder)
+	if t.customComparator {
+		profile.KeyComparator = KeyComparatorCustom
+	}
 	profile.Root = t.root
 	profile.Revision = t.revision
 	profile.Keys = t.length

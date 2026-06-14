@@ -74,7 +74,7 @@ func (tx *ReadWriteTx) Delete(key string) {
 // DeleteRange stages removal of keys greater than or equal to start and less
 // than end in the transaction-visible view.
 func (tx *ReadWriteTx) DeleteRange(start, end string) {
-	if tx == nil || tx.closed || tx.batch == nil || compareStrings(start, end) >= 0 {
+	if tx == nil || tx.closed || tx.batch == nil || tx.compareKeys(start, end) >= 0 {
 		return
 	}
 	for _, key := range tx.visibleKeysBetween(start, end) {
@@ -85,7 +85,7 @@ func (tx *ReadWriteTx) DeleteRange(start, end string) {
 // RangeBetween visits transaction-visible keys greater than or equal to start
 // and less than end.
 func (tx *ReadWriteTx) RangeBetween(start, end string, visit func(string, []byte) bool) {
-	if tx == nil || tx.closed || visit == nil || compareStrings(start, end) >= 0 {
+	if tx == nil || tx.closed || visit == nil || tx.compareKeys(start, end) >= 0 {
 		return
 	}
 	for _, key := range tx.visibleKeysBetween(start, end) {
@@ -116,12 +116,22 @@ func (tx *ReadWriteTx) visibleKeysBetween(start, end string) []string {
 		if staged.deleted || seen[key] {
 			continue
 		}
-		if compareStrings(key, start) >= 0 && compareStrings(key, end) < 0 {
+		if tx.compareKeys(key, start) >= 0 && tx.compareKeys(key, end) < 0 {
 			keys = append(keys, key)
 		}
 	}
-	sort.Strings(keys)
+	sort.Slice(keys, func(i, j int) bool { return tx.compareKeys(keys[i], keys[j]) < 0 })
 	return keys
+}
+
+func (tx *ReadWriteTx) compareKeys(left, right string) int {
+	if tx != nil && tx.tree != nil {
+		return tx.tree.compareKeys(left, right)
+	}
+	if tx != nil && tx.base != nil {
+		return tx.base.compareKeys(left, right)
+	}
+	return compareStrings(left, right)
 }
 
 // Rollback discards all staged operations.

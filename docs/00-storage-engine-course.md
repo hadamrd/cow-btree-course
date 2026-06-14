@@ -787,8 +787,10 @@ Serious pieces in this repository:
 
 - Real fixed-size slotted pages.
 - String-key and opaque byte-key APIs ordered by bytewise page-key comparison.
+- A memory-backed `KeyComparator` boundary used by search, ranges, cursors,
+  transactions, validation, and derived branch-routing cache lookups.
 - mmap metadata that persists the bytewise key-order identity and rejects
-  unsupported ordering semantics on reopen.
+  unsupported ordering semantics or non-persisted custom comparators on reopen.
 - Direct slot binary search for point lookup.
 - Branch child page IDs stored in page bytes.
 - Copy-on-write root publication.
@@ -851,7 +853,8 @@ Still research or incomplete compared with a production engine:
 - No production-grade crash test harness with true power-fail fault injection;
   sync publication, transaction sync publication, mmap growth, compact shrink,
   large-freelist spill, and large-reclaim spill have process-exit probes.
-- No pluggable comparator or locale/collation layer; byte-key APIs use the
+- No persisted mmap custom-comparator identity or locale/collation layer yet;
+  memory-backed trees can use a custom comparator, but mmap files still use the
   persisted bytewise page order.
 - Insertion and delete redistribution use byte-aware split-point selection, and
   leaf/branch repair have configurable low-byte-occupancy triggers at the
@@ -862,7 +865,7 @@ Still research or incomplete compared with a production engine:
 - No benchstat baseline history or CI performance gate yet.
 - No production-grade tracing pipeline beyond the synchronous mmap trace hook
   and small JSONL exporter.
-- No multi-database catalog, duplicate keys, or comparator plugins.
+- No multi-database catalog, duplicate keys, or persisted comparator plugins.
 - No portability story beyond the Unix mmap path and non-Unix stubs.
 
 The value is that the core mechanisms are visible. You can read the code without

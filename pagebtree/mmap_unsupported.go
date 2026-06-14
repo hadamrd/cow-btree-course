@@ -10,6 +10,7 @@ type MmapOptions struct {
 	Degree                   int
 	MaxPages                 int
 	KeyOrder                 KeyOrder
+	KeyComparator            KeyComparator
 	AccessPattern            MmapAccessPattern
 	PageCacheCapacity        int
 	RangePrefetchLeafWindow  int

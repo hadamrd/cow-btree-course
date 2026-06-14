@@ -49,9 +49,9 @@ func normalizePageCacheCapacity(capacity int) int {
 	return capacity
 }
 
-func (c *pageCache) searchBranchChild(p *page, key string) PageID {
+func (c *pageCache) searchBranchChild(p *page, key string, compare func(string, string) int) PageID {
 	entry := c.branch(p)
-	return entry.children[childIndex(entry.keys, key)]
+	return entry.children[childIndex(entry.keys, key, compare)]
 }
 
 func (c *pageCache) branch(p *page) cachedBranch {

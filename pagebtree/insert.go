@@ -27,7 +27,7 @@ func (t *Tree) insertLeaf(pageID PageID, key string, value []byte) ([]byte, bool
 	p := t.pages[pageID]
 	entries := p.leafEntries()
 	index, found := slices.BinarySearchFunc(entries, key, func(entry leafEntry, key string) int {
-		return compareStrings(entry.key, key)
+		return t.compareKeys(entry.key, key)
 	})
 	if found {
 		old := resolveLeafValue(t.pages, entries[index].value, entries[index].slotFlags)
@@ -111,7 +111,7 @@ func (t *Tree) insertBranch(pageID PageID, key string, value []byte) ([]byte, bo
 	p := t.pages[pageID]
 	keys, children := p.branchParts()
 
-	index := childIndex(keys, key)
+	index := childIndex(keys, key, t.compareKeys)
 	copiedChildID := t.copyPage(children[index])
 	children[index] = copiedChildID
 	mustWriteBranchParts(p, keys, children)

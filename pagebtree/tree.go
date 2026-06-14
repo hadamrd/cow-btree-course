@@ -11,6 +11,8 @@ type Tree struct {
 	syncedRevision           uint64
 	degree                   int
 	keyOrder                 KeyOrder
+	keyComparator            KeyComparator
+	customComparator         bool
 	activeReaders            map[uint64]int
 	retired                  []retiredPage
 	free                     []PageID
@@ -34,6 +36,7 @@ type Options struct {
 	PageCacheCapacity        int
 	RangePrefetchLeafWindow  int
 	MinRepairPageFillPercent int
+	KeyComparator            KeyComparator
 }
 
 func New(degree int) *Tree {
@@ -46,6 +49,8 @@ func NewWithOptions(degree int, options Options) *Tree {
 		nextPage:                 1,
 		degree:                   normalizeDegree(degree),
 		keyOrder:                 KeyOrderBytewise,
+		keyComparator:            normalizeKeyComparator(options.KeyComparator),
+		customComparator:         options.KeyComparator != nil,
 		pageCache:                newPageCache(options.PageCacheCapacity),
 		rangePrefetchLeafWindow:  normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
 		minRepairPageFillPercent: normalizeMinRepairPageFillPercent(options.MinRepairPageFillPercent),
@@ -64,7 +69,7 @@ func (t *Tree) Get(key string) ([]byte, bool) {
 	if t.closed {
 		return nil, false
 	}
-	return searchPageWithCache(t.pages, t.root, key, &t.pageCache)
+	return searchPageWithCache(t.pages, t.root, key, t.compareKeys, &t.pageCache)
 }
 
 // Put inserts or replaces a key in the current root version.
@@ -120,10 +125,10 @@ func (t *Tree) Range(visit func(string, []byte) bool) {
 	if t.closed {
 		return
 	}
-	if t.activeReaderCount() == 0 && rangeLinkedLeaves(t.pages, t.root, t.rangePrefetchLeafWindow, t.rangePrefetcher(), visit) {
+	if t.activeReaderCount() == 0 && rangeLinkedLeaves(t.pages, t.root, t.compareKeys, t.rangePrefetchLeafWindow, t.rangePrefetcher(), visit) {
 		return
 	}
-	rangePage(t.pages, t.root, visit)
+	rangePage(t.pages, t.root, t.compareKeys, visit)
 }
 
 // RangeFrom visits keys greater than or equal to start in sorted order.
@@ -131,10 +136,10 @@ func (t *Tree) RangeFrom(start string, visit func(string, []byte) bool) {
 	if t.closed {
 		return
 	}
-	if t.activeReaderCount() == 0 && rangeLinkedLeavesFrom(t.pages, t.root, start, t.rangePrefetchLeafWindow, t.rangePrefetcher(), visit) {
+	if t.activeReaderCount() == 0 && rangeLinkedLeavesFrom(t.pages, t.root, start, t.compareKeys, t.rangePrefetchLeafWindow, t.rangePrefetcher(), visit) {
 		return
 	}
-	rangePageFrom(t.pages, t.root, start, visit)
+	rangePageFrom(t.pages, t.root, start, t.compareKeys, visit)
 }
 
 // RangeBetween visits keys greater than or equal to start and less than end.
@@ -142,10 +147,10 @@ func (t *Tree) RangeBetween(start, end string, visit func(string, []byte) bool) 
 	if t.closed {
 		return
 	}
-	if t.activeReaderCount() == 0 && rangeLinkedLeavesBetween(t.pages, t.root, start, end, t.rangePrefetchLeafWindow, t.rangePrefetcher(), visit) {
+	if t.activeReaderCount() == 0 && rangeLinkedLeavesBetween(t.pages, t.root, start, end, t.compareKeys, t.rangePrefetchLeafWindow, t.rangePrefetcher(), visit) {
 		return
 	}
-	rangePageBetween(t.pages, t.root, start, end, visit)
+	rangePageBetween(t.pages, t.root, start, end, t.compareKeys, visit)
 }
 
 func (t *Tree) rangePrefetcher() func(PageID, PageID) {
@@ -211,13 +216,21 @@ func (t *Tree) Snapshot() *Snapshot {
 	}
 	t.beginRead(t.revision)
 	return &Snapshot{
-		tree:     t,
-		pages:    t.pages,
-		root:     t.root,
-		length:   t.length,
-		revision: t.revision,
-		degree:   t.degree,
+		tree:          t,
+		pages:         t.pages,
+		root:          t.root,
+		length:        t.length,
+		revision:      t.revision,
+		degree:        t.degree,
+		keyComparator: t.compareKeys,
 	}
+}
+
+func (t *Tree) compareKeys(left, right string) int {
+	if t == nil || t.keyComparator == nil {
+		return compareStrings(left, right)
+	}
+	return t.keyComparator.CompareKeys(left, right)
 }
 
 func (t *Tree) Stats() Stats {

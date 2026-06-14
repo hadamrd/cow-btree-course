@@ -157,14 +157,18 @@ func slotBase(index int) int {
 }
 
 func (p *page) validateLayout() error {
+	return p.validateLayoutWithComparator(compareStrings)
+}
+
+func (p *page) validateLayoutWithComparator(compare func(string, string) int) error {
 	switch p.flags() {
 	case flagLeaf:
-		return p.validateSlottedLayout()
+		return p.validateSlottedLayoutWithComparator(compare)
 	case flagBranch:
 		if p.leftmostChild() == 0 {
 			return fmt.Errorf("%w: branch page %d has zero leftmost child", ErrPageLayout, p.id)
 		}
-		return p.validateSlottedLayout()
+		return p.validateSlottedLayoutWithComparator(compare)
 	case flagOverflow:
 		return p.validateOverflowLayout()
 	case flagFreelist:
@@ -177,6 +181,10 @@ func (p *page) validateLayout() error {
 }
 
 func (p *page) validateSlottedLayout() error {
+	return p.validateSlottedLayoutWithComparator(compareStrings)
+}
+
+func (p *page) validateSlottedLayoutWithComparator(compare func(string, string) int) error {
 	slotCount := int(p.slotCount())
 	slotEnd := pageHeaderSize + slotCount*slotSize
 	if slotEnd > PageSize {
@@ -212,7 +220,7 @@ func (p *page) validateSlottedLayout() error {
 			return fmt.Errorf("%w: leaf page %d slot %d has flags %x", ErrPageLayout, p.id, i, slot.flags)
 		}
 		key := p.readCellKey(i)
-		if i > 0 && previousKey >= key {
+		if i > 0 && compare(previousKey, key) >= 0 {
 			return fmt.Errorf("%w: page %d slot keys out of order at %d", ErrPageLayout, p.id, i)
 		}
 		previousKey = key
@@ -332,27 +340,14 @@ func (p *page) branchChild(index int) PageID {
 }
 
 func (p *page) compareCellKey(index int, key string) int {
+	return p.compareCellKeyWithComparator(index, key, compareStrings)
+}
+
+func (p *page) compareCellKeyWithComparator(index int, key string, compare func(string, string) int) int {
 	slot := p.readSlot(index)
 	keyStart := int(slot.offset)
-	keyBytes := p.data[keyStart : keyStart+int(slot.keyLen)]
-
-	for i := 0; i < len(keyBytes) && i < len(key); i++ {
-		switch {
-		case keyBytes[i] < key[i]:
-			return -1
-		case keyBytes[i] > key[i]:
-			return 1
-		}
-	}
-
-	switch {
-	case len(keyBytes) < len(key):
-		return -1
-	case len(keyBytes) > len(key):
-		return 1
-	default:
-		return 0
-	}
+	keyEnd := keyStart + int(slot.keyLen)
+	return compare(string(p.data[keyStart:keyEnd]), key)
 }
 
 func (p *page) searchLeafValue(key string) ([]byte, bool) {
@@ -364,7 +359,11 @@ func (p *page) searchLeafValue(key string) ([]byte, bool) {
 }
 
 func (p *page) searchLeafCell(key string) ([]byte, uint16, bool) {
-	index, found := p.searchSlot(key)
+	return p.searchLeafCellWithComparator(key, compareStrings)
+}
+
+func (p *page) searchLeafCellWithComparator(key string, compare func(string, string) int) ([]byte, uint16, bool) {
+	index, found := p.searchSlotWithComparator(key, compare)
 	if !found {
 		return nil, 0, false
 	}
@@ -380,7 +379,11 @@ func (p *page) overflowRef(key string) (overflowRef, bool) {
 }
 
 func (p *page) searchBranchChild(key string) PageID {
-	index, found := p.searchSlot(key)
+	return p.searchBranchChildWithComparator(key, compareStrings)
+}
+
+func (p *page) searchBranchChildWithComparator(key string, compare func(string, string) int) PageID {
+	index, found := p.searchSlotWithComparator(key, compare)
 	if found {
 		return p.readCellPageID(index)
 	}
@@ -391,10 +394,14 @@ func (p *page) searchBranchChild(key string) PageID {
 }
 
 func (p *page) searchSlot(key string) (int, bool) {
+	return p.searchSlotWithComparator(key, compareStrings)
+}
+
+func (p *page) searchSlotWithComparator(key string, compare func(string, string) int) (int, bool) {
 	low, high := 0, int(p.slotCount())
 	for low < high {
 		mid := low + (high-low)/2
-		switch cmp := p.compareCellKey(mid, key); {
+		switch cmp := p.compareCellKeyWithComparator(mid, key, compare); {
 		case cmp < 0:
 			low = mid + 1
 		case cmp > 0:

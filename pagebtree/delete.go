@@ -50,7 +50,7 @@ func (t *Tree) deleteFrom(pageID PageID, key string) bool {
 func (t *Tree) deleteFromLeaf(p *page, key string) bool {
 	entries := p.leafEntries()
 	index, found := slices.BinarySearchFunc(entries, key, func(entry leafEntry, key string) int {
-		return compareStrings(entry.key, key)
+		return t.compareKeys(entry.key, key)
 	})
 	if !found {
 		return false
@@ -64,7 +64,7 @@ func (t *Tree) deleteFromLeaf(p *page, key string) bool {
 
 func (t *Tree) deleteFromBranch(p *page, key string) bool {
 	keys, children := p.branchParts()
-	index := childIndex(keys, key)
+	index := childIndex(keys, key, t.compareKeys)
 	children, copiedChildID := t.borrowBranchChildBeforeDescent(children, index)
 	if copiedChildID == 0 {
 		copiedChildID = t.copyPage(children[index])

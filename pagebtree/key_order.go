@@ -17,3 +17,36 @@ func normalizeKeyOrder(order KeyOrder) KeyOrder {
 	}
 	return order
 }
+
+// KeyComparator compares two logical keys in the order used by a tree.
+//
+// The comparator must define a strict total order and must remain stable for
+// the lifetime of the tree. Mmap files currently persist only KeyOrderBytewise,
+// so custom comparators are accepted for memory-backed trees and rejected for
+// mmap-backed trees until a durable comparator identity exists.
+type KeyComparator interface {
+	CompareKeys(left, right string) int
+}
+
+// KeyComparatorFunc adapts a function to KeyComparator.
+type KeyComparatorFunc func(left, right string) int
+
+func (f KeyComparatorFunc) CompareKeys(left, right string) int {
+	return f(left, right)
+}
+
+type KeyComparatorKind uint32
+
+const (
+	KeyComparatorBytewise KeyComparatorKind = 1
+	KeyComparatorCustom   KeyComparatorKind = 2
+)
+
+var bytewiseKeyComparator KeyComparator = KeyComparatorFunc(compareStrings)
+
+func normalizeKeyComparator(comparator KeyComparator) KeyComparator {
+	if comparator == nil {
+		return bytewiseKeyComparator
+	}
+	return comparator
+}

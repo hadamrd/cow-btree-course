@@ -82,6 +82,56 @@ func TestMDBKernelProfileDescribesMemoryCoreWithoutMmapMechanics(t *testing.T) {
 	}
 }
 
+func TestMemoryTreeUsesCustomComparatorBoundary(t *testing.T) {
+	reverse := KeyComparatorFunc(func(left, right string) int {
+		return -strings.Compare(left, right)
+	})
+	tree := NewWithOptions(2, Options{KeyComparator: reverse})
+	for _, key := range []string{"alpha", "bravo", "charlie", "delta", "echo"} {
+		tree.Put(key, []byte("value-"+key))
+	}
+
+	if got, ok := tree.Get("charlie"); !ok || string(got) != "value-charlie" {
+		t.Fatalf("Get(charlie) = %q, %v; want value-charlie, true", got, ok)
+	}
+
+	var ranged []string
+	tree.Range(func(key string, value []byte) bool {
+		ranged = append(ranged, key)
+		return true
+	})
+	if want := []string{"echo", "delta", "charlie", "bravo", "alpha"}; !reflect.DeepEqual(ranged, want) {
+		t.Fatalf("Range keys = %v, want %v", ranged, want)
+	}
+
+	var bounded []string
+	tree.RangeBetween("delta", "bravo", func(key string, value []byte) bool {
+		bounded = append(bounded, key)
+		return true
+	})
+	if want := []string{"delta", "charlie"}; !reflect.DeepEqual(bounded, want) {
+		t.Fatalf("RangeBetween(delta, bravo) keys = %v, want %v", bounded, want)
+	}
+
+	cursor := tree.CursorBetween("echo", "bravo")
+	defer cursor.Close()
+	var cursorKeys []string
+	for cursor.Valid() {
+		cursorKeys = append(cursorKeys, cursor.Key())
+		cursor.Next()
+	}
+	if want := []string{"echo", "delta", "charlie"}; !reflect.DeepEqual(cursorKeys, want) {
+		t.Fatalf("CursorBetween(echo, bravo) keys = %v, want %v", cursorKeys, want)
+	}
+
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check custom comparator tree: %v", err)
+	}
+	if got := tree.MDBKernelProfile().KeyComparator; got != KeyComparatorCustom {
+		t.Fatalf("KeyComparator profile = %d, want custom", got)
+	}
+}
+
 func TestStatsReportsReachablePageByteFill(t *testing.T) {
 	tree := New(2)
 	for i := range 18 {
@@ -1468,7 +1518,7 @@ func TestRangeBetweenStopsBeforeReadingOutOfBoundLeafCellValue(t *testing.T) {
 	corruptSlotValueLen(leaf, 2, PageSize)
 
 	var got []string
-	rangePageBetween(map[PageID]*page{1: leaf}, 1, "alpha", "charlie", func(key string, value []byte) bool {
+	rangePageBetween(map[PageID]*page{1: leaf}, 1, "alpha", "charlie", compareStrings, func(key string, value []byte) bool {
 		got = append(got, fmt.Sprintf("%s=%s", key, value))
 		return true
 	})
@@ -1489,7 +1539,7 @@ func TestRangeFromStartsBeforeReadingLowerLeafCellValue(t *testing.T) {
 	corruptSlotValueLen(leaf, 0, PageSize)
 
 	var got []string
-	rangePageFrom(map[PageID]*page{1: leaf}, 1, "bravo", func(key string, value []byte) bool {
+	rangePageFrom(map[PageID]*page{1: leaf}, 1, "bravo", compareStrings, func(key string, value []byte) bool {
 		got = append(got, fmt.Sprintf("%s=%s", key, value))
 		return true
 	})
@@ -1609,10 +1659,10 @@ func TestPageCacheRefreshesBranchRoutingWhenChecksumChanges(t *testing.T) {
 	branch := newPage(9, flagBranch)
 	mustWriteBranchParts(branch, []string{"bravo", "delta"}, []PageID{10, 20, 30})
 
-	if got := cache.searchBranchChild(branch, "charlie"); got != 20 {
+	if got := cache.searchBranchChild(branch, "charlie", compareStrings); got != 20 {
 		t.Fatalf("first cached child = %d, want 20", got)
 	}
-	if got := cache.searchBranchChild(branch, "charlie"); got != 20 {
+	if got := cache.searchBranchChild(branch, "charlie", compareStrings); got != 20 {
 		t.Fatalf("second cached child = %d, want 20", got)
 	}
 	if cache.stats.Hits == 0 {
@@ -1620,7 +1670,7 @@ func TestPageCacheRefreshesBranchRoutingWhenChecksumChanges(t *testing.T) {
 	}
 
 	mustWriteBranchParts(branch, []string{"bravo", "delta"}, []PageID{10, 200, 30})
-	if got := cache.searchBranchChild(branch, "charlie"); got != 200 {
+	if got := cache.searchBranchChild(branch, "charlie", compareStrings); got != 200 {
 		t.Fatalf("refreshed cached child = %d, want 200", got)
 	}
 	if cache.stats.Invalidations == 0 {
@@ -1637,10 +1687,10 @@ func TestPageCacheEvictsLeastRecentlyUsedBranch(t *testing.T) {
 	third := newPage(3, flagBranch)
 	mustWriteBranchParts(third, []string{"m"}, []PageID{30, 31})
 
-	cache.searchBranchChild(first, "a")
-	cache.searchBranchChild(second, "a")
-	cache.searchBranchChild(first, "a")
-	cache.searchBranchChild(third, "a")
+	cache.searchBranchChild(first, "a", compareStrings)
+	cache.searchBranchChild(second, "a", compareStrings)
+	cache.searchBranchChild(first, "a", compareStrings)
+	cache.searchBranchChild(third, "a", compareStrings)
 
 	if _, ok := cache.branches[first.id]; !ok {
 		t.Fatalf("recently used branch %d was evicted", first.id)
@@ -1671,7 +1721,7 @@ func TestRangeBetweenStopsBeforeReadingOutOfBoundBranchChildValue(t *testing.T) 
 		20: right,
 	}
 	var got []string
-	rangePageBetween(pages, 9, "alpha", "bravo", func(key string, value []byte) bool {
+	rangePageBetween(pages, 9, "alpha", "bravo", compareStrings, func(key string, value []byte) bool {
 		got = append(got, fmt.Sprintf("%s=%s", key, value))
 		return true
 	})

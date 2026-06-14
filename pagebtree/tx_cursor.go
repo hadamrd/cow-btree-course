@@ -23,7 +23,7 @@ func (tx *ReadWriteTx) CursorBetween(start, end string) *TxCursor {
 	cursor := &TxCursor{
 		tx:     tx,
 		index:  -1,
-		closed: tx == nil || tx.closed || compareStrings(start, end) >= 0,
+		closed: tx == nil || tx.closed || tx.compareKeys(start, end) >= 0,
 	}
 	if cursor.closed {
 		return cursor
@@ -55,7 +55,7 @@ func (c *TxCursor) Seek(key string) bool {
 		return false
 	}
 	for i, entry := range c.entries {
-		if compareStrings(entry.key, key) >= 0 {
+		if c.tx.compareKeys(entry.key, key) >= 0 {
 			c.index = i
 			c.valid = true
 			return true

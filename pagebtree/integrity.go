@@ -233,7 +233,7 @@ func (t *Tree) validatePageBounds(id PageID, seen map[PageID]bool, lower string,
 	if !p.validChecksum() {
 		return fmt.Errorf("%w: page %d", ErrPageChecksum, id)
 	}
-	if err := p.validateLayout(); err != nil {
+	if err := p.validateLayoutWithComparator(t.compareKeys); err != nil {
 		return err
 	}
 	if p.isLeaf() {
@@ -242,10 +242,10 @@ func (t *Tree) validatePageBounds(id PageID, seen map[PageID]bool, lower string,
 		}
 		for i := 0; i < int(p.slotCount()); i++ {
 			key := p.readCellKey(i)
-			if hasLower && compareStrings(key, lower) < 0 {
+			if hasLower && t.compareKeys(key, lower) < 0 {
 				return fmt.Errorf("%w: leaf page %d key %q outside branch bounds", ErrTreeInvariant, id, key)
 			}
-			if hasUpper && compareStrings(key, upper) >= 0 {
+			if hasUpper && t.compareKeys(key, upper) >= 0 {
 				return fmt.Errorf("%w: leaf page %d key %q outside branch bounds", ErrTreeInvariant, id, key)
 			}
 			slot := p.readSlot(i)
@@ -275,7 +275,7 @@ func (t *Tree) validatePageBounds(id PageID, seen map[PageID]bool, lower string,
 		if index < len(children)-1 {
 			childUpper, childHasUpper = p.readCellKey(index), true
 		}
-		if childHasLower && childHasUpper && compareStrings(childLower, childUpper) >= 0 {
+		if childHasLower && childHasUpper && t.compareKeys(childLower, childUpper) >= 0 {
 			return fmt.Errorf("%w: branch page %d child %d has empty key bounds", ErrTreeInvariant, id, index)
 		}
 		if err := t.validatePageBounds(child, seen, childLower, childHasLower, childUpper, childHasUpper); err != nil {
