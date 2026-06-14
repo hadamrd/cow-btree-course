@@ -141,6 +141,12 @@ func (tx *ReadWriteTx) Commit() bool {
 	return err == nil && result.Changed
 }
 
+// CommitSync commits staged operations and syncs the tree when they changed it.
+func (tx *ReadWriteTx) CommitSync() (bool, error) {
+	result, err := tx.CommitSyncDetailed()
+	return err == nil && result.Changed, err
+}
+
 // CommitDetailed applies staged operations and reports per-operation old values.
 func (tx *ReadWriteTx) CommitDetailed() (BatchCommitResult, error) {
 	if tx == nil || tx.closed || tx.batch == nil {
@@ -152,6 +158,31 @@ func (tx *ReadWriteTx) CommitDetailed() (BatchCommitResult, error) {
 		return BatchCommitResult{}, ErrTxConflict
 	}
 	return tx.batch.CommitDetailed()
+}
+
+// CommitSyncDetailed applies staged operations, reports their effects, and
+// syncs the tree when the commit changed it.
+//
+// If Sync fails, the returned BatchCommitResult still describes the logical
+// commit that is visible in this process. Callers must treat the returned error
+// as "durability not proven" and decide whether to close, retry Sync, or recover
+// from disk.
+func (tx *ReadWriteTx) CommitSyncDetailed() (BatchCommitResult, error) {
+	if tx == nil {
+		return BatchCommitResult{}, ErrBatchClosed
+	}
+	tree := tx.tree
+	result, err := tx.CommitDetailed()
+	if err != nil || !result.Changed {
+		return result, err
+	}
+	if tree == nil {
+		return result, ErrTreeClosed
+	}
+	if err := tree.Sync(); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func (tx *ReadWriteTx) close() {

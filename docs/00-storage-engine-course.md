@@ -358,6 +358,15 @@ then reopens the same file from the parent process. A crash before dirty data
 sync recovers the old root. A crash after metadata bytes are written recovers
 the new root.
 
+`WriteBatch.CommitSync` and `ReadWriteTx.CommitSync` are the ergonomic durable
+commit helpers: they commit, then call `Sync` only when the commit changed the
+tree. Their `CommitSyncDetailed` variants return the same per-operation
+`BatchCommitResult` as `CommitDetailed`. If the sync step fails, the result
+still describes the logical commit visible in the current process, but the
+returned error means durable publication is not proven. That is intentionally
+explicit; it avoids pretending that a failed `msync` can be hidden behind a
+boolean commit result.
+
 `MmapOptions.TraceHook` can observe this path without parsing logs. A traced
 sync emits `mmap-sync-begin`, one `mmap-sync-data-range` event per coalesced
 dirty data-page run, `mmap-sync-data-synced`, `mmap-sync-meta-published`, and
@@ -377,6 +386,8 @@ Code to read:
 - Metadata page sync: [`pagebtree/mmap.go#L617-L635`](../pagebtree/mmap.go#L617-L635)
 - Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
 - Transaction process-crash sync proof: [`pagebtree/mmap_process_crash_test.go#L57-L91`](../pagebtree/mmap_process_crash_test.go#L57-L91)
+- Batch commit-sync API and sync-error contract: [`pagebtree/batch.go#L130-L220`](../pagebtree/batch.go#L130-L220)
+- Transaction commit-sync API: [`pagebtree/tx.go#L144-L185`](../pagebtree/tx.go#L144-L185)
 
 ## Module 10: Dual Checked Metadata Pages
 
@@ -761,7 +772,9 @@ Serious pieces in this repository:
   read-your-writes point reads, `RangeBetween` over the staged view,
   transaction-visible range delete expansion, transaction cursors with staged
   `Delete`, rollback, optimistic revision-conflict detection, and one-revision
-  commit through the batch machinery.
+  commit through the batch machinery. Batches and read-write transactions also
+  expose `CommitSync`/`CommitSyncDetailed` helpers that commit and then call
+  `Sync` when the commit changed the tree.
 - A sorted-map model/fuzz target for put, delete, cursor delete, batch, batch
   range delete, read-write transaction, transaction cursor delete, range,
   cursor, bounded cursor, reverse bounded cursor, and integrity-check operation
@@ -789,8 +802,9 @@ Still research or incomplete compared with a production engine:
   transactions add read-your-writes `Get`, `RangeBetween`, range delete,
   transaction cursor delete, stable begin-revision reads, rollback, optimistic
   revision-conflict detection, one-revision commit, and a process-exit crash
-  proof for commit followed by mmap `Sync`. Explicit durable-commit APIs,
-  concurrency stress, and filesystem-specific fsync guarantees remain research
+  proof for commit followed by mmap `Sync`. `CommitSync` and
+  `CommitSyncDetailed` provide explicit commit-then-sync helpers, but
+  concurrency stress and filesystem-specific fsync guarantees remain research
   work.
 - No sparse-file hole punching.
 - No full vacuum that moves live pages.

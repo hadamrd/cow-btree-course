@@ -60,6 +60,24 @@ func TestReadWriteTxReadsOwnWritesAndPublishesOneRevision(t *testing.T) {
 	}
 }
 
+func TestReadWriteTxCommitSyncReturnsChanged(t *testing.T) {
+	tree := New(2)
+	tree.Put("alpha", []byte("one"))
+
+	tx := tree.BeginReadWrite()
+	tx.Put("bravo", []byte("two"))
+	changed, err := tx.CommitSync()
+	if err != nil {
+		t.Fatalf("tx CommitSync error: %v", err)
+	}
+	if !changed {
+		t.Fatalf("tx CommitSync changed = false, want true")
+	}
+	if got, ok := tree.Get("bravo"); !ok || string(got) != "two" {
+		t.Fatalf("Get(bravo) after tx CommitSync = %q, %v; want two, true", got, ok)
+	}
+}
+
 func TestReadWriteTxDeleteRangeUsesTransactionView(t *testing.T) {
 	tree := New(3)
 	for i := 0; i < 8; i++ {

@@ -127,6 +127,12 @@ func (b *WriteBatch) Commit() bool {
 	return err == nil && result.Changed
 }
 
+// CommitSync applies staged operations and syncs the tree when they changed it.
+func (b *WriteBatch) CommitSync() (bool, error) {
+	result, err := b.CommitSyncDetailed()
+	return err == nil && result.Changed, err
+}
+
 // CommitDetailed applies staged operations and reports per-operation old values.
 //
 // The detailed form keeps Commit's one-revision publication semantics but also
@@ -192,6 +198,24 @@ func (b *WriteBatch) CommitDetailed() (result BatchCommitResult, err error) {
 		b.tree.publishStagedMutation()
 	}
 	result.Changed = changed
+	return result, nil
+}
+
+// CommitSyncDetailed applies staged operations, reports their effects, and
+// syncs the tree when the commit changed it.
+//
+// If Sync fails, the returned BatchCommitResult still describes the logical
+// commit that is visible in this process. Callers must treat the returned error
+// as "durability not proven" and decide whether to close, retry Sync, or recover
+// from disk.
+func (b *WriteBatch) CommitSyncDetailed() (BatchCommitResult, error) {
+	result, err := b.CommitDetailed()
+	if err != nil || !result.Changed {
+		return result, err
+	}
+	if err := b.tree.Sync(); err != nil {
+		return result, err
+	}
 	return result, nil
 }
 

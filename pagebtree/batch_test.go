@@ -133,6 +133,24 @@ func TestWriteBatchCommitDetailedReportsOperationResults(t *testing.T) {
 	}
 }
 
+func TestWriteBatchCommitSyncReturnsChanged(t *testing.T) {
+	tree := New(2)
+	tree.Put("alpha", []byte("one"))
+
+	batch := tree.Batch()
+	batch.Put("bravo", []byte("two"))
+	changed, err := batch.CommitSync()
+	if err != nil {
+		t.Fatalf("CommitSync error: %v", err)
+	}
+	if !changed {
+		t.Fatalf("CommitSync changed = false, want true")
+	}
+	if got, ok := tree.Get("bravo"); !ok || string(got) != "two" {
+		t.Fatalf("Get(bravo) after CommitSync = %q, %v; want two, true", got, ok)
+	}
+}
+
 func TestWriteBatchDeleteRangePublishesOneRevision(t *testing.T) {
 	tree := New(3)
 	for i := 0; i < 12; i++ {
