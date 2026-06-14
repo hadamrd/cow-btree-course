@@ -147,9 +147,10 @@
 // exposes them, reducing PID-reuse and reboot/session ambiguity during stale-slot
 // cleanup; version-1 and version-2 sidecars remain readable. MmapReaderStats
 // reports live, stale, process-start-tagged, and boot-tagged reader-table slots,
-// InspectMmapReaderStats reports an existing sidecar without claiming an
-// observer slot, and CleanStaleMmapReaders clears slots owned by dead or
-// detectably reused owners. Existing malformed reader-table sidecars and live
+// InspectMmapReaderStats validates slots against the recovered usable root
+// revision without claiming an observer slot, and CleanStaleMmapReaders clears
+// slots owned by dead or detectably reused owners. Existing malformed
+// reader-table sidecars and live
 // slots with impossible future revisions or zero claim tokens return
 // ErrReaderTable instead of being reset, because resetting them could forget
 // active reader watermarks; writer reclaim treats reader-table scan errors as a

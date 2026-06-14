@@ -297,9 +297,10 @@ func validateReaderSlotRevision(slot int, current readerSlot, maxRevision uint64
 }
 
 // InspectMmapReaderStats reports mmap reader-table slots without claiming a
-// reader slot for the inspection itself. It opens only existing sidecar state.
+// reader slot for the inspection itself. It validates reader revisions against
+// the same recovered root revision normal mmap metadata recovery would accept.
 func InspectMmapReaderStats(path string) (MmapReaderStats, error) {
-	maxRevision, err := inspectMmapMaxRevision(path)
+	recoveredRevision, err := inspectMmapRecoveredRevision(path)
 	if err != nil {
 		return MmapReaderStats{}, err
 	}
@@ -311,7 +312,7 @@ func InspectMmapReaderStats(path string) (MmapReaderStats, error) {
 		return MmapReaderStats{}, nil
 	}
 	defer table.file.Close()
-	return table.stats(maxRevision)
+	return table.stats(recoveredRevision)
 }
 
 // MmapReaderStats reports the current mmap reader-table slots for this tree.
@@ -335,59 +336,62 @@ func (t *Tree) CleanStaleMmapReaders() (int, error) {
 	return cleared, nil
 }
 
-func inspectMmapMaxRevision(path string) (uint64, error) {
+func inspectMmapRecoveredRevision(path string) (uint64, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, err
 	}
-	defer file.Close()
 	if err := lockFile(file, false); err != nil {
+		file.Close()
 		return 0, err
 	}
-	defer unlockFile(file)
 
 	info, err := file.Stat()
 	if err != nil {
+		unlockFile(file)
+		file.Close()
 		return 0, err
 	}
 	if err := validateExistingMmapFileSize(info.Size()); err != nil {
+		unlockFile(file)
+		file.Close()
 		return 0, err
 	}
 
-	page := make([]byte, PageSize)
-	var maxRevision uint64
-	found := false
-	var lastMetaErr error
-	var lastMetaErrRevision uint64
-	var lastMetaErrHasRevision bool
-	for index := 0; index < metaPageCount; index++ {
-		if _, err := file.ReadAt(page, int64(index*PageSize)); err != nil {
-			return 0, err
-		}
-		record, ok, err := readMetaPageChecked(page)
-		if err != nil {
-			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaError(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, page)
-			continue
-		}
-		if !ok {
-			continue
-		}
-		if err := validateMetaSlot(record, index); err != nil {
-			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaErrorForRevision(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, record.revision)
-			continue
-		}
-		if !found || record.revision > maxRevision {
-			maxRevision = record.revision
-			found = true
-		}
+	size := int(info.Size())
+	data, err := mmapBytes(int(file.Fd()), 0, size, unix.PROT_READ, unix.MAP_SHARED)
+	if err != nil {
+		unlockFile(file)
+		file.Close()
+		return 0, err
 	}
-	if !found {
-		if lastMetaErr != nil {
-			return 0, lastMetaErr
-		}
-		return 0, fmt.Errorf("no valid mmap tree metadata page")
+	arena := &mmapArena{
+		file:     file,
+		path:     path,
+		data:     data,
+		maxPages: int(info.Size()/PageSize) - metaPageCount,
+		locked:   true,
+		readOnly: true,
 	}
-	return maxRevision, nil
+	tree := &Tree{
+		pages:                    map[PageID]*page{},
+		nextPage:                 firstTreePageID,
+		keyOrder:                 KeyOrderBytewise,
+		keyComparator:            keyComparatorForOrder(KeyOrderBytewise),
+		arena:                    arena,
+		readOnly:                 true,
+		pageCache:                newPageCache(DefaultPageCacheCapacity),
+		rangePrefetchLeafWindow:  DefaultRangePrefetchLeafWindow,
+		minRepairPageFillPercent: DefaultMinRepairPageFillPercent,
+	}
+	if err := tree.loadMeta(); err != nil {
+		return 0, errors.Join(err, arena.close())
+	}
+	revision := tree.revision
+	if err := arena.close(); err != nil {
+		return 0, err
+	}
+	return revision, nil
 }
 
 func (r *readerTable) ensureFileLocked() error {

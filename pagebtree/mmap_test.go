@@ -5973,6 +5973,67 @@ func TestInspectMmapReaderStatsDoesNotClaimReaderSlot(t *testing.T) {
 	}
 }
 
+func TestInspectMmapReaderStatsValidatesAgainstRecoveredRootRevision(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync older root: %v", err)
+	}
+	olderRevision := tree.Revision()
+	tree.Put("bravo", []byte("two"))
+	newerRevision := tree.Revision()
+	newestRoot := tree.Stats().Root
+	if newerRevision <= olderRevision {
+		t.Fatalf("newer revision = %d, want above older revision %d", newerRevision, olderRevision)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	corruptPagePayload(t, path, newestRoot)
+
+	recovered, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after corrupt newest root: %v", err)
+	}
+	if recovered.Revision() != olderRevision {
+		recovered.Close()
+		t.Fatalf("recovered revision = %d, want older revision %d", recovered.Revision(), olderRevision)
+	}
+	if err := recovered.Close(); err != nil {
+		t.Fatalf("Close recovered: %v", err)
+	}
+
+	table, err := openReaderTable(path)
+	if err != nil {
+		t.Fatalf("openReaderTable: %v", err)
+	}
+	if err := table.withLock(func() error {
+		return table.writeSlotLocked(0, readerSlot{
+			active:   true,
+			pid:      os.Getpid(),
+			revision: newerRevision,
+			token:    99,
+		})
+	}); err != nil {
+		table.close()
+		t.Fatalf("write reader slot at rejected revision: %v", err)
+	}
+	if err := table.close(); err != nil {
+		t.Fatalf("close injected reader table: %v", err)
+	}
+
+	stats, err := InspectMmapReaderStats(path)
+	if !errors.Is(err, ErrReaderTable) {
+		t.Fatalf("InspectMmapReaderStats = %+v, %v; want ErrReaderTable against recovered revision", stats, err)
+	}
+}
+
 func TestMmapReaderTableOpensLegacyV1Sidecar(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

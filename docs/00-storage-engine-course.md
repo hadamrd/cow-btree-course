@@ -604,11 +604,14 @@ keeps retired pages pinned instead of recycling from an untrusted watermark.
 pages, how many are pinned by the oldest reader watermark, how many would be
 reclaimable at the current watermark, the oldest reader revision when known,
 and whether a reader-table scan failure forced the conservative pin.
-`InspectMmapReaderStats(path)` is the passive inspection path: it reads checked
-metadata to learn the current revision, opens an existing `.readers` sidecar
-without creating it, and scans slots without claiming one for itself. That is
-the API `cmd/mmapinspect --readers` uses after closing its own read-only handle,
-so the act of observing reader pressure does not add an extra reader watermark.
+`InspectMmapReaderStats(path)` is the passive inspection path: it recovers the
+same usable root revision that normal metadata recovery would accept, opens an
+existing `.readers` sidecar without creating it, and scans slots without
+claiming one for itself. That is the API `cmd/mmapinspect --readers` uses after
+closing its own read-only handle, so the act of observing reader pressure does
+not add an extra reader watermark. If the newest checked metadata points at a
+torn root and recovery falls back to the older root, passive reader inspection
+validates slots against the older recovered revision too.
 
 Code to read:
 
