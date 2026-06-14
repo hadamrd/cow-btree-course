@@ -23,7 +23,7 @@ go run ./cmd/pagebtree-demo
 go run ./cmd/mmapbtree-demo
 go run ./cmd/mdbkernel-demo
 go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
-go run ./cmd/mmapinspect /path/to/source.db
+go run ./cmd/mmapinspect --readers --cache /path/to/source.db
 go run ./cmd/mmapcopycompact /path/to/source.db /path/to/compact.db
 go run ./cmd/mmapcompact /path/to/source.db
 go test ./pagebtree -run '^$' -bench 'Benchmark(PageTree|MmapTree)' -benchtime=100x

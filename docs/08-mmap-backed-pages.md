@@ -177,10 +177,12 @@ go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
 For a one-shot read-only integrity snapshot, `cmd/mmapinspect` opens the
 database with `OpenMmapReadOnly`, runs `Audit`, and prints indented JSON with
 the validity bit, validation error if any, stats, reachable page IDs, free page
-IDs, retired page IDs, and leaf-link validation state:
+IDs, retired page IDs, and leaf-link validation state. `--readers` adds
+reader-table slot statistics, including active/stale slots and oldest pinned
+revision. `--cache` adds `mincore`-backed mapped/resident page counts:
 
 ```bash
-go run ./cmd/mmapinspect source.db
+go run ./cmd/mmapinspect --readers --cache source.db
 ```
 
 This is useful when studying recovery fallback. If the newest metadata page points at a torn root page, a trace hook can show the newest candidate rejected with a checksum or invariant reason and the older candidate accepted. That is more precise than a counter saying "one open succeeded."
