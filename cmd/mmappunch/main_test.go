@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,6 +58,43 @@ func TestRunPunchesMmapFreePagesAndPrintsJSON(t *testing.T) {
 	}
 }
 
+func TestRunWritesTraceJSONL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "punch.db")
+	tracePath := filepath.Join(dir, "punch.jsonl")
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 32})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	for i := range 8 {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--trace", tracePath, path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report punchReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.TracePath != tracePath {
+		t.Fatalf("TracePath = %q, want %q", report.TracePath, tracePath)
+	}
+	traceBytes, err := os.ReadFile(tracePath)
+	if err != nil {
+		t.Fatalf("read trace: %v", err)
+	}
+	if !bytes.Contains(traceBytes, []byte(`"kind":"mmap-punch-begin"`)) {
+		t.Fatalf("trace %q does not contain mmap-punch-begin", string(traceBytes))
+	}
+}
+
 func TestRunRejectsWrongArgumentCount(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run(nil, &stdout, &stderr)
@@ -68,5 +106,19 @@ func TestRunRejectsWrongArgumentCount(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "usage:") {
 		t.Fatalf("stderr = %q, want usage", stderr.String())
+	}
+}
+
+func TestRunRejectsMissingTracePath(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--trace"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run exit = %d, want 2", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--trace") {
+		t.Fatalf("stderr = %q, want trace usage error", stderr.String())
 	}
 }

@@ -72,7 +72,7 @@ cmd/mmapbtree-demo/  Mmap persistence demonstration
 cmd/mdbkernel-demo/  OpenLDAP-style mmap kernel profile demonstration
 cmd/mmaptrace-demo/  JSONL mmap trace export demonstration
 cmd/mmapinspect/     Read-only mmap audit JSON inspection tool
-cmd/mmappunch/       Sparse-hole maintenance JSON with before/after space stats
+cmd/mmappunch/       Sparse-hole maintenance JSON with before/after space stats and optional trace export
 cmd/benchsummary/    Markdown summary for Go benchmark output
 docs/           Research chapters
 ```
@@ -90,7 +90,7 @@ docs/           Research chapters
 9. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, reader-table recycling, kernel page-cache behavior, Linux file-advice coordination, derived branch-routing cache behavior, exact reachable-page warm-up, tunable exact-page prefetch advice, residency and file-space stats, sparse-hole capability reporting, and trace events.
 10. Run `go run ./cmd/mmaptrace-demo > mmap-trace.jsonl` to inspect value-free JSONL trace events from a small mmap write/delete/compact workload.
 11. Run `go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db` to print read-only audit JSON plus reader-table, cache-residency, file-space, sparse-hole capability, page-summary, bounded key-sample, and trace-correlation sections.
-12. Run `go run ./cmd/mmappunch /path/to/source.db` to execute sparse-hole maintenance and print before/after file-space evidence.
+12. Run `go run ./cmd/mmappunch --trace punch-trace.jsonl /path/to/source.db` to execute sparse-hole maintenance, print before/after file-space evidence, and write value-free maintenance trace events.
 13. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
 14. Read [`10-respectability-gap-audit.md`](10-respectability-gap-audit.md) for the blunt gap list and next research slices.
 15. Read [`11-benchmarking-and-baselines.md`](11-benchmarking-and-baselines.md), run a benchmark pass, and summarize it with `go run ./cmd/benchsummary bench.out`.

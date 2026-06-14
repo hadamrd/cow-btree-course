@@ -73,10 +73,11 @@ go run ./cmd/mmapcopycompact source.db compact.db
 go run ./cmd/mmapcompact source.db
 ```
 
-This reclaims interior free pages because it builds a fresh tree whose page IDs are assigned only for live records. It is still offline: the swap refuses active readers and writers instead of relocating pages under them. It is different from `PunchFreeMmapPages`: copy compaction rewrites live records into a smaller replacement file, while hole punching leaves the active file size and page IDs unchanged and only asks the filesystem to release physical blocks behind safe free extents. The `mmappunch` command is the active-file maintenance wrapper around that API. It opens the database through the normal writer path, runs sparse-hole maintenance, and prints JSON with the hole-punch profile, before/after `MmapSpaceStats`, punch stats, and an unsupported error string when the build has no platform primitive:
+This reclaims interior free pages because it builds a fresh tree whose page IDs are assigned only for live records. It is still offline: the swap refuses active readers and writers instead of relocating pages under them. It is different from `PunchFreeMmapPages`: copy compaction rewrites live records into a smaller replacement file, while hole punching leaves the active file size and page IDs unchanged and only asks the filesystem to release physical blocks behind safe free extents. The `mmappunch` command is the active-file maintenance wrapper around that API. It opens the database through the normal writer path, runs sparse-hole maintenance, and prints JSON with the hole-punch profile, before/after `MmapSpaceStats`, punch stats, and an unsupported error string when the build has no platform primitive. With `--trace`, it also writes the value-free mmap trace events emitted while the maintenance runs, which can be fed back into `mmapinspect --trace`:
 
 ```bash
-go run ./cmd/mmappunch source.db
+go run ./cmd/mmappunch --trace punch-trace.jsonl source.db
+go run ./cmd/mmapinspect --space --trace punch-trace.jsonl source.db
 ```
 
 Code to read:
