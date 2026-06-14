@@ -174,10 +174,21 @@ For simple experiments, `NewMmapTraceJSONLExporter` adapts the hook to newline-d
 go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
 ```
 
+For a one-shot read-only integrity snapshot, `cmd/mmapinspect` opens the
+database with `OpenMmapReadOnly`, runs `Audit`, and prints indented JSON with
+the validity bit, validation error if any, stats, reachable page IDs, free page
+IDs, retired page IDs, and leaf-link validation state:
+
+```bash
+go run ./cmd/mmapinspect source.db
+```
+
 This is useful when studying recovery fallback. If the newest metadata page points at a torn root page, a trace hook can show the newest candidate rejected with a checksum or invariant reason and the older candidate accepted. That is more precise than a counter saying "one open succeeded."
 
 Code to read:
 
+- Audit inspect command: [`../cmd/mmapinspect/main.go`](../cmd/mmapinspect/main.go)
+- Audit inspect command tests: [`../cmd/mmapinspect/main_test.go`](../cmd/mmapinspect/main_test.go)
 - Trace event API and JSON field schema: [`../pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
 - JSONL exporter: [`../pagebtree/mmap_trace_export.go#L9-L72`](../pagebtree/mmap_trace_export.go#L9-L72)
 - JSONL exporter example: [`../pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)

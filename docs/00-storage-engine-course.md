@@ -697,12 +697,23 @@ The runnable command version emits JSONL only on stdout:
 go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
 ```
 
+For an operator-style read-only validation snapshot, `cmd/mmapinspect` opens an
+mmap database through `OpenMmapReadOnly`, runs `Audit`, and writes indented JSON
+with validity, stats, reachable page IDs, free page IDs, retired page IDs, and
+linked-leaf validation state:
+
+```bash
+go run ./cmd/mmapinspect /path/to/source.db
+```
+
 Code to read:
 
 - Stats byte-fill fields and reachable-page walk: [`pagebtree/stats.go#L3-L170`](../pagebtree/stats.go#L3-L170)
 - Stats byte-fill tests: [`pagebtree/tree_test.go#L78-L117`](../pagebtree/tree_test.go#L78-L117), [`pagebtree/mmap_test.go#L53-L93`](../pagebtree/mmap_test.go#L53-L93)
 - Audit report API and checker delegation: [`pagebtree/integrity.go`](../pagebtree/integrity.go)
 - Audit report tests: [`pagebtree/tree_test.go`](../pagebtree/tree_test.go), [`pagebtree/mmap_test.go`](../pagebtree/mmap_test.go)
+- Audit inspect command: [`cmd/mmapinspect/main.go`](../cmd/mmapinspect/main.go)
+- Audit inspect command tests: [`cmd/mmapinspect/main_test.go`](../cmd/mmapinspect/main_test.go)
 - Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
 - JSONL exporter: [`pagebtree/mmap_trace_export.go#L9-L72`](../pagebtree/mmap_trace_export.go#L9-L72)
 - JSONL exporter example: [`pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)

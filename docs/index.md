@@ -71,6 +71,7 @@ cmd/pagebtree-demo/  Page-backed CoW demonstration
 cmd/mmapbtree-demo/  Mmap persistence demonstration
 cmd/mdbkernel-demo/  OpenLDAP-style mmap kernel profile demonstration
 cmd/mmaptrace-demo/  JSONL mmap trace export demonstration
+cmd/mmapinspect/     Read-only mmap audit JSON inspection tool
 docs/           Research chapters
 ```
 
@@ -86,6 +87,7 @@ docs/           Research chapters
 8. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
 9. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, reader-table recycling, kernel page-cache behavior, Linux file-advice coordination, derived branch-routing cache behavior, exact reachable-page warm-up, tunable exact-page prefetch advice, residency stats, and trace events.
 10. Run `go run ./cmd/mmaptrace-demo > mmap-trace.jsonl` to inspect JSONL trace events from an mmap sync.
-11. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
-12. Read [`10-respectability-gap-audit.md`](10-respectability-gap-audit.md) for the blunt gap list and next research slices.
-13. Change the degree in the demos and observe how `Stats` changes.
+11. Run `go run ./cmd/mmapinspect /path/to/source.db` to print read-only audit JSON for an mmap database.
+12. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
+13. Read [`10-respectability-gap-audit.md`](10-respectability-gap-audit.md) for the blunt gap list and next research slices.
+14. Change the degree in the demos and observe how `Stats` changes.
