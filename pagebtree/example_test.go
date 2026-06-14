@@ -154,6 +154,23 @@ func ExampleTree_CursorBetween() {
 	// charlie charlie-value
 }
 
+func ExampleCursor_Prev() {
+	tree := pagebtree.New(2)
+	for _, key := range []string{"alpha", "bravo", "charlie", "delta"} {
+		tree.Put(key, []byte(key+"-value"))
+	}
+
+	cursor := tree.CursorBetween("bravo", "delta")
+	defer cursor.Close()
+
+	for ok := cursor.Last(); ok; ok = cursor.Prev() {
+		fmt.Println(cursor.Key(), string(cursor.Value()))
+	}
+	// Output:
+	// charlie charlie-value
+	// bravo bravo-value
+}
+
 func ExampleMmapTraceJSONLExporter() {
 	var out bytes.Buffer
 	exporter := pagebtree.NewMmapTraceJSONLExporter(&out)

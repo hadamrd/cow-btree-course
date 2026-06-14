@@ -1,6 +1,6 @@
 package pagebtree
 
-// Cursor is a snapshot-backed, forward-only read cursor.
+// Cursor is a snapshot-backed ordered read cursor.
 //
 // A cursor opened from Tree owns its snapshot and releases the reader pin on
 // Close. A cursor opened from Snapshot borrows that snapshot; closing the cursor
@@ -134,6 +134,28 @@ func (c *Cursor) Next() bool {
 	return c.loadForward()
 }
 
+// Last positions the cursor at the last key.
+func (c *Cursor) Last() bool {
+	if !c.usable() {
+		return false
+	}
+	c.stack = c.stack[:0]
+	if c.hasEnd {
+		return c.seekBefore(c.end)
+	}
+	return c.descendRight(c.root)
+}
+
+// Prev moves the cursor to the previous key.
+func (c *Cursor) Prev() bool {
+	if !c.Valid() {
+		return false
+	}
+	last := len(c.stack) - 1
+	c.stack[last].index--
+	return c.loadBackward()
+}
+
 // Valid reports whether the cursor is positioned at a key.
 func (c *Cursor) Valid() bool {
 	return c != nil && c.valid && c.usable()
@@ -190,6 +212,49 @@ func (c *Cursor) descendLeft(id PageID) bool {
 	return c.invalidate()
 }
 
+func (c *Cursor) descendRight(id PageID) bool {
+	for id != 0 {
+		p := c.pages[id]
+		if p == nil {
+			return c.invalidate()
+		}
+		if p.isLeaf() {
+			c.stack = append(c.stack, cursorFrame{id: id, index: int(p.slotCount()) - 1})
+			return c.loadBackward()
+		}
+		index := int(p.slotCount())
+		c.stack = append(c.stack, cursorFrame{id: id, index: index})
+		id = p.branchChild(index)
+	}
+	return c.invalidate()
+}
+
+func (c *Cursor) seekBefore(key string) bool {
+	if c.hasLower && key <= c.lower {
+		return c.invalidate()
+	}
+	c.stack = c.stack[:0]
+	for id := c.root; id != 0; {
+		p := c.pages[id]
+		if p == nil {
+			return c.invalidate()
+		}
+		index, equal := p.searchSlot(key)
+		if p.isLeaf() {
+			index--
+			c.stack = append(c.stack, cursorFrame{id: id, index: index})
+			return c.loadBackward()
+		}
+		childIndex := index
+		if equal {
+			childIndex = index
+		}
+		c.stack = append(c.stack, cursorFrame{id: id, index: childIndex})
+		id = p.branchChild(childIndex)
+	}
+	return c.invalidate()
+}
+
 func (c *Cursor) loadForward() bool {
 	for len(c.stack) > 0 {
 		last := len(c.stack) - 1
@@ -212,6 +277,34 @@ func (c *Cursor) loadForward() bool {
 		frame.index++
 		if frame.index <= int(p.slotCount()) {
 			return c.descendLeft(p.branchChild(frame.index))
+		}
+		c.stack = c.stack[:last]
+	}
+	return c.invalidate()
+}
+
+func (c *Cursor) loadBackward() bool {
+	for len(c.stack) > 0 {
+		last := len(c.stack) - 1
+		frame := &c.stack[last]
+		p := c.pages[frame.id]
+		if p == nil {
+			return c.invalidate()
+		}
+		if p.isLeaf() {
+			if frame.index >= 0 {
+				c.loadLeafSlot(p, frame.index)
+				if c.hasLower && c.key < c.lower {
+					return c.invalidate()
+				}
+				return true
+			}
+			c.stack = c.stack[:last]
+			continue
+		}
+		frame.index--
+		if frame.index >= 0 {
+			return c.descendRight(p.branchChild(frame.index))
 		}
 		c.stack = c.stack[:last]
 	}

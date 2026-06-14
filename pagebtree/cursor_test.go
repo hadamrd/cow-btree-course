@@ -103,6 +103,67 @@ func TestCursorFirstAndEnd(t *testing.T) {
 	}
 }
 
+func TestCursorLastAndPrevReadStableSnapshot(t *testing.T) {
+	tree := New(3)
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	cursor := tree.Cursor()
+	if !cursor.Last() {
+		t.Fatalf("Last = false, want true")
+	}
+	if got := cursor.Key(); got != "key-11" {
+		t.Fatalf("last key = %q, want key-11", got)
+	}
+
+	tree.Put("key-10", []byte("new-value-10"))
+	tree.Delete("key-09")
+
+	var got []string
+	var values []string
+	for cursor.Valid() {
+		got = append(got, cursor.Key())
+		values = append(values, string(cursor.Value()))
+		if !cursor.Prev() {
+			break
+		}
+	}
+	wantKeys := []string{"key-11", "key-10", "key-09", "key-08", "key-07", "key-06", "key-05", "key-04", "key-03", "key-02", "key-01", "key-00"}
+	if fmt.Sprint(got) != fmt.Sprint(wantKeys) {
+		t.Fatalf("reverse cursor keys = %v, want %v", got, wantKeys)
+	}
+	if values[1] != "value-10" || values[2] != "value-09" {
+		t.Fatalf("reverse cursor old values around mutation = %v, want value-10/value-09", values[:3])
+	}
+	cursor.Close()
+}
+
+func TestBoundedCursorLastAndPrevStopAtLowerBound(t *testing.T) {
+	tree := New(3)
+	for i := 0; i < 14; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	cursor := tree.CursorBetween("key-05", "key-09")
+	defer cursor.Close()
+
+	if !cursor.Last() {
+		t.Fatalf("Last on bounded cursor = false, want true")
+	}
+	var got []string
+	for cursor.Valid() {
+		got = append(got, cursor.Key())
+		if !cursor.Prev() {
+			break
+		}
+	}
+	want := []string{"key-08", "key-07", "key-06", "key-05"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("bounded reverse cursor keys = %v, want %v", got, want)
+	}
+}
+
 func TestTreeCursorBetweenStopsAtExclusiveEnd(t *testing.T) {
 	tree := New(3)
 	for i := 0; i < 14; i++ {

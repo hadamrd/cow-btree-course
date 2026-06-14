@@ -61,7 +61,7 @@ pagebtree/
   mmap_trace.go Public mmap trace event API
   mmap_trace_export.go JSONL trace exporter
   mmap_warm.go  Exact reachable-page mmap warm-up advice
-  cursor.go     Snapshot-backed seek/next and half-open bounded cursors
+  cursor.go     Snapshot-backed seek/next/prev and half-open bounded cursors
   kernel_profile.go OpenLDAP-style mmap kernel research profile
   reader_table_unix.go LMDB-style mmap reader table and writer mutex sidecars
   mmap.go       Mmap-backed page arena, metadata recovery, dirty sync, compact, tunable advice, cache stats, and locks

@@ -41,7 +41,7 @@ func runPageTreeModel(t *testing.T, data []byte) {
 	model := modelMap{}
 	reader := modelReader{data: data}
 	for step := 0; step < 96 && reader.hasMore(); step++ {
-		op := reader.next() % 7
+		op := reader.next() % 8
 		switch op {
 		case 0:
 			key := reader.key()
@@ -94,6 +94,13 @@ func runPageTreeModel(t *testing.T, data []byte) {
 				start, end = end, start
 			}
 			assertCursorBetweenMatchesModel(t, tree, model, start, end)
+		case 7:
+			start := reader.key()
+			end := reader.key()
+			if compareStrings(end, start) < 0 {
+				start, end = end, start
+			}
+			assertReverseCursorBetweenMatchesModel(t, tree, model, start, end)
 		}
 		if err := tree.Check(); err != nil {
 			t.Fatalf("Check after step %d: %v", step, err)
@@ -265,5 +272,31 @@ func assertCursorBetweenMatchesModel(t *testing.T, tree *Tree, model modelMap, s
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("bounded cursor keys for [%q,%q) = %v, want %v", start, end, got, want)
+	}
+}
+
+func assertReverseCursorBetweenMatchesModel(t *testing.T, tree *Tree, model modelMap, start, end string) {
+	t.Helper()
+
+	cursor := tree.CursorBetween(start, end)
+	defer cursor.Close()
+	var got []string
+	for ok := cursor.Last(); ok; ok = cursor.Prev() {
+		key := cursor.Key()
+		value := cursor.Value()
+		got = append(got, key)
+		if want := model[key]; !bytes.Equal(value, want) {
+			t.Fatalf("reverse bounded cursor value for %q in [%q,%q) = %q, want %q", key, start, end, value, want)
+		}
+	}
+	var want []string
+	for _, key := range model.keys() {
+		if compareStrings(key, start) >= 0 && compareStrings(key, end) < 0 {
+			want = append(want, key)
+		}
+	}
+	slices.Reverse(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("reverse bounded cursor keys for [%q,%q) = %v, want %v", start, end, got, want)
 	}
 }

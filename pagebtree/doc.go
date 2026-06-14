@@ -27,8 +27,9 @@
 // before publication. Snapshots and cursors keep reading their older roots. A
 // cursor opened from Tree owns a snapshot and must be closed to release the
 // reader pin; CursorBetween adds a half-open upper bound for incremental range
-// reads. A cursor opened from Snapshot borrows that snapshot and does not
-// register another reader. Leaf sibling-link repair is deferred while a
+// reads, and Last/Prev traverse the same snapshot in reverse. A cursor opened
+// from Snapshot borrows that snapshot and does not register another reader.
+// Leaf sibling-link repair is deferred while a
 // snapshot or cursor is active, because rewriting those headers in place would
 // mutate bytes visible to the old root.
 // Current-tree Range, RangeFrom, and RangeBetween use those leaf links when no
