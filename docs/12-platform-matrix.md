@@ -33,16 +33,17 @@ That probe creates a fresh mmap database, inserts fixed-size values, deletes
 half the keys to create reusable pages, syncs, tail-compacts, attempts sparse
 punching, and prints value-free JSON with `Stats`, `MmapSpaceStats`,
 `MmapPlatformProfile`, and `MmapHolePunchStats` for each phase. It reports
-filesystem allocation evidence from the actual path you give it; it still does
-not simulate sudden power loss or prove crash ordering.
+filesystem allocation evidence from the actual path you give it, including the
+filesystem type name or numeric type ID when the platform exposes one; it still
+does not simulate sudden power loss or prove crash ordering.
 
 ## Current Matrix
 
 | Platform family | mmap tree | Locks | reader table | owner tokens | file advice | cache/space stats | sparse punching |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Linux | Supported through `mmap` | `flock` exclusive writer and shared read-only locks | Supported | PID, process-start from `/proc/<pid>/stat`, boot token from `/proc/sys/kernel/random/boot_id` | `posix_fadvise` plus `madvise` | `mincore` and `stat(2)` | `fallocate(PUNCH_HOLE|KEEP_SIZE)` |
-| Darwin | Supported through `mmap` | `flock` exclusive writer and shared read-only locks | Supported | PID, process-start from `kern.proc.pid`, boot token from `kern.boottime` | `madvise`; file advice is a no-op in this lab | `mincore` and `stat(2)` | Unsupported placeholder |
-| Other Unix | Supported through `mmap` when Go and `x/sys/unix` provide the syscalls | `flock` exclusive writer and shared read-only locks | Supported | PID only; process-start and boot tokens are zero | `madvise`; file advice is a no-op in this lab | `mincore` and `stat(2)` | Unsupported placeholder |
+| Linux | Supported through `mmap` | `flock` exclusive writer and shared read-only locks | Supported | PID, process-start from `/proc/<pid>/stat`, boot token from `/proc/sys/kernel/random/boot_id` | `posix_fadvise` plus `madvise` | `mincore`, `stat(2)`, and numeric `statfs(2)` filesystem magic | `fallocate(PUNCH_HOLE|KEEP_SIZE)` |
+| Darwin | Supported through `mmap` | `flock` exclusive writer and shared read-only locks | Supported | PID, process-start from `kern.proc.pid`, boot token from `kern.boottime` | `madvise`; file advice is a no-op in this lab | `mincore`, `stat(2)`, and named `statfs(2)` filesystem type | Unsupported placeholder |
+| Other Unix | Supported through `mmap` when Go and `x/sys/unix` provide the syscalls | `flock` exclusive writer and shared read-only locks | Supported | PID only; process-start and boot tokens are zero | `madvise`; file advice is a no-op in this lab | `mincore`, `stat(2)`, and filesystem identity where wired | Unsupported placeholder |
 | Non-Unix | Not supported for mmap-backed files | Stubbed | Stubbed | Stubbed | Stubbed | Zero-value stubs | Unsupported/inert |
 
 The generic in-memory B-tree and page-backed in-memory B+tree are portable Go

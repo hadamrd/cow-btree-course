@@ -24,6 +24,10 @@ func (t *Tree) MmapSpaceStats() (MmapSpaceStats, error) {
 	if !ok || stat == nil {
 		return MmapSpaceStats{}, fmt.Errorf("mmap space stats unavailable for file info %T", info.Sys())
 	}
+	fsType, fsTypeID, err := mmapFilesystemIdentity(t.arena.file.Name())
+	if err != nil {
+		return MmapSpaceStats{}, err
+	}
 	allocatedBytes := stat.Blocks * statAllocatedBlockBytes
 	return MmapSpaceStats{
 		LogicalFileBytes:          info.Size(),
@@ -33,5 +37,7 @@ func (t *Tree) MmapSpaceStats() (MmapSpaceStats, error) {
 		AllocatedFilesystemBlocks: stat.Blocks,
 		FilesystemBlockBytes:      statAllocatedBlockBytes,
 		PreferredIOBlockBytes:     int64(stat.Blksize),
+		FilesystemType:            fsType,
+		FilesystemTypeID:          fsTypeID,
 	}, nil
 }

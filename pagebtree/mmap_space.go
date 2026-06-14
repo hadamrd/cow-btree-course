@@ -10,6 +10,8 @@ type MmapSpaceStats struct {
 	AllocatedFilesystemBlocks int64
 	FilesystemBlockBytes      int64
 	PreferredIOBlockBytes     int64
+	FilesystemType            string
+	FilesystemTypeID          int64
 }
 
 func sparseBytes(logicalBytes, allocatedBytes int64) int64 {

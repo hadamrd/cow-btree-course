@@ -4351,6 +4351,9 @@ func TestMmapSpaceStatsReportsLogicalAndAllocatedBytes(t *testing.T) {
 	if stats.AllocatedFilesystemBlocks <= 0 {
 		t.Fatalf("AllocatedFilesystemBlocks = %d, want positive block count", stats.AllocatedFilesystemBlocks)
 	}
+	if stats.FilesystemType == "" && stats.FilesystemTypeID == 0 {
+		t.Fatalf("filesystem identity missing: %+v", stats)
+	}
 }
 
 func TestMemoryTreeMmapSpaceStatsIsEmpty(t *testing.T) {
