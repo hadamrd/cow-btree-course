@@ -703,10 +703,11 @@ with validity, stats, persisted key-order identity, comparator kind, readable
 names for both, reachable page IDs, free page IDs, retired page IDs, and
 linked-leaf validation state.
 `--readers` adds the mmap reader-table slot summary, and `--cache` adds kernel
-page-cache residency counts:
+page-cache residency counts. `--keys N` adds a bounded first/last key sample in
+the recovered comparator order without dumping values:
 
 ```bash
-go run ./cmd/mmapinspect --readers --cache /path/to/source.db
+go run ./cmd/mmapinspect --readers --cache --keys=4 /path/to/source.db
 ```
 
 Code to read:

@@ -59,6 +59,9 @@ func TestRunPrintsAuditJSONForMmapDatabase(t *testing.T) {
 	if report.CacheStats != nil {
 		t.Fatalf("CacheStats = %+v, want nil without --cache", report.CacheStats)
 	}
+	if report.KeySample != nil {
+		t.Fatalf("KeySample = %+v, want nil without --keys", report.KeySample)
+	}
 }
 
 func TestRunPrintsPersistedKeyOrder(t *testing.T) {
@@ -79,7 +82,7 @@ func TestRunPrintsPersistedKeyOrder(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{path}, &stdout, &stderr)
+	code := run([]string{"--keys", "2", path}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
 	}
@@ -99,6 +102,17 @@ func TestRunPrintsPersistedKeyOrder(t *testing.T) {
 	}
 	if report.KeyComparatorName != "reverse" {
 		t.Fatalf("KeyComparatorName = %q, want reverse", report.KeyComparatorName)
+	}
+	if report.KeySample == nil {
+		t.Fatalf("KeySample = nil, want section with --keys")
+	}
+	wantFirst := []string{"charlie", "bravo"}
+	if fmt.Sprint(report.KeySample.First) != fmt.Sprint(wantFirst) {
+		t.Fatalf("KeySample.First = %v, want %v", report.KeySample.First, wantFirst)
+	}
+	wantLast := []string{"bravo", "alpha"}
+	if fmt.Sprint(report.KeySample.Last) != fmt.Sprint(wantLast) {
+		t.Fatalf("KeySample.Last = %v, want %v", report.KeySample.Last, wantLast)
 	}
 }
 
@@ -148,6 +162,48 @@ func TestRunPrintsOptionalReaderAndCacheSections(t *testing.T) {
 	}
 }
 
+func TestRunPrintsKeySample(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inspect.db")
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	for i := range 6 {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--keys=2", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.KeySample == nil {
+		t.Fatalf("KeySample = nil, want section with --keys")
+	}
+	if report.KeySample.Limit != 2 {
+		t.Fatalf("KeySample.Limit = %d, want 2", report.KeySample.Limit)
+	}
+	if !report.KeySample.Truncated {
+		t.Fatalf("KeySample.Truncated = false, want true")
+	}
+	wantFirst := []string{"key-00", "key-01"}
+	if fmt.Sprint(report.KeySample.First) != fmt.Sprint(wantFirst) {
+		t.Fatalf("KeySample.First = %v, want %v", report.KeySample.First, wantFirst)
+	}
+	wantLast := []string{"key-04", "key-05"}
+	if fmt.Sprint(report.KeySample.Last) != fmt.Sprint(wantLast) {
+		t.Fatalf("KeySample.Last = %v, want %v", report.KeySample.Last, wantLast)
+	}
+}
+
 func TestRunRejectsWrongArgumentCount(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run(nil, &stdout, &stderr)
@@ -159,6 +215,20 @@ func TestRunRejectsWrongArgumentCount(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "usage:") {
 		t.Fatalf("stderr = %q, want usage", stderr.String())
+	}
+}
+
+func TestRunRejectsInvalidKeySampleLimit(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--keys=0", "db"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run exit = %d, want 2", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "positive") {
+		t.Fatalf("stderr = %q, want positive limit error", stderr.String())
 	}
 }
 

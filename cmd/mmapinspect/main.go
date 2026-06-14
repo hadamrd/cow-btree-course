@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/hadamrd/cow-btree-course/pagebtree"
 )
@@ -24,12 +26,21 @@ type inspectReport struct {
 	LeafLinksSkipped  bool                        `json:"leaf_links_skipped"`
 	ReaderStats       *pagebtree.MmapReaderStats  `json:"reader_stats,omitempty"`
 	CacheStats        *pagebtree.MmapCacheStats   `json:"cache_stats,omitempty"`
+	KeySample         *inspectKeySample           `json:"key_sample,omitempty"`
+}
+
+type inspectKeySample struct {
+	Limit     int      `json:"limit"`
+	First     []string `json:"first"`
+	Last      []string `json:"last"`
+	Truncated bool     `json:"truncated"`
 }
 
 type inspectOptions struct {
-	path    string
-	readers bool
-	cache   bool
+	path           string
+	readers        bool
+	cache          bool
+	keySampleLimit int
 }
 
 func main() {
@@ -68,6 +79,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		report.CacheStats = &stats
 	}
+	if options.keySampleLimit > 0 {
+		sample := inspectKeys(tree, options.keySampleLimit)
+		report.KeySample = &sample
+	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(report); err != nil {
@@ -82,13 +97,32 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func parseArgs(args []string) (inspectOptions, error) {
 	var options inspectOptions
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		switch arg {
 		case "--readers":
 			options.readers = true
 		case "--cache":
 			options.cache = true
+		case "--keys":
+			i++
+			if i >= len(args) {
+				return inspectOptions{}, fmt.Errorf("--keys expects a positive limit")
+			}
+			limit, err := parsePositiveLimit(args[i])
+			if err != nil {
+				return inspectOptions{}, fmt.Errorf("--keys expects a positive limit: %w", err)
+			}
+			options.keySampleLimit = limit
 		default:
+			if strings.HasPrefix(arg, "--keys=") {
+				limit, err := parsePositiveLimit(strings.TrimPrefix(arg, "--keys="))
+				if err != nil {
+					return inspectOptions{}, fmt.Errorf("--keys expects a positive limit: %w", err)
+				}
+				options.keySampleLimit = limit
+				continue
+			}
 			if len(arg) > 0 && arg[0] == '-' {
 				return inspectOptions{}, fmt.Errorf("unknown option %q", arg)
 			}
@@ -104,8 +138,19 @@ func parseArgs(args []string) (inspectOptions, error) {
 	return options, nil
 }
 
+func parsePositiveLimit(raw string) (int, error) {
+	limit, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	if limit <= 0 {
+		return 0, fmt.Errorf("got %d", limit)
+	}
+	return limit, nil
+}
+
 func printUsage(stderr io.Writer) {
-	fmt.Fprintf(stderr, "usage: mmapinspect [--readers] [--cache] DB.db\n")
+	fmt.Fprintf(stderr, "usage: mmapinspect [--readers] [--cache] [--keys N] DB.db\n")
 }
 
 func inspectFromAudit(audit pagebtree.AuditReport, profile pagebtree.MDBKernelProfile) inspectReport {
@@ -126,4 +171,26 @@ func inspectFromAudit(audit pagebtree.AuditReport, profile pagebtree.MDBKernelPr
 		report.Error = audit.Error.Error()
 	}
 	return report
+}
+
+func inspectKeys(tree *pagebtree.Tree, limit int) inspectKeySample {
+	sample := inspectKeySample{
+		Limit: limit,
+		First: make([]string, 0, limit),
+		Last:  make([]string, 0, limit),
+	}
+	tree.Range(func(key string, _ []byte) bool {
+		if len(sample.First) < limit {
+			sample.First = append(sample.First, key)
+		}
+		if len(sample.Last) < limit {
+			sample.Last = append(sample.Last, key)
+		} else {
+			copy(sample.Last, sample.Last[1:])
+			sample.Last[len(sample.Last)-1] = key
+			sample.Truncated = true
+		}
+		return true
+	})
+	return sample
 }
