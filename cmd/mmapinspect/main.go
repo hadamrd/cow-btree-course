@@ -16,6 +16,8 @@ import (
 // counts only database pages after them.
 const inspectMmapMetaPages = 2
 
+const traceTimelineLimit = 64
+
 type inspectReport struct {
 	Valid             bool                               `json:"valid"`
 	Error             string                             `json:"error,omitempty"`
@@ -46,28 +48,43 @@ type inspectKeySample struct {
 }
 
 type inspectTraceSummary struct {
-	Path                       string           `json:"path"`
-	Events                     int              `json:"events"`
-	KindCounts                 map[string]int   `json:"kind_counts"`
-	DirtyDataRanges            int              `json:"dirty_data_ranges"`
-	DirtyDataPages             int              `json:"dirty_data_pages"`
-	MaxDirtyRangePages         int              `json:"max_dirty_range_pages"`
-	MaxDirtyRangeDurationNanos int64            `json:"max_dirty_range_duration_nanos"`
-	PunchRanges                int              `json:"punch_ranges"`
-	PunchedPages               int              `json:"punched_pages"`
-	PunchedBytes               int64            `json:"punched_bytes"`
-	SkippedRecoverablePages    int              `json:"skipped_recoverable_pages"`
-	MaxPunchRangePages         int              `json:"max_punch_range_pages"`
-	PunchFailures              int              `json:"punch_failures"`
-	LastRevision               uint64           `json:"last_revision,omitempty"`
-	LastRoot                   pagebtree.PageID `json:"last_root,omitempty"`
-	LastNextPage               pagebtree.PageID `json:"last_next_page,omitempty"`
-	LastMaxPages               int              `json:"last_max_pages,omitempty"`
-	MatchesCurrentRevision     bool             `json:"matches_current_revision"`
-	MatchesCurrentRoot         bool             `json:"matches_current_root"`
-	MatchesCurrentNextPage     bool             `json:"matches_current_next_page"`
-	HasFailures                bool             `json:"has_failures"`
-	FailureReasons             []string         `json:"failure_reasons,omitempty"`
+	Path                       string              `json:"path"`
+	Events                     int                 `json:"events"`
+	KindCounts                 map[string]int      `json:"kind_counts"`
+	Timeline                   []inspectTracePhase `json:"timeline,omitempty"`
+	TimelineTruncated          bool                `json:"timeline_truncated,omitempty"`
+	DirtyDataRanges            int                 `json:"dirty_data_ranges"`
+	DirtyDataPages             int                 `json:"dirty_data_pages"`
+	MaxDirtyRangePages         int                 `json:"max_dirty_range_pages"`
+	MaxDirtyRangeDurationNanos int64               `json:"max_dirty_range_duration_nanos"`
+	PunchRanges                int                 `json:"punch_ranges"`
+	PunchedPages               int                 `json:"punched_pages"`
+	PunchedBytes               int64               `json:"punched_bytes"`
+	SkippedRecoverablePages    int                 `json:"skipped_recoverable_pages"`
+	MaxPunchRangePages         int                 `json:"max_punch_range_pages"`
+	PunchFailures              int                 `json:"punch_failures"`
+	LastRevision               uint64              `json:"last_revision,omitempty"`
+	LastRoot                   pagebtree.PageID    `json:"last_root,omitempty"`
+	LastNextPage               pagebtree.PageID    `json:"last_next_page,omitempty"`
+	LastMaxPages               int                 `json:"last_max_pages,omitempty"`
+	MatchesCurrentRevision     bool                `json:"matches_current_revision"`
+	MatchesCurrentRoot         bool                `json:"matches_current_root"`
+	MatchesCurrentNextPage     bool                `json:"matches_current_next_page"`
+	HasFailures                bool                `json:"has_failures"`
+	FailureReasons             []string            `json:"failure_reasons,omitempty"`
+}
+
+type inspectTracePhase struct {
+	EventIndex    int              `json:"event_index"`
+	Kind          string           `json:"kind"`
+	Revision      uint64           `json:"revision,omitempty"`
+	Root          pagebtree.PageID `json:"root,omitempty"`
+	NextPage      pagebtree.PageID `json:"next_page,omitempty"`
+	StartPage     pagebtree.PageID `json:"start_page,omitempty"`
+	EndPage       pagebtree.PageID `json:"end_page,omitempty"`
+	Pages         int              `json:"pages,omitempty"`
+	DurationNanos int64            `json:"duration_nanos,omitempty"`
+	Reason        string           `json:"reason,omitempty"`
 }
 
 type inspectOptions struct {
@@ -310,6 +327,7 @@ func inspectTrace(path string, stats pagebtree.Stats) (inspectTraceSummary, erro
 func (s *inspectTraceSummary) add(event pagebtree.MmapTraceEvent) {
 	s.Events++
 	s.KindCounts[string(event.Kind)]++
+	s.addTimelinePhase(event)
 	if event.Revision != 0 {
 		s.LastRevision = event.Revision
 	}
@@ -388,4 +406,41 @@ func (s *inspectTraceSummary) add(event pagebtree.MmapTraceEvent) {
 			s.FailureReasons = append(s.FailureReasons, event.Reason)
 		}
 	}
+}
+
+func (s *inspectTraceSummary) addTimelinePhase(event pagebtree.MmapTraceEvent) {
+	if len(s.Timeline) >= traceTimelineLimit {
+		s.TimelineTruncated = true
+		return
+	}
+	phase := inspectTracePhase{
+		EventIndex:    s.Events,
+		Kind:          string(event.Kind),
+		Revision:      event.Revision,
+		Root:          event.Root,
+		NextPage:      effectiveTraceNextPage(event),
+		StartPage:     event.StartPage,
+		EndPage:       event.EndPage,
+		Pages:         traceEventPages(event),
+		DurationNanos: event.DurationNanos,
+		Reason:        event.Reason,
+	}
+	s.Timeline = append(s.Timeline, phase)
+}
+
+func effectiveTraceNextPage(event pagebtree.MmapTraceEvent) pagebtree.PageID {
+	if event.NewNextPage != 0 {
+		return event.NewNextPage
+	}
+	return event.NextPage
+}
+
+func traceEventPages(event pagebtree.MmapTraceEvent) int {
+	if event.EndPage > event.StartPage {
+		return int(event.EndPage - event.StartPage)
+	}
+	if event.PunchedPages > 0 {
+		return event.PunchedPages
+	}
+	return 0
 }

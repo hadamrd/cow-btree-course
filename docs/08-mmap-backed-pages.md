@@ -201,8 +201,9 @@ and `--space` adds `stat(2)` logical-vs-allocated file-space counts plus the
 hole-punch capability profile for sparse experiments. `--pages` adds value-free page summaries with role, kind, byte
 occupancy, branch children, and next-page hints. `--keys N` adds a bounded first/last key
 sample in the recovered comparator order without dumping values. `--trace
-TRACE.jsonl` reads value-free trace output, counts event kinds, summarizes dirty
-data-page ranges, summarizes sparse-hole punched ranges/pages/bytes and skipped
+TRACE.jsonl` reads value-free trace output, counts event kinds, keeps a bounded
+ordered timeline of the first storage phases, summarizes dirty data-page ranges,
+summarizes sparse-hole punched ranges/pages/bytes and skipped
 fallback-recoverable pages, lists failure reasons, and checks whether the last
 traced revision/root/nextPage geometry matches the inspected file:
 
@@ -211,6 +212,11 @@ go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap
 ```
 
 This is useful when studying recovery fallback. If the newest metadata page points at a torn root page, a trace hook can show the newest candidate rejected with a checksum or invariant reason and the older candidate accepted. That is more precise than a counter saying "one open succeeded."
+
+The timeline is intentionally capped. It is for seeing the opening shape of a
+trace, such as sync begin, dirty ranges, metadata publish, compaction, and punch
+phases, while the aggregate counters remain the primary view for very large
+workloads.
 
 Code to read:
 

@@ -400,6 +400,21 @@ func TestRunCorrelatesTraceJSONL(t *testing.T) {
 	if summary.PunchRanges != 2 || summary.PunchedPages != 5 || summary.PunchedBytes != 5*pagebtree.PageSize {
 		t.Fatalf("punch summary = ranges %d pages %d bytes %d, want 2/5/%d", summary.PunchRanges, summary.PunchedPages, summary.PunchedBytes, 5*pagebtree.PageSize)
 	}
+	if len(summary.Timeline) == 0 {
+		t.Fatalf("TraceSummary.Timeline = empty, want ordered phase evidence")
+	}
+	if summary.Timeline[0].EventIndex != 1 || summary.Timeline[0].Kind == "" {
+		t.Fatalf("first timeline phase = %+v, want first event index and kind", summary.Timeline[0])
+	}
+	var sawPunchRange bool
+	for _, phase := range summary.Timeline {
+		if phase.Kind == string(pagebtree.MmapTracePunchRange) && phase.StartPage == 5 && phase.EndPage == 8 && phase.Pages == 3 {
+			sawPunchRange = true
+		}
+	}
+	if !sawPunchRange {
+		t.Fatalf("TraceSummary.Timeline missing punch range phase: %+v", summary.Timeline)
+	}
 	if summary.SkippedRecoverablePages != 4 || summary.MaxPunchRangePages != 3 {
 		t.Fatalf("punch skipped/max range = %d/%d, want 4/3", summary.SkippedRecoverablePages, summary.MaxPunchRangePages)
 	}
@@ -468,6 +483,48 @@ func TestRunCorrelatesTracePunchFailures(t *testing.T) {
 	}
 	if summary.SkippedRecoverablePages != 1 || summary.PunchedPages != 3 || summary.PunchedBytes != 3*pagebtree.PageSize {
 		t.Fatalf("punch failure counters = skipped %d pages %d bytes %d", summary.SkippedRecoverablePages, summary.PunchedPages, summary.PunchedBytes)
+	}
+	if len(summary.Timeline) != 1 {
+		t.Fatalf("Timeline = %+v, want one failure phase", summary.Timeline)
+	}
+	if phase := summary.Timeline[0]; phase.Kind != string(pagebtree.MmapTracePunchFailed) || phase.Reason != "punch denied" || phase.Pages != 2 {
+		t.Fatalf("failure timeline phase = %+v, want value-free failed range with reason", phase)
+	}
+}
+
+func TestInspectTraceBoundsTimeline(t *testing.T) {
+	dir := t.TempDir()
+	tracePath := filepath.Join(dir, "long-trace.jsonl")
+	var trace bytes.Buffer
+	exporter := pagebtree.NewMmapTraceJSONLExporter(&trace)
+	for i := range traceTimelineLimit + 5 {
+		exporter.Hook()(pagebtree.MmapTraceEvent{
+			Kind:     pagebtree.MmapTraceSyncBegin,
+			Revision: uint64(i + 1),
+			Root:     pagebtree.PageID(i + 2),
+			NextPage: pagebtree.PageID(i + 3),
+		})
+	}
+	if err := exporter.Err(); err != nil {
+		t.Fatalf("trace exporter Err: %v", err)
+	}
+	if err := os.WriteFile(tracePath, trace.Bytes(), 0o644); err != nil {
+		t.Fatalf("write trace: %v", err)
+	}
+
+	summary, err := inspectTrace(tracePath, pagebtree.Stats{})
+	if err != nil {
+		t.Fatalf("inspectTrace: %v", err)
+	}
+	if got := len(summary.Timeline); got != traceTimelineLimit {
+		t.Fatalf("Timeline length = %d, want bounded %d", got, traceTimelineLimit)
+	}
+	if !summary.TimelineTruncated {
+		t.Fatalf("TimelineTruncated = false, want true for oversized trace")
+	}
+	last := summary.Timeline[len(summary.Timeline)-1]
+	if last.EventIndex != traceTimelineLimit {
+		t.Fatalf("last retained EventIndex = %d, want %d", last.EventIndex, traceTimelineLimit)
 	}
 }
 
