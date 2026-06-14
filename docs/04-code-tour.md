@@ -79,7 +79,7 @@ total reachable page capacity/free bytes, and used-byte buckets for leaves,
 branches, and overflow pages. Leaf and branch insertion now use that same
 concern when choosing split points, and delete redistribution uses byte-aware
 split points for both leaf and branch pages. The remaining simplification is
-that repair is still triggered by key counts rather than byte occupancy.
+that branch repair is still triggered by key counts rather than byte occupancy.
 
 ## Page-backed Tree
 

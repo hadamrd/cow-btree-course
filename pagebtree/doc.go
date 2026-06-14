@@ -127,6 +127,6 @@
 // and page counts. Stats also reports reachable leaf, branch, and overflow page
 // counts plus used/free/capacity byte counts. Insertion and delete
 // redistribution use encoded cell byte footprints to choose leaf and branch
-// split points, while underfull repair is still triggered by degree/key-count
-// thresholds.
+// split points. Leaf repair can also trigger on low byte occupancy at the
+// minimum key count; branch repair still uses degree/key-count thresholds.
 package pagebtree

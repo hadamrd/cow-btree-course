@@ -299,6 +299,42 @@ func TestDeleteRedistributesUnderfullLeafWhenMergeCannotFit(t *testing.T) {
 	snapshot.Close()
 }
 
+func TestDeleteMergesLowByteFillLeafAtMinimumKeyCount(t *testing.T) {
+	tree := New(3)
+	small := []byte("s")
+	for i := 0; i < 6; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), small)
+	}
+	beforeLeaves := make([]PageID, 0)
+	collectLeavesInOrder(tree.pages, tree.root, &beforeLeaves)
+	if len(beforeLeaves) != 2 {
+		t.Fatalf("leaf count before delete = %d, want 2: %v", len(beforeLeaves), beforeLeaves)
+	}
+
+	old, deleted := tree.Delete("key-03")
+	if !deleted || string(old) != "s" {
+		t.Fatalf("Delete(key-03) = %q, %v; want s, true", old, deleted)
+	}
+
+	afterLeaves := make([]PageID, 0)
+	collectLeavesInOrder(tree.pages, tree.root, &afterLeaves)
+	if len(afterLeaves) != 1 {
+		t.Fatalf("leaf count after low-fill merge = %d, want 1: %v", len(afterLeaves), afterLeaves)
+	}
+	wantKeys := []string{"key-00", "key-01", "key-02", "key-04", "key-05"}
+	var gotKeys []string
+	tree.Range(func(key string, value []byte) bool {
+		gotKeys = append(gotKeys, key)
+		return true
+	})
+	if !reflect.DeepEqual(gotKeys, wantKeys) {
+		t.Fatalf("Range after low-fill leaf merge = %v, want %v", gotKeys, wantKeys)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after low-fill leaf merge: %v", err)
+	}
+}
+
 func TestDeleteLeafRedistributionBalancesEncodedBytes(t *testing.T) {
 	tree := New(3)
 	leftID := PageID(1)
@@ -333,6 +369,33 @@ func TestDeleteLeafRedistributionBalancesEncodedBytes(t *testing.T) {
 	}
 	if redistributedLeft.slottedBytesUsed() < redistributedChild.slottedBytesUsed() {
 		t.Fatalf("left redistributed bytes = %d, right = %d; want large records kept on heavier left side", redistributedLeft.slottedBytesUsed(), redistributedChild.slottedBytesUsed())
+	}
+}
+
+func TestDeleteMergesByteUnderfullLeafAtMinimumKeyCount(t *testing.T) {
+	tree := New(3)
+	leftID := PageID(1)
+	childID := PageID(2)
+	left := tree.newPage(leftID, flagLeaf)
+	child := tree.newPage(childID, flagLeaf)
+	tree.pages[leftID] = left
+	tree.pages[childID] = child
+	small := []byte("s")
+	tree.writeLeafEntries(left, []leafEntry{
+		{key: "key-00", value: small},
+		{key: "key-01", value: small},
+	})
+	tree.writeLeafEntries(child, []leafEntry{
+		{key: "key-02", value: small},
+		{key: "key-03", value: small},
+	})
+
+	children := tree.mergeUnderfullLeaf([]PageID{leftID, childID}, 1)
+	if len(children) != 1 {
+		t.Fatalf("children after byte-underfull merge = %v, want one merged leaf", children)
+	}
+	if got, want := int(tree.pages[children[0]].slotCount()), 4; got != want {
+		t.Fatalf("merged leaf slot count = %d, want %d", got, want)
 	}
 }
 
