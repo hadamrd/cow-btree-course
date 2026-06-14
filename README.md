@@ -10,7 +10,7 @@ The reference design line is OpenLDAP MDB/LMDB: slotted pages in one mapped file
 - A page-backed copy-on-write package in [`pagebtree/`](pagebtree/) using slotted pages, linked leaves, overflow pages, growable/compactable mmap-backed storage, offline mmap copy compaction, read-only mmap reader slots, stale-reader cleanup, tunable kernel page-cache advice, bounded branch-routing cache, validation audit reports, cache residency stats, and optional mmap trace events with JSONL export
 - A small `MDBKernelProfile` API that reports which OpenLDAP-style kernel mechanics and byte-balance policies are active on a live tree
 - Copy-on-write writes with stable read-only snapshots
-- Runnable demos and tools in [`cmd/cowbtree`](cmd/cowbtree/), [`cmd/pagebtree-demo`](cmd/pagebtree-demo/), [`cmd/mmapbtree-demo`](cmd/mmapbtree-demo/), [`cmd/mdbkernel-demo`](cmd/mdbkernel-demo/), [`cmd/mmaptrace-demo`](cmd/mmaptrace-demo/), and [`cmd/mmapinspect`](cmd/mmapinspect/)
+- Runnable demos and tools in [`cmd/cowbtree`](cmd/cowbtree/), [`cmd/pagebtree-demo`](cmd/pagebtree-demo/), [`cmd/mmapbtree-demo`](cmd/mmapbtree-demo/), [`cmd/mdbkernel-demo`](cmd/mdbkernel-demo/), [`cmd/mmaptrace-demo`](cmd/mmaptrace-demo/), [`cmd/mmapinspect`](cmd/mmapinspect/), and [`cmd/benchsummary`](cmd/benchsummary/)
 - Tests that document the behavior and invariants
 - Research notes and diagrams in [`docs/`](docs/)
 
@@ -26,7 +26,8 @@ go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
 go run ./cmd/mmapinspect --readers --cache --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db
 go run ./cmd/mmapcopycompact /path/to/source.db /path/to/compact.db
 go run ./cmd/mmapcompact /path/to/source.db
-go test ./pagebtree -run '^$' -bench 'Benchmark(PageTree|MmapTree)' -benchtime=100x
+go test ./pagebtree -run '^$' -bench 'Benchmark(PageTree|MmapTree)' -benchmem -benchtime=100x > bench.out
+go run ./cmd/benchsummary bench.out > bench-summary.md
 ```
 
 ```go
@@ -97,6 +98,7 @@ Then read the focused chapters in order:
 8. [`docs/08-mmap-backed-pages.md`](docs/08-mmap-backed-pages.md)
 9. [`docs/09-openldap-opendj-research.md`](docs/09-openldap-opendj-research.md)
 10. [`docs/10-respectability-gap-audit.md`](docs/10-respectability-gap-audit.md)
+11. [`docs/11-benchmarking-and-baselines.md`](docs/11-benchmarking-and-baselines.md)
 
 ## Deliberate Scope
 

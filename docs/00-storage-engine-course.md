@@ -870,7 +870,9 @@ Serious pieces in this repository:
 - Reproducible microbenchmarks for page and mmap get, seek/next, forward and
   reverse bounded cursor, bounded range, insert, delete, reopen, and sync paths.
   Run a short local pass with
-  `go test ./pagebtree -run '^$' -bench 'Benchmark(PageTree|MmapTree)' -benchtime=100x`.
+  `go test ./pagebtree -run '^$' -bench 'Benchmark(PageTree|MmapTree)' -benchmem -benchtime=100x`.
+  Capture repeated raw output with `-count=5 > bench.out`, then summarize it
+  for review with `go run ./cmd/benchsummary bench.out > bench-summary.md`.
 
 Still research or incomplete compared with a production engine:
 
@@ -898,7 +900,8 @@ Still research or incomplete compared with a production engine:
   occupancy-target heuristics are still open.
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.
-- No benchstat baseline history or CI performance gate yet.
+- No benchstat baseline history or CI performance gate yet; the repository has
+  a lightweight `cmd/benchsummary` table generator for local baseline notes.
 - No production-grade tracing pipeline beyond lightweight sync/async JSONL
   export and read-only inspect correlation.
 - No multi-database catalog, duplicate keys, or persisted comparator plugins.

@@ -72,6 +72,7 @@ cmd/mmapbtree-demo/  Mmap persistence demonstration
 cmd/mdbkernel-demo/  OpenLDAP-style mmap kernel profile demonstration
 cmd/mmaptrace-demo/  JSONL mmap trace export demonstration
 cmd/mmapinspect/     Read-only mmap audit JSON inspection tool
+cmd/benchsummary/    Markdown summary for Go benchmark output
 docs/           Research chapters
 ```
 
@@ -90,4 +91,5 @@ docs/           Research chapters
 11. Run `go run ./cmd/mmapinspect --readers --cache --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db` to print read-only audit JSON plus reader-table, cache-residency, page-summary, bounded key-sample, and trace-correlation sections.
 12. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
 13. Read [`10-respectability-gap-audit.md`](10-respectability-gap-audit.md) for the blunt gap list and next research slices.
-14. Change the degree in the demos and observe how `Stats` changes.
+14. Read [`11-benchmarking-and-baselines.md`](11-benchmarking-and-baselines.md), run a benchmark pass, and summarize it with `go run ./cmd/benchsummary bench.out`.
+15. Change the degree in the demos and observe how `Stats` changes.
