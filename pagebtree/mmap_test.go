@@ -92,6 +92,46 @@ func TestMmapStatsReportsReachablePageByteFillAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMmapAuditReportsStorageAndSyncedRevisionAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := range 40 {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	tree.Put("large", bytes.Repeat([]byte("x"), PageSize*2+77))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	report := reopened.Audit()
+	if !report.Valid() || report.Error != nil {
+		t.Fatalf("Audit reopened tree = valid:%v error:%v", report.Valid(), report.Error)
+	}
+	if report.Stats.Storage != "mmap" {
+		t.Fatalf("Storage = %q, want mmap", report.Stats.Storage)
+	}
+	if report.Stats.SyncedRevision != report.Stats.Revision {
+		t.Fatalf("SyncedRevision = %d, want reopened Revision %d", report.Stats.SyncedRevision, report.Stats.Revision)
+	}
+	if len(report.ReachablePageIDs) != report.Stats.Pages {
+		t.Fatalf("reachable page IDs = %d, want Stats.Pages %d", len(report.ReachablePageIDs), report.Stats.Pages)
+	}
+	if len(report.FreePageIDs) != report.Stats.FreePages || len(report.RetiredPageIDs) != report.Stats.RetiredPages {
+		t.Fatalf("free/retired ids = %d/%d, want stats %d/%d",
+			len(report.FreePageIDs), len(report.RetiredPageIDs), report.Stats.FreePages, report.Stats.RetiredPages)
+	}
+}
+
 func TestMmapCursorPinsRetiredPages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

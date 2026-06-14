@@ -1250,6 +1250,64 @@ func TestCheckAcceptsValidTree(t *testing.T) {
 	}
 }
 
+func TestAuditReportsReachableEvidenceAndValidationError(t *testing.T) {
+	tree := New(2)
+	large := bytes.Repeat([]byte("x"), PageSize*2+41)
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	tree.Put("large", large)
+	if _, deleted := tree.Delete("key-03"); !deleted {
+		t.Fatalf("Delete(key-03) = false, want true")
+	}
+
+	report := tree.Audit()
+	if !report.Valid() || report.Error != nil {
+		t.Fatalf("Audit valid tree = valid:%v error:%v", report.Valid(), report.Error)
+	}
+	stats := tree.Stats()
+	if report.Stats.Root != stats.Root || report.Stats.Keys != stats.Keys || report.Stats.OverflowPages != stats.OverflowPages {
+		t.Fatalf("Audit stats = root:%d keys:%d overflow:%d, want root:%d keys:%d overflow:%d",
+			report.Stats.Root, report.Stats.Keys, report.Stats.OverflowPages,
+			stats.Root, stats.Keys, stats.OverflowPages)
+	}
+	if len(report.ReachablePageIDs) != stats.Pages {
+		t.Fatalf("reachable page IDs = %d, want Stats.Pages %d", len(report.ReachablePageIDs), stats.Pages)
+	}
+	for i := 1; i < len(report.ReachablePageIDs); i++ {
+		if report.ReachablePageIDs[i-1] >= report.ReachablePageIDs[i] {
+			t.Fatalf("reachable page IDs are not sorted unique: %v", report.ReachablePageIDs)
+		}
+	}
+	if !report.LeafLinksChecked || report.LeafLinksSkipped {
+		t.Fatalf("leaf link flags = checked:%v skipped:%v, want checked without active readers", report.LeafLinksChecked, report.LeafLinksSkipped)
+	}
+
+	snapshot := tree.Snapshot()
+	withReader := tree.Audit()
+	snapshot.Close()
+	if withReader.LeafLinksChecked || !withReader.LeafLinksSkipped {
+		t.Fatalf("leaf link flags with active reader = checked:%v skipped:%v, want skipped", withReader.LeafLinksChecked, withReader.LeafLinksSkipped)
+	}
+
+	root := tree.pages[tree.root]
+	if !root.isBranch() || root.slotCount() == 0 {
+		t.Fatalf("root does not have a separator after many inserts")
+	}
+	corruptInMemoryBranchSlotKey(root, 0, "key-00")
+
+	bad := tree.Audit()
+	if bad.Valid() || bad.Error == nil {
+		t.Fatalf("Audit corrupted tree = valid:%v error:%v, want validation error", bad.Valid(), bad.Error)
+	}
+	if !errors.Is(bad.Error, ErrTreeInvariant) {
+		t.Fatalf("Audit corrupted tree error = %v, want ErrTreeInvariant", bad.Error)
+	}
+	if len(bad.ReachablePageIDs) == 0 {
+		t.Fatalf("Audit corrupted tree reachable page IDs empty, want partial traversal evidence")
+	}
+}
+
 func TestCheckRejectsOpenTreeWithMismatchedBranchSeparator(t *testing.T) {
 	tree := New(2)
 	for i := 0; i < 40; i++ {

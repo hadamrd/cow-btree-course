@@ -471,14 +471,23 @@ fresh checksum if the corruption was written through the engine or a test
 rewrote the checksum. Layout and semantic checks catch a different class of
 failure.
 
+`Tree.Check` is the strict pass/fail surface. `Tree.Audit` runs the same
+validation path but returns an `AuditReport`: current `Stats`, sorted reachable
+page IDs, sorted free and retired page IDs, whether leaf-link validation ran or
+was skipped because active readers can legitimately delay relinking, and the
+exact validation error. That makes corruption tests and crash-image experiments
+explainable without weakening the validator.
+
 Code to read:
 
+- Integrity checker and audit report: [`pagebtree/integrity.go`](../pagebtree/integrity.go)
 - Page checksum: [`pagebtree/page.go#L132-L149`](../pagebtree/page.go#L132-L149)
 - Page kind dispatch: [`pagebtree/page.go#L155-L173`](../pagebtree/page.go#L155-L173)
 - Slotted layout checks: [`pagebtree/page.go#L175-L225`](../pagebtree/page.go#L175-L225)
 - Freelist validation: [`pagebtree/mmap.go#L1664-L1684`](../pagebtree/mmap.go#L1664-L1684)
 - Retired-page validation: [`pagebtree/mmap.go#L1686-L1713`](../pagebtree/mmap.go#L1686-L1713)
 - Metadata invariant check: [`pagebtree/mmap.go#L1715-L1730`](../pagebtree/mmap.go#L1715-L1730)
+- Audit report tests: [`pagebtree/tree_test.go`](../pagebtree/tree_test.go), [`pagebtree/mmap_test.go`](../pagebtree/mmap_test.go)
 
 ## Module 12: Freelists, Retired Pages, and Recycling
 
@@ -623,6 +632,9 @@ Storage-engine observability has several layers:
   quantities. `Stats` includes reachable leaf/branch/overflow page counts,
   total reachable page capacity/free bytes, and leaf/branch/overflow used-byte
   buckets.
+- Validation reports: `Audit` tells you what the validator actually reached:
+  reachable page IDs, reusable page IDs, retired page IDs, linked-leaf check
+  state, and the same error that `Check` would return.
 - Profiles: `MDBKernelProfile` tells you which design mechanics are active,
   including mmap/kernel-cache mechanics and the byte-balance policy used by
   split, delete redistribution, merge, and repair decisions.
@@ -631,6 +643,7 @@ Storage-engine observability has several layers:
 ```mermaid
 flowchart TD
     S["Stats"] --> C["counts: pages, readers, cache hits, byte fill"]
+    A["Audit"] --> V["validation evidence: reachable/free/retired page IDs"]
     M["MmapCacheStats"] --> R["kernel residency via mincore"]
     P["MDBKernelProfile"] --> K["design contract flags"]
     T["TraceHook"] --> E["decisions: sync ranges, recovery, growth, compact, reclaim"]
@@ -688,6 +701,8 @@ Code to read:
 
 - Stats byte-fill fields and reachable-page walk: [`pagebtree/stats.go#L3-L170`](../pagebtree/stats.go#L3-L170)
 - Stats byte-fill tests: [`pagebtree/tree_test.go#L78-L117`](../pagebtree/tree_test.go#L78-L117), [`pagebtree/mmap_test.go#L53-L93`](../pagebtree/mmap_test.go#L53-L93)
+- Audit report API and checker delegation: [`pagebtree/integrity.go`](../pagebtree/integrity.go)
+- Audit report tests: [`pagebtree/tree_test.go`](../pagebtree/tree_test.go), [`pagebtree/mmap_test.go`](../pagebtree/mmap_test.go)
 - Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
 - JSONL exporter: [`pagebtree/mmap_trace_export.go#L9-L72`](../pagebtree/mmap_trace_export.go#L9-L72)
 - JSONL exporter example: [`pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)

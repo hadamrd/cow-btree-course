@@ -1,6 +1,26 @@
 package pagebtree
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
+
+// AuditReport describes the validation result and traversal evidence produced
+// by Tree.Audit.
+type AuditReport struct {
+	Stats            Stats
+	ReachablePageIDs []PageID
+	FreePageIDs      []PageID
+	RetiredPageIDs   []PageID
+	LeafLinksChecked bool
+	LeafLinksSkipped bool
+	Error            error
+}
+
+// Valid reports whether Audit found no validation error.
+func (r AuditReport) Valid() bool {
+	return r.Error == nil
+}
 
 // Check validates the currently open tree.
 //
@@ -9,30 +29,62 @@ import "fmt"
 // confirms leaf sibling links, and makes sure reusable page IDs are not still
 // reachable. Closed or nil trees are inert and return nil.
 func (t *Tree) Check() error {
+	return t.Audit().Error
+}
+
+// Audit validates the currently open tree and returns traversal evidence.
+//
+// It is intentionally read-only. A valid report contains the same rich counters
+// as Stats plus sorted reachable, free, and retired page IDs. If validation
+// fails, Error is the same kind of error Check would return and any page IDs
+// reached before the failure are still reported for diagnosis.
+func (t *Tree) Audit() AuditReport {
+	report := AuditReport{}
 	if t == nil || t.closed {
-		return nil
+		return report
 	}
+	report.Stats = auditBaseStats(t)
+	report.FreePageIDs = sortedPageIDsFromSlice(t.free)
+	report.RetiredPageIDs = sortedRetiredPageIDs(t.retired)
+
 	if t.root == 0 {
 		if t.length != 0 {
-			return fmt.Errorf("%w: empty root with length %d", ErrTreeInvariant, t.length)
+			report.Error = fmt.Errorf("%w: empty root with length %d", ErrTreeInvariant, t.length)
+			return report
 		}
-		return t.validateReusablePages(nil)
+		report.Error = t.validateReusablePages(nil)
+		if report.Error == nil {
+			report.Stats = statsFor(t)
+		}
+		return report
 	}
 
 	reachable, err := t.validateReachablePages()
+	report.ReachablePageIDs = sortedPageIDs(reachable)
 	if err != nil {
-		return err
+		report.Error = err
+		return report
 	}
+
 	if t.activeReaderCount() == 0 {
+		report.LeafLinksChecked = true
 		if err := t.validateLeafLinks(); err != nil {
-			return err
+			report.Error = err
+			return report
 		}
+	} else {
+		report.LeafLinksSkipped = true
 	}
 	keyCount := t.countReachableKeys(t.root, map[PageID]bool{})
 	if keyCount != t.length {
-		return fmt.Errorf("%w: length %d does not match reachable key count %d", ErrTreeInvariant, t.length, keyCount)
+		report.Error = fmt.Errorf("%w: length %d does not match reachable key count %d", ErrTreeInvariant, t.length, keyCount)
+		return report
 	}
-	return t.validateReusablePages(reachable)
+	report.Error = t.validateReusablePages(reachable)
+	if report.Error == nil {
+		report.Stats = statsFor(t)
+	}
+	return report
 }
 
 func (t *Tree) validateReusablePages(reachable map[PageID]bool) error {
@@ -75,9 +127,54 @@ func (t *Tree) validateReusablePages(reachable map[PageID]bool) error {
 func (t *Tree) validateReachablePages() (map[PageID]bool, error) {
 	seen := map[PageID]bool{}
 	if err := t.validatePage(t.root, seen); err != nil {
-		return nil, err
+		return seen, err
 	}
 	return seen, nil
+}
+
+func auditBaseStats(t *Tree) Stats {
+	stats := Stats{
+		Root:              t.root,
+		Len:               t.length,
+		Revision:          t.revision,
+		SyncedRevision:    t.syncedRevision,
+		Degree:            t.degree,
+		AllocatedPages:    len(t.pages),
+		RetiredPages:      len(t.retired),
+		FreePages:         len(t.free),
+		ActiveReaders:     t.activeReaderCount(),
+		ReusedPages:       t.reusedPages,
+		PageCacheCapacity: t.pageCache.snapshot().Capacity,
+		Storage:           "memory",
+	}
+	if t.arena != nil {
+		stats.Storage = "mmap"
+	}
+	return stats
+}
+
+func sortedPageIDs(ids map[PageID]bool) []PageID {
+	out := make([]PageID, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func sortedPageIDsFromSlice(ids []PageID) []PageID {
+	out := append([]PageID(nil), ids...)
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func sortedRetiredPageIDs(retired []retiredPage) []PageID {
+	out := make([]PageID, 0, len(retired))
+	for _, page := range retired {
+		out = append(out, page.id)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 func (t *Tree) validateLeafLinks() error {
