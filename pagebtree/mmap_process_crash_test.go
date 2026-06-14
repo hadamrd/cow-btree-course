@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -21,6 +22,11 @@ const (
 	mmapReaderHoldChildEnv   = "COWBTREE_MMAP_READER_HOLD_CHILD"
 	mmapReaderHoldReadyEnv   = "COWBTREE_MMAP_READER_HOLD_READY"
 	mmapReaderHoldReleaseEnv = "COWBTREE_MMAP_READER_HOLD_RELEASE"
+)
+
+const (
+	mmapObsoleteFreelistBeforeBothSlotsAdvance mmapFaultPoint = "obsolete-freelist-before-both-slots-advance"
+	mmapObsoleteFreelistAfterBothSlotsAdvance  mmapFaultPoint = "obsolete-freelist-after-both-slots-advance"
 )
 
 func TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot(t *testing.T) {
@@ -279,6 +285,41 @@ func TestMmapLegacyMetadataUpgradeProcessCrashMatrixClassifiesRecoveryRoot(t *te
 	}
 }
 
+func TestMmapObsoleteFreelistProcessCrashClassifiesMetadataGenerationReclaim(t *testing.T) {
+	if os.Getenv(mmapCrashChildEnv) == "1" {
+		runMmapObsoleteFreelistProcessCrashChild(t)
+		return
+	}
+
+	tests := []struct {
+		name        string
+		fault       mmapFaultPoint
+		wantReclaim bool
+		wantCharlie bool
+	}{
+		{
+			name:        "before both metadata slots advance",
+			fault:       mmapObsoleteFreelistBeforeBothSlotsAdvance,
+			wantReclaim: false,
+			wantCharlie: false,
+		},
+		{
+			name:        "after both metadata slots advance",
+			fault:       mmapObsoleteFreelistAfterBothSlotsAdvance,
+			wantReclaim: true,
+			wantCharlie: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "course.db")
+			runMmapObsoleteFreelistProcessCrash(t, path, tt.fault)
+			assertMmapObsoleteFreelistProcessCrashRecovered(t, path, tt.fault, tt.wantReclaim, tt.wantCharlie)
+		})
+	}
+}
+
 func TestMmapReadOnlyChildProcessPinsRecyclingUntilRelease(t *testing.T) {
 	if os.Getenv(mmapReaderHoldChildEnv) == "1" {
 		runMmapReadOnlyHoldChildProcess(t)
@@ -476,6 +517,12 @@ func runMmapLegacyUpgradeProcessCrash(t *testing.T, path string, fault mmapFault
 	t.Helper()
 
 	runMmapProcessCrashChild(t, path, fault, "^TestMmapLegacyMetadataUpgradeProcessCrashMatrixClassifiesRecoveryRoot$", "legacy-upgrade")
+}
+
+func runMmapObsoleteFreelistProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
+	t.Helper()
+
+	runMmapProcessCrashChild(t, path, fault, "^TestMmapObsoleteFreelistProcessCrashClassifiesMetadataGenerationReclaim$", "obsolete-freelist")
 }
 
 func runMmapProcessCrashChild(t *testing.T, path string, fault mmapFaultPoint, testPattern string, label string) {
@@ -883,6 +930,60 @@ func runMmapLegacyUpgradeProcessCrashChild(t *testing.T) {
 	t.Fatalf("legacy-upgrade child Sync completed without hitting fault %s", fault)
 }
 
+func runMmapObsoleteFreelistProcessCrashChild(t *testing.T) {
+	t.Helper()
+
+	path := os.Getenv(mmapCrashPathEnv)
+	fault := mmapFaultPoint(os.Getenv(mmapCrashFaultEnv))
+	if path == "" || fault == "" {
+		t.Fatalf("missing obsolete-freelist crash child env path=%q fault=%q", path, fault)
+	}
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 4096})
+	if err != nil {
+		t.Fatalf("OpenMmap obsolete-freelist child create: %v", err)
+	}
+	defer tree.Close()
+
+	if _, replaced := tree.Put("alpha", []byte("one")); replaced {
+		t.Fatalf("obsolete-freelist child first Put replaced existing key")
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("obsolete-freelist child initial Sync: %v", err)
+	}
+	clear(tree.arena.dirtyPages)
+
+	freeCount := obsoleteFreelistProcessFreeCount()
+	tree.free = make([]PageID, freeCount)
+	for i := range tree.free {
+		tree.free[i] = firstTreePageID + 1 + PageID(i)
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(freeCount)
+
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("obsolete-freelist child first large-freelist Sync: %v", err)
+	}
+	if len(tree.metaFreelistPages) == 0 {
+		t.Fatalf("obsolete-freelist child first large-freelist Sync did not create metadata pages")
+	}
+
+	tree.Put("bravo", []byte("two"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("obsolete-freelist child second large-freelist Sync: %v", err)
+	}
+	if fault == mmapObsoleteFreelistBeforeBothSlotsAdvance {
+		os.Exit(mmapCrashChildExitCode)
+	}
+
+	tree.Put("charlie", []byte("three"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("obsolete-freelist child third large-freelist Sync: %v", err)
+	}
+	if fault == mmapObsoleteFreelistAfterBothSlotsAdvance {
+		os.Exit(mmapCrashChildExitCode)
+	}
+	t.Fatalf("obsolete-freelist child completed without hitting fault %s", fault)
+}
+
 func assertMmapProcessCrashRecoveryRoot(t *testing.T, path string, fault mmapFaultPoint, wantNewRoot bool) {
 	t.Helper()
 
@@ -1058,4 +1159,57 @@ func assertMmapLegacyUpgradeProcessCrashRecovered(t *testing.T, path string, fau
 	if got := recovered.Revision(); got != legacy.revision {
 		t.Fatalf("Revision after old metadata recovery at %s = %d, want %d", fault, got, legacy.revision)
 	}
+}
+
+func assertMmapObsoleteFreelistProcessCrashRecovered(t *testing.T, path string, fault mmapFaultPoint, wantReclaim bool, wantCharlie bool) {
+	t.Helper()
+
+	recovered, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after obsolete-freelist process crash at %s: %v", fault, err)
+	}
+	defer recovered.Close()
+
+	if err := recovered.Check(); err != nil {
+		t.Fatalf("Check after obsolete-freelist process crash at %s: %v", fault, err)
+	}
+	if got, ok := recovered.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("Get(alpha) after obsolete-freelist process crash at %s = %q, %v; want one, true", fault, got, ok)
+	}
+	if got, ok := recovered.Get("bravo"); !ok || string(got) != "two" {
+		t.Fatalf("Get(bravo) after obsolete-freelist process crash at %s = %q, %v; want two, true", fault, got, ok)
+	}
+	got, ok := recovered.Get("charlie")
+	if wantCharlie {
+		if !ok || string(got) != "three" {
+			t.Fatalf("Get(charlie) after obsolete-freelist process crash at %s = %q, %v; want three, true", fault, got, ok)
+		}
+	} else if ok {
+		t.Fatalf("Get(charlie) after obsolete-freelist process crash at %s = %q, true; want absent", fault, got)
+	}
+
+	for _, id := range obsoleteFreelistProcessFirstGenerationPages() {
+		reusable := slices.Contains(recovered.free, id)
+		if wantReclaim && !reusable {
+			t.Fatalf("obsolete metadata page %d after process crash at %s is not reusable", id, fault)
+		}
+		if !wantReclaim && reusable {
+			t.Fatalf("still-referenced metadata page %d after process crash at %s became reusable", id, fault)
+		}
+	}
+}
+
+func obsoleteFreelistProcessFreeCount() int {
+	return maxMetaFreePages + 17
+}
+
+func obsoleteFreelistProcessFirstGenerationPages() []PageID {
+	freeCount := obsoleteFreelistProcessFreeCount()
+	pageCount := divideRoundUp(freeCount, freelistPageCapacity)
+	first := firstTreePageID + 1 + PageID(freeCount)
+	ids := make([]PageID, pageCount)
+	for i := range ids {
+		ids[i] = first + PageID(i)
+	}
+	return ids
 }

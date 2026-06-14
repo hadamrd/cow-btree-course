@@ -957,8 +957,9 @@ Serious pieces in this repository:
   accepted image to pass `Tree.Check`.
 - Process-exit crash probes that kill a child writer at sync-publication,
   transaction-sync-publication, mmap-growth, compact-shrink, large-freelist
-  spill, large-reclaim spill, and legacy metadata-upgrade fault points, then
-  reopen the same database from a fresh process.
+  spill, large-reclaim spill, legacy metadata-upgrade, and obsolete freelist
+  metadata-generation boundaries, then reopen the same database from a fresh
+  process.
 - Reproducible microbenchmarks for page and mmap get, seek/next, forward and
   reverse bounded cursor, bounded range, insert, delete, reopen, and sync paths.
   Run a short local pass with
@@ -983,7 +984,8 @@ Still research or incomplete compared with a production engine:
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with true power-fail fault injection;
   sync publication, transaction sync publication, mmap growth, compact shrink,
-  large-freelist spill, and large-reclaim spill have process-exit probes.
+  large-freelist spill, large-reclaim spill, legacy metadata upgrade, and
+  obsolete freelist metadata-generation reclaim have process-exit probes.
 - No arbitrary mmap custom-comparator plugin identity or locale/collation layer
   yet; memory-backed trees can use a custom comparator, while mmap files can
   reopen only named built-in orders persisted in metadata.
