@@ -783,7 +783,9 @@ events showing which checked metadata records were accepted or rejected during
 the same recovery path normal open uses. If normal read-only open fails, the
 command still emits an invalid JSON report with the open error and any recovery
 candidate events collected before failure, so broken images can be diagnosed
-without scraping stderr.
+without scraping stderr. When `--readers` is present on that failed-open path,
+the report also includes either passive `reader_stats` or `reader_stats_error`,
+so a malformed `.readers` sidecar is visible next to metadata recovery state.
 `--readers` closes that inspection handle first, then uses
 `InspectMmapReaderStats` to add the mmap reader-table slot summary without
 claiming an inspector slot. `--cache` adds kernel page-cache residency counts,

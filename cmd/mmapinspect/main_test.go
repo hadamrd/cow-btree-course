@@ -212,6 +212,44 @@ func TestRunPrintsRecoveryCandidatesWhenOpenFails(t *testing.T) {
 	}
 }
 
+func TestRunPrintsReaderTableErrorWhenOpenFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inspect.db")
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+	if err := os.WriteFile(path+".readers", []byte("not-a-reader-table"), 0o644); err != nil {
+		t.Fatalf("write malformed reader sidecar: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--readers", path}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run exit = %d, want 1", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want JSON-only failure", stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.Valid || report.Error == "" {
+		t.Fatalf("valid/error = %v/%q, want invalid report with open error", report.Valid, report.Error)
+	}
+	if report.ReaderStatsError == "" || !strings.Contains(report.ReaderStatsError, "reader table") {
+		t.Fatalf("ReaderStatsError = %q, want reader-table diagnostic", report.ReaderStatsError)
+	}
+	if len(report.MetadataRecovery) == 0 {
+		t.Fatalf("MetadataRecovery = empty, want recovery context next to reader-table failure")
+	}
+}
+
 func TestRunPrintsOptionalReaderAndCacheSections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspect.db")
 	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})

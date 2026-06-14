@@ -210,6 +210,9 @@ recovery used by normal open, and reports rejected and accepted metadata
 candidates without dumping keys or values. If normal read-only open fails,
 `mmapinspect` still writes an invalid JSON report with the open error plus any
 collected recovery candidate events, instead of only writing a stderr string.
+With `--readers`, that failed-open report also includes either passive
+`reader_stats` or `reader_stats_error`, which makes malformed `.readers`
+sidecars diagnosable even when they prevent `OpenMmapReadOnly` from returning.
 `--readers` closes the command's own
 read-only handle before reading the sidecar through
 `InspectMmapReaderStats`, so reader-table output reports the workload's readers

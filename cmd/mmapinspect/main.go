@@ -34,6 +34,7 @@ type inspectReport struct {
 	LeafLinksChecked  bool                               `json:"leaf_links_checked"`
 	LeafLinksSkipped  bool                               `json:"leaf_links_skipped"`
 	ReaderStats       *pagebtree.MmapReaderStats         `json:"reader_stats,omitempty"`
+	ReaderStatsError  string                             `json:"reader_stats_error,omitempty"`
 	CacheStats        *pagebtree.MmapCacheStats          `json:"cache_stats,omitempty"`
 	SpaceStats        *pagebtree.MmapSpaceStats          `json:"space_stats,omitempty"`
 	HolePunchProfile  *pagebtree.MmapHolePunchCapability `json:"hole_punch_profile,omitempty"`
@@ -118,6 +119,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 			Valid:            false,
 			Error:            err.Error(),
 			MetadataRecovery: recovery,
+		}
+		if options.readers {
+			stats, statsErr := pagebtree.InspectMmapReaderStats(options.path)
+			if statsErr != nil {
+				report.ReaderStatsError = statsErr.Error()
+			} else {
+				report.ReaderStats = &stats
+			}
 		}
 		if err := encodeReport(stdout, report); err != nil {
 			fmt.Fprintf(stderr, "mmap inspect: encode report: %v\n", err)
