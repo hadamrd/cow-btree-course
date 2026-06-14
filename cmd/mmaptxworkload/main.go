@@ -15,8 +15,10 @@ import (
 const defaultTransactions = 12
 
 type txWorkloadReport struct {
-	Path                    string          `json:"path"`
+	Path                    string          `json:"path,omitempty"`
+	PathRedacted            bool            `json:"path_redacted,omitempty"`
 	TracePath               string          `json:"trace_path,omitempty"`
+	TracePathRedacted       bool            `json:"trace_path_redacted,omitempty"`
 	Transactions            int             `json:"transactions"`
 	Committed               int             `json:"committed"`
 	Conflicted              int             `json:"conflicted"`
@@ -30,6 +32,7 @@ type txWorkloadReport struct {
 type txWorkloadOptions struct {
 	path         string
 	tracePath    string
+	redactPath   bool
 	transactions int
 }
 
@@ -64,7 +67,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "mmap tx workload: %v\n", err)
 		return 1
 	}
-	report.TracePath = options.tracePath
+	if options.redactPath {
+		report.PathRedacted = true
+		if options.tracePath != "" {
+			report.TracePathRedacted = true
+		}
+	} else {
+		report.TracePath = options.tracePath
+	}
 	if traceExporter != nil {
 		if err := traceExporter.Err(); err != nil {
 			fmt.Fprintf(stderr, "mmap tx workload: trace: %v\n", err)
@@ -113,6 +123,8 @@ func parseArgs(args []string) (txWorkloadOptions, error) {
 			if options.tracePath == "" {
 				return txWorkloadOptions{}, fmt.Errorf("--trace expects a JSONL path")
 			}
+		case arg == "--redact-path":
+			options.redactPath = true
 		default:
 			if arg == "" || strings.HasPrefix(arg, "-") {
 				return txWorkloadOptions{}, fmt.Errorf("unknown argument %q", arg)
@@ -149,7 +161,7 @@ func parsePositiveInt(text string) (int, error) {
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintln(stderr, "usage: mmaptxworkload [--transactions N] [--trace TRACE.jsonl] DB.db")
+	fmt.Fprintln(stderr, "usage: mmaptxworkload [--transactions N] [--trace TRACE.jsonl] [--redact-path] DB.db")
 }
 
 func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (txWorkloadReport, error) {
@@ -173,9 +185,11 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 	}
 
 	report := txWorkloadReport{
-		Path:                    options.path,
 		Transactions:            options.transactions,
 		TransactionConflictKind: string(pagebtree.MmapTraceTxConflict),
+	}
+	if !options.redactPath {
+		report.Path = options.path
 	}
 
 	for i := 0; i < options.transactions; i++ {

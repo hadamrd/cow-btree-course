@@ -201,10 +201,12 @@ root/revision with a recovered database image.
 For a transaction-focused trace, `cmd/mmaptxworkload` creates a fresh mmap
 database, alternates successful transaction commit-sync calls with forced
 optimistic conflicts, reopens the database to verify which staged writes became
-durable, and optionally writes value-free trace JSONL:
+durable, and optionally writes value-free trace JSONL. `--redact-path` omits
+local database and trace paths from the JSON report while still writing the
+trace file at the supplied path:
 
 ```bash
-go run ./cmd/mmaptxworkload --transactions 12 --trace tx-trace.jsonl txworkload.db
+go run ./cmd/mmaptxworkload --transactions 12 --trace tx-trace.jsonl --redact-path txworkload.db
 go run ./cmd/mmaptracesummary tx-trace.jsonl
 ```
 

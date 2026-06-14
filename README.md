@@ -27,7 +27,7 @@ go run ./cmd/mmaptracesummary mmap-trace.jsonl > mmap-trace-summary.md
 go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db
 go run ./cmd/mmappunch --trace punch-trace.jsonl /path/to/source.db
 go run ./cmd/mmapreadersoak --readers 4 --rounds 5 --keys 128 /path/to/soak.db
-go run ./cmd/mmaptxworkload --transactions 12 --trace tx-trace.jsonl /path/to/txworkload.db
+go run ./cmd/mmaptxworkload --transactions 12 --trace tx-trace.jsonl --redact-path /path/to/txworkload.db
 go run ./cmd/mmaptearlab --mode metadata /path/to/tear.db
 go run ./cmd/mmaptearlab --mode root /path/to/tear.db
 go run ./cmd/mmapplatform

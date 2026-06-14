@@ -800,10 +800,12 @@ readable while still counting all events.
 existing database artifacts, creates a fresh mmap tree, alternates successful
 read-write transaction `CommitSyncDetailed` calls with forced optimistic
 conflicts, verifies the reopened committed/conflicted key counts, and can write
-value-free trace JSONL:
+value-free trace JSONL. Use `--redact-path` when the JSON report will be shared
+or checked in; the command still uses the real database and trace paths
+internally, but omits them from the report:
 
 ```bash
-go run ./cmd/mmaptxworkload --transactions 12 --trace tx-trace.jsonl txworkload.db
+go run ./cmd/mmaptxworkload --transactions 12 --trace tx-trace.jsonl --redact-path txworkload.db
 go run ./cmd/mmaptracesummary tx-trace.jsonl
 ```
 

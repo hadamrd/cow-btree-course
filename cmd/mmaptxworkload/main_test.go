@@ -63,6 +63,42 @@ func TestRunPrintsTransactionWorkloadJSONAndTrace(t *testing.T) {
 	}
 }
 
+func TestRunCanRedactReportPaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "txworkload.db")
+	tracePath := filepath.Join(dir, "txworkload.jsonl")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--transactions", "2", "--trace", tracePath, "--redact-path", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report txWorkloadReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.Path != "" || report.TracePath != "" {
+		t.Fatalf("redacted report paths = %q/%q, want empty", report.Path, report.TracePath)
+	}
+	if !report.PathRedacted || !report.TracePathRedacted {
+		t.Fatalf("redaction flags = path:%v trace:%v, want true/true", report.PathRedacted, report.TracePathRedacted)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw JSON: %v", err)
+	}
+	if _, ok := raw["path"]; ok {
+		t.Fatalf("redacted JSON includes path field: %s", stdout.String())
+	}
+	if _, ok := raw["trace_path"]; ok {
+		t.Fatalf("redacted JSON includes trace_path field: %s", stdout.String())
+	}
+	if _, err := os.Stat(tracePath); err != nil {
+		t.Fatalf("trace file was not written at real path: %v", err)
+	}
+}
+
 func TestRunRejectsExistingDatabaseArtifacts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "txworkload.db")
 	if err := os.WriteFile(path, []byte("already here"), 0o644); err != nil {
