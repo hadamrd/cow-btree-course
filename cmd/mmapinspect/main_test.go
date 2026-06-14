@@ -62,6 +62,9 @@ func TestRunPrintsAuditJSONForMmapDatabase(t *testing.T) {
 	if report.KeySample != nil {
 		t.Fatalf("KeySample = %+v, want nil without --keys", report.KeySample)
 	}
+	if report.PageSummaries != nil {
+		t.Fatalf("PageSummaries = %+v, want nil without --pages", report.PageSummaries)
+	}
 }
 
 func TestRunPrintsPersistedKeyOrder(t *testing.T) {
@@ -201,6 +204,57 @@ func TestRunPrintsKeySample(t *testing.T) {
 	wantLast := []string{"key-04", "key-05"}
 	if fmt.Sprint(report.KeySample.Last) != fmt.Sprint(wantLast) {
 		t.Fatalf("KeySample.Last = %v, want %v", report.KeySample.Last, wantLast)
+	}
+}
+
+func TestRunPrintsPageSummaries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inspect.db")
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	for i := range 40 {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	tree.Put("large", bytes.Repeat([]byte("x"), pagebtree.PageSize*2+17))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--pages", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if len(report.PageSummaries) < report.Stats.Pages {
+		t.Fatalf("PageSummaries = %d, want at least Stats.Pages %d", len(report.PageSummaries), report.Stats.Pages)
+	}
+	reachableSummaries := 0
+	var sawRootBranch, sawLeaf, sawOverflow bool
+	for _, summary := range report.PageSummaries {
+		if summary.Role == "reachable" {
+			reachableSummaries++
+		}
+		if summary.ID == report.Stats.Root && summary.Role == "reachable" && summary.Kind == "branch" && len(summary.Children) > 0 {
+			sawRootBranch = true
+		}
+		if summary.Role == "reachable" && summary.Kind == "leaf" && summary.Keys > 0 {
+			sawLeaf = true
+		}
+		if summary.Role == "reachable" && summary.Kind == "overflow" && summary.BytesUsed > 0 {
+			sawOverflow = true
+		}
+	}
+	if reachableSummaries != report.Stats.Pages {
+		t.Fatalf("reachable page summaries = %d, want Stats.Pages %d", reachableSummaries, report.Stats.Pages)
+	}
+	if !sawRootBranch || !sawLeaf || !sawOverflow {
+		t.Fatalf("page summaries missing root/leaf/overflow evidence: root=%v leaf=%v overflow=%v summaries=%+v", sawRootBranch, sawLeaf, sawOverflow, report.PageSummaries)
 	}
 }
 

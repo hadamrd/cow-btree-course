@@ -473,9 +473,10 @@ failure.
 
 `Tree.Check` is the strict pass/fail surface. `Tree.Audit` runs the same
 validation path but returns an `AuditReport`: current `Stats`, sorted reachable
-page IDs, sorted free and retired page IDs, whether leaf-link validation ran or
-was skipped because active readers can legitimately delay relinking, and the
-exact validation error. That makes corruption tests and crash-image experiments
+page IDs, sorted free and retired page IDs, value-free page summaries with
+role/kind/occupancy/routing hints, whether leaf-link validation ran or was
+skipped because active readers can legitimately delay relinking, and the exact
+validation error. That makes corruption tests and crash-image experiments
 explainable without weakening the validator.
 
 Code to read:
@@ -703,11 +704,13 @@ with validity, stats, persisted key-order identity, comparator kind, readable
 names for both, reachable page IDs, free page IDs, retired page IDs, and
 linked-leaf validation state.
 `--readers` adds the mmap reader-table slot summary, and `--cache` adds kernel
-page-cache residency counts. `--keys N` adds a bounded first/last key sample in
-the recovered comparator order without dumping values:
+page-cache residency counts. `--pages` adds value-free page summaries with
+role, kind, byte occupancy, branch children, and next-page hints. `--keys N`
+adds a bounded first/last key sample in the recovered comparator order without
+dumping values:
 
 ```bash
-go run ./cmd/mmapinspect --readers --cache --keys=4 /path/to/source.db
+go run ./cmd/mmapinspect --readers --cache --pages --keys=4 /path/to/source.db
 ```
 
 Code to read:

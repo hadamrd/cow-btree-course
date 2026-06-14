@@ -59,8 +59,9 @@
 // length, and freelist safety. It validates leaf links only when no active
 // reader is delaying leaf-link repair. Audit runs that same validation path
 // and returns a report with Stats plus sorted reachable, free, and retired page
-// IDs, whether leaf-link validation was checked or skipped, and the exact
-// validation error if the tree is not valid.
+// IDs, value-free page summaries with role/kind/occupancy/routing hints,
+// whether leaf-link validation was checked or skipped, and the exact validation
+// error if the tree is not valid.
 // Mmap-backed ranges prefetch a configurable bounded window of exact next leaf
 // page ranges with MADV_WILLNEED; adjacent page ids are coalesced into one
 // hint, and the window can be disabled when the caller wants to avoid even

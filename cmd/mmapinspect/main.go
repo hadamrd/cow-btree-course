@@ -27,6 +27,7 @@ type inspectReport struct {
 	ReaderStats       *pagebtree.MmapReaderStats  `json:"reader_stats,omitempty"`
 	CacheStats        *pagebtree.MmapCacheStats   `json:"cache_stats,omitempty"`
 	KeySample         *inspectKeySample           `json:"key_sample,omitempty"`
+	PageSummaries     []pagebtree.PageSummary     `json:"page_summaries,omitempty"`
 }
 
 type inspectKeySample struct {
@@ -40,6 +41,7 @@ type inspectOptions struct {
 	path           string
 	readers        bool
 	cache          bool
+	pages          bool
 	keySampleLimit int
 }
 
@@ -63,6 +65,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	defer tree.Close()
 
 	report := inspectFromAudit(tree.Audit(), tree.MDBKernelProfile())
+	if !options.pages {
+		report.PageSummaries = nil
+	}
 	if options.readers {
 		stats, err := tree.MmapReaderStats()
 		if err != nil {
@@ -104,6 +109,8 @@ func parseArgs(args []string) (inspectOptions, error) {
 			options.readers = true
 		case "--cache":
 			options.cache = true
+		case "--pages":
+			options.pages = true
 		case "--keys":
 			i++
 			if i >= len(args) {
@@ -150,7 +157,7 @@ func parsePositiveLimit(raw string) (int, error) {
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintf(stderr, "usage: mmapinspect [--readers] [--cache] [--keys N] DB.db\n")
+	fmt.Fprintf(stderr, "usage: mmapinspect [--readers] [--cache] [--pages] [--keys N] DB.db\n")
 }
 
 func inspectFromAudit(audit pagebtree.AuditReport, profile pagebtree.MDBKernelProfile) inspectReport {
@@ -164,6 +171,7 @@ func inspectFromAudit(audit pagebtree.AuditReport, profile pagebtree.MDBKernelPr
 		ReachablePageIDs:  audit.ReachablePageIDs,
 		FreePageIDs:       audit.FreePageIDs,
 		RetiredPageIDs:    audit.RetiredPageIDs,
+		PageSummaries:     audit.PageSummaries,
 		LeafLinksChecked:  audit.LeafLinksChecked,
 		LeafLinksSkipped:  audit.LeafLinksSkipped,
 	}

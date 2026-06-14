@@ -1324,6 +1324,30 @@ func TestAuditReportsReachableEvidenceAndValidationError(t *testing.T) {
 	if len(report.ReachablePageIDs) != stats.Pages {
 		t.Fatalf("reachable page IDs = %d, want Stats.Pages %d", len(report.ReachablePageIDs), stats.Pages)
 	}
+	if len(report.PageSummaries) < len(report.ReachablePageIDs) {
+		t.Fatalf("page summaries = %d, want at least reachable page count %d", len(report.PageSummaries), len(report.ReachablePageIDs))
+	}
+	var sawRootBranch, sawLeaf, sawOverflow bool
+	for _, summary := range report.PageSummaries {
+		if summary.Role == "reachable" && summary.BytesCapacity != PageSize {
+			t.Fatalf("reachable page summary %+v has BytesCapacity %d, want %d", summary, summary.BytesCapacity, PageSize)
+		}
+		if summary.ID == stats.Root {
+			if summary.Role != "reachable" || summary.Kind != "branch" || summary.Separators == 0 || len(summary.Children) != summary.Separators+1 {
+				t.Fatalf("root page summary = %+v, want reachable branch with separator children", summary)
+			}
+			sawRootBranch = true
+		}
+		if summary.Role == "reachable" && summary.Kind == "leaf" && summary.Keys > 0 {
+			sawLeaf = true
+		}
+		if summary.Role == "reachable" && summary.Kind == "overflow" && summary.BytesUsed > 0 {
+			sawOverflow = true
+		}
+	}
+	if !sawRootBranch || !sawLeaf || !sawOverflow {
+		t.Fatalf("page summaries missing root/leaf/overflow evidence: root=%v leaf=%v overflow=%v summaries=%+v", sawRootBranch, sawLeaf, sawOverflow, report.PageSummaries)
+	}
 	for i := 1; i < len(report.ReachablePageIDs); i++ {
 		if report.ReachablePageIDs[i-1] >= report.ReachablePageIDs[i] {
 			t.Fatalf("reachable page IDs are not sorted unique: %v", report.ReachablePageIDs)

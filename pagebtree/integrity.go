@@ -12,9 +12,30 @@ type AuditReport struct {
 	ReachablePageIDs []PageID
 	FreePageIDs      []PageID
 	RetiredPageIDs   []PageID
+	PageSummaries    []PageSummary
 	LeafLinksChecked bool
 	LeafLinksSkipped bool
 	Error            error
+}
+
+// PageSummary is a compact, value-free description of one page known to Audit.
+//
+// Role distinguishes pages reachable from the current root from reusable or
+// reader-pinned pages. Kind describes the page header kind when the page bytes
+// are present. Children is populated for branch pages; NextPage is populated for
+// linked leaves and overflow pages when their next pointer is nonzero.
+type PageSummary struct {
+	ID              PageID   `json:"id"`
+	Role            string   `json:"role"`
+	Kind            string   `json:"kind"`
+	Keys            int      `json:"keys,omitempty"`
+	Separators      int      `json:"separators,omitempty"`
+	Children        []PageID `json:"children,omitempty"`
+	NextPage        PageID   `json:"next_page,omitempty"`
+	BytesUsed       int      `json:"bytes_used,omitempty"`
+	BytesFree       int      `json:"bytes_free,omitempty"`
+	BytesCapacity   int      `json:"bytes_capacity,omitempty"`
+	RetiredRevision uint64   `json:"retired_revision,omitempty"`
 }
 
 // Valid reports whether Audit found no validation error.
@@ -48,6 +69,7 @@ func (t *Tree) Audit() AuditReport {
 	report.RetiredPageIDs = sortedRetiredPageIDs(t.retired)
 
 	if t.root == 0 {
+		report.PageSummaries = t.pageSummaries(nil)
 		if t.length != 0 {
 			report.Error = fmt.Errorf("%w: empty root with length %d", ErrTreeInvariant, t.length)
 			return report
@@ -61,6 +83,7 @@ func (t *Tree) Audit() AuditReport {
 
 	reachable, err := t.validateReachablePages()
 	report.ReachablePageIDs = sortedPageIDs(reachable)
+	report.PageSummaries = t.pageSummaries(reachable)
 	if err != nil {
 		report.Error = err
 		return report
@@ -175,6 +198,78 @@ func sortedRetiredPageIDs(retired []retiredPage) []PageID {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
+}
+
+func (t *Tree) pageSummaries(reachable map[PageID]bool) []PageSummary {
+	summaries := make([]PageSummary, 0, len(reachable)+len(t.free)+len(t.retired))
+	for _, id := range sortedPageIDs(reachable) {
+		summaries = append(summaries, summarizePage(id, t.pages[id], "reachable", 0))
+	}
+	for _, id := range sortedPageIDsFromSlice(t.free) {
+		summaries = append(summaries, summarizePage(id, t.pages[id], "free", 0))
+	}
+	retired := append([]retiredPage(nil), t.retired...)
+	sort.Slice(retired, func(i, j int) bool { return retired[i].id < retired[j].id })
+	for _, page := range retired {
+		summaries = append(summaries, summarizePage(page.id, t.pages[page.id], "retired", page.revision))
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		if summaries[i].ID != summaries[j].ID {
+			return summaries[i].ID < summaries[j].ID
+		}
+		return summaries[i].Role < summaries[j].Role
+	})
+	return summaries
+}
+
+func summarizePage(id PageID, p *page, role string, retiredRevision uint64) PageSummary {
+	summary := PageSummary{
+		ID:              id,
+		Role:            role,
+		Kind:            "missing",
+		RetiredRevision: retiredRevision,
+	}
+	if p == nil {
+		return summary
+	}
+	summary.Kind = pageKind(p)
+	summary.BytesCapacity = PageSize
+	switch {
+	case p.isLeaf():
+		summary.Keys = int(p.slotCount())
+		summary.NextPage = p.nextLeaf()
+		summary.BytesUsed = p.slottedBytesUsed()
+	case p.isBranch():
+		summary.Separators = int(p.slotCount())
+		summary.Children = p.childIDs()
+		summary.BytesUsed = p.slottedBytesUsed()
+	case p.isOverflow():
+		summary.NextPage = p.overflowNext()
+		summary.BytesUsed = p.overflowBytesUsed()
+	default:
+		summary.BytesUsed = PageSize
+	}
+	summary.BytesFree = summary.BytesCapacity - summary.BytesUsed
+	return summary
+}
+
+func pageKind(p *page) string {
+	switch {
+	case p == nil:
+		return "missing"
+	case p.isLeaf():
+		return "leaf"
+	case p.isBranch():
+		return "branch"
+	case p.isOverflow():
+		return "overflow"
+	case p.flags()&flagFreelist != 0:
+		return "freelist"
+	case p.flags()&flagReclaim != 0:
+		return "reclaim"
+	default:
+		return "unknown"
+	}
 }
 
 func (t *Tree) validateLeafLinks() error {
