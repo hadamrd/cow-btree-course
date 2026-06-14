@@ -147,8 +147,11 @@
 // coexist with a writer while pinning old copy-on-write pages. Version-3 reader
 // slots also store process-start and boot/session tokens when the platform
 // exposes them, reducing PID-reuse and reboot/session ambiguity during stale-slot
-// cleanup; version-1 and version-2 sidecars remain readable. MmapReaderStats
-// reports live, stale, process-start-tagged, and boot-tagged reader-table slots,
+// cleanup; version-1 and version-2 sidecars remain readable.
+// InspectMmapLockStats checks the writer sidecar without opening a writer and
+// reports whether the mutex file exists and whether a non-blocking exclusive
+// lock attempt observed active writer contention. MmapReaderStats reports live,
+// stale, process-start-tagged, and boot-tagged reader-table slots,
 // InspectMmapReaderStats validates slots against the recovered usable root
 // revision without claiming an observer slot, and CleanStaleMmapReaders clears
 // slots owned by dead or detectably reused owners. Existing malformed

@@ -35,6 +35,8 @@ type inspectReport struct {
 	LeafLinksSkipped  bool                               `json:"leaf_links_skipped"`
 	ReaderStats       *pagebtree.MmapReaderStats         `json:"reader_stats,omitempty"`
 	ReaderStatsError  string                             `json:"reader_stats_error,omitempty"`
+	LockStats         *pagebtree.MmapLockStats           `json:"lock_stats,omitempty"`
+	LockStatsError    string                             `json:"lock_stats_error,omitempty"`
 	CacheStats        *pagebtree.MmapCacheStats          `json:"cache_stats,omitempty"`
 	SpaceStats        *pagebtree.MmapSpaceStats          `json:"space_stats,omitempty"`
 	HolePunchProfile  *pagebtree.MmapHolePunchCapability `json:"hole_punch_profile,omitempty"`
@@ -93,6 +95,7 @@ type inspectTracePhase struct {
 type inspectOptions struct {
 	path           string
 	readers        bool
+	locks          bool
 	cache          bool
 	space          bool
 	pages          bool
@@ -126,6 +129,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 				report.ReaderStatsError = statsErr.Error()
 			} else {
 				report.ReaderStats = &stats
+			}
+		}
+		if options.locks {
+			stats, statsErr := pagebtree.InspectMmapLockStats(options.path)
+			if statsErr != nil {
+				report.LockStatsError = statsErr.Error()
+			} else {
+				report.LockStats = &stats
 			}
 		}
 		if err := encodeReport(stdout, report); err != nil {
@@ -167,6 +178,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		report.SpaceStats = &stats
 		profile := pagebtree.MmapHolePunchProfile()
 		report.HolePunchProfile = &profile
+	}
+	if options.locks {
+		stats, err := pagebtree.InspectMmapLockStats(options.path)
+		if err != nil {
+			fmt.Fprintf(stderr, "mmap inspect: lock stats: %v\n", err)
+			return 1
+		}
+		report.LockStats = &stats
 	}
 	if options.keySampleLimit > 0 {
 		sample := inspectKeys(tree, options.keySampleLimit)
@@ -217,6 +236,8 @@ func parseArgs(args []string) (inspectOptions, error) {
 		switch arg {
 		case "--readers":
 			options.readers = true
+		case "--locks":
+			options.locks = true
 		case "--cache":
 			options.cache = true
 		case "--space":
@@ -282,7 +303,7 @@ func parsePositiveLimit(raw string) (int, error) {
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintf(stderr, "usage: mmapinspect [--readers] [--cache] [--space] [--pages] [--keys N] [--trace TRACE.jsonl] DB.db\n")
+	fmt.Fprintf(stderr, "usage: mmapinspect [--readers] [--locks] [--cache] [--space] [--pages] [--keys N] [--trace TRACE.jsonl] DB.db\n")
 }
 
 func inspectFromAudit(audit pagebtree.AuditReport, profile pagebtree.MDBKernelProfile) inspectReport {

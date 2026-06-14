@@ -213,11 +213,17 @@ collected recovery candidate events, instead of only writing a stderr string.
 With `--readers`, that failed-open report also includes either passive
 `reader_stats` or `reader_stats_error`, which makes malformed `.readers`
 sidecars diagnosable even when they prevent `OpenMmapReadOnly` from returning.
+With `--locks`, failed-open reports also include `lock_stats` or
+`lock_stats_error`, so writer-sidecar contention can be reviewed beside
+metadata and reader-table state.
 `--readers` closes the command's own
 read-only handle before reading the sidecar through
 `InspectMmapReaderStats`, so reader-table output reports the workload's readers
 rather than an extra inspector slot. It includes active/stale slots and oldest
-pinned revision. `--cache` adds `mincore`-backed mapped/resident page counts,
+pinned revision. `--locks` calls `InspectMmapLockStats` without opening a
+writer and reports whether the `.writer` mutex sidecar exists and whether a
+non-blocking exclusive lock attempt observed active writer contention. `--cache`
+adds `mincore`-backed mapped/resident page counts,
 and `--space` adds `stat(2)` logical-vs-allocated file-space counts plus the
 hole-punch capability profile for sparse experiments. `--pages` adds value-free
 page summaries with role, kind, byte occupancy, branch children, metadata record
@@ -230,7 +236,7 @@ fallback-recoverable pages, lists failure reasons, and checks whether the last
 traced revision/root/nextPage geometry matches the inspected file:
 
 ```bash
-go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl source.db
+go run ./cmd/mmapinspect --readers --locks --cache --space --pages --keys=4 --trace mmap-trace.jsonl source.db
 ```
 
 This is useful when studying recovery fallback. If the newest metadata page points at a torn root page, a trace hook can show the newest candidate rejected with a checksum or invariant reason and the older candidate accepted. That is more precise than a counter saying "one open succeeded."
@@ -321,7 +327,7 @@ flowchart TD
 
 ## Writer Mutex and Reader Table
 
-`OpenMmap` takes a non-blocking exclusive advisory lock on a sidecar writer-mutex file. A second writer attempting to open the same path receives `ErrDatabaseLocked` until the first writer closes. The database file itself is mapped with a shared advisory lock so read-only handles can coexist with the writer.
+`OpenMmap` takes a non-blocking exclusive advisory lock on a sidecar writer-mutex file. A second writer attempting to open the same path receives `ErrDatabaseLocked` until the first writer closes. `InspectMmapLockStats(path)` observes that sidecar without creating missing files or opening a writer, reporting whether the sidecar exists and whether it is currently locked. The database file itself is mapped with a shared advisory lock so read-only handles can coexist with the writer.
 
 `OpenMmapReadOnly` opens the database file with a shared advisory lock and a read-only mapping, then claims a sidecar reader-table slot with revision `0` before metadata recovery reads a root. Revision `0` is a conservative provisional pin: writers that scan the table during that short window must keep all retired pages unavailable for reuse. After metadata recovery chooses a root, the reader updates its slot to the recovered revision and validates the table against that recovered revision before returning the handle. Writable `OpenMmap` performs the same validation after recovering metadata from an existing file. The version-3 slot records the process ID, revision, claim token, process-start token, and boot/session token when the platform exposes them; Linux reads process start from `/proc/<pid>/stat` and boot identity from `/proc/sys/kernel/random/boot_id`, while Darwin reads process start from `kern.proc.pid` and boot identity from `kern.boottime`. Version-1 and version-2 sidecars still reopen as older, weaker slot formats. When a writer reclaims retired pages, it combines in-process snapshots with the oldest live revision found in that reader table. If any active reader can still see a retired page, the writer allocates new pages instead of recycling that page ID. Version-3 metadata can persist those still-pinned retired records in checked reclaim pages, so a writer can close and a later writer can recover the same pending retired list. When the read-only handle closes, the next writer reclaim pass can move those records into the reusable free list.
 

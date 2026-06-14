@@ -2387,7 +2387,11 @@ func TestCompactMmapFileRejectsOpenWriter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenMmap writer: %v", err)
 	}
-	defer writer.Close()
+	defer func() {
+		if writer != nil {
+			_ = writer.Close()
+		}
+	}()
 	writer.Put("alpha", []byte("one"))
 	if err := writer.Sync(); err != nil {
 		t.Fatalf("Sync writer: %v", err)
@@ -5189,6 +5193,47 @@ func TestMmapTreeTakesExclusiveWriterMutex(t *testing.T) {
 	}
 	if err := reopened.Close(); err != nil {
 		t.Fatalf("Close reopened: %v", err)
+	}
+}
+
+func TestInspectMmapLockStatsReportsWriterMutex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	stats, err := InspectMmapLockStats(path)
+	if err != nil {
+		t.Fatalf("InspectMmapLockStats missing sidecar: %v", err)
+	}
+	if stats.WriterSidecarExists || stats.WriterLocked {
+		t.Fatalf("missing-sidecar lock stats = %+v, want zero evidence", stats)
+	}
+	if _, err := os.Stat(path + ".writer"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("writer sidecar after missing inspection err = %v, want not created", err)
+	}
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	defer writer.Close()
+
+	stats, err = InspectMmapLockStats(path)
+	if err != nil {
+		t.Fatalf("InspectMmapLockStats active writer: %v", err)
+	}
+	if !stats.WriterSidecarExists || !stats.WriterLocked {
+		t.Fatalf("active-writer lock stats = %+v, want existing locked writer sidecar", stats)
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+	writer = nil
+	stats, err = InspectMmapLockStats(path)
+	if err != nil {
+		t.Fatalf("InspectMmapLockStats after close: %v", err)
+	}
+	if !stats.WriterSidecarExists || stats.WriterLocked {
+		t.Fatalf("closed-writer lock stats = %+v, want existing unlocked writer sidecar", stats)
 	}
 }
 

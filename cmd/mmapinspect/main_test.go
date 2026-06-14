@@ -303,6 +303,39 @@ func TestRunPrintsOptionalReaderAndCacheSections(t *testing.T) {
 	}
 }
 
+func TestRunPrintsWriterLockSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inspect.db")
+	writer, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	defer writer.Close()
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Sync(); err != nil {
+		t.Fatalf("Sync writer: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--locks", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.LockStats == nil {
+		t.Fatalf("LockStats = nil, want section with --locks")
+	}
+	if !report.LockStats.WriterSidecarExists {
+		t.Fatalf("WriterSidecarExists = false, want writer sidecar evidence")
+	}
+	if !report.LockStats.WriterLocked {
+		t.Fatalf("WriterLocked = false, want active writer contention evidence")
+	}
+}
+
 func TestRunPrintsReclaimPressure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspect.db")
 	writer, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})

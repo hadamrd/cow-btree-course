@@ -786,7 +786,12 @@ candidate events collected before failure, so broken images can be diagnosed
 without scraping stderr. When `--readers` is present on that failed-open path,
 the report also includes either passive `reader_stats` or `reader_stats_error`,
 so a malformed `.readers` sidecar is visible next to metadata recovery state.
-`--readers` closes that inspection handle first, then uses
+`--locks` adds passive writer-sidecar evidence through `InspectMmapLockStats`:
+whether the `.writer` mutex file exists and whether a non-blocking exclusive
+lock attempt observed active writer contention. On failed-open reports it uses
+the same `lock_stats` or `lock_stats_error` shape, so lock contention can be
+seen beside metadata and reader-table failures. `--readers` closes that
+inspection handle first, then uses
 `InspectMmapReaderStats` to add the mmap reader-table slot summary without
 claiming an inspector slot. `--cache` adds kernel page-cache residency counts,
 and `--space` adds logical-vs-allocated file-space counts plus the hole-punch
@@ -804,7 +809,7 @@ reasons, and checks whether the last traced revision/root/nextPage matches the
 inspected database:
 
 ```bash
-go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db
+go run ./cmd/mmapinspect --readers --locks --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db
 ```
 
 For filesystem-specific sparse allocation experiments, `cmd/mmapfsprobe` creates
