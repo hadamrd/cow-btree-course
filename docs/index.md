@@ -100,5 +100,5 @@ docs/           Research chapters
 13. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
 14. Read [`10-respectability-gap-audit.md`](10-respectability-gap-audit.md) for the blunt gap list and next research slices.
 15. Read [`11-benchmarking-and-baselines.md`](11-benchmarking-and-baselines.md), run a benchmark pass, and summarize it with `go run ./cmd/benchsummary bench.out`.
-16. Read [`12-platform-matrix.md`](12-platform-matrix.md), run `go run ./cmd/mmapplatform` to inspect the current build's mmap support envelope, then run `go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 --label local-fs /path/to/probe.db > probe.json` and `go run ./cmd/fsprobesummary probe.json` on a disposable path to collect local filesystem space evidence.
+16. Read [`12-platform-matrix.md`](12-platform-matrix.md), run `go run ./cmd/mmapplatform` to inspect the current build's mmap support envelope, then run `go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 --label local-fs --redact-path /path/to/probe.db > probe.json` and `go run ./cmd/fsprobesummary probe.json` on a disposable path to collect local filesystem space evidence.
 17. Change the degree in the demos and observe how `Stats` changes.

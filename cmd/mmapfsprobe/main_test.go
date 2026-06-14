@@ -71,6 +71,43 @@ func TestRunFilesystemProbePrintsSpaceEvidence(t *testing.T) {
 	}
 }
 
+func TestRunFilesystemProbeCanRedactOutputPath(t *testing.T) {
+	if !pagebtree.MmapPlatformProfile().MmapSupported {
+		t.Skip("mmap filesystem probe requires mmap support")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "probe.db")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--keys", "16", "--value-bytes", "64", "--label", "shareable-apfs", "--redact-path", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	if strings.Contains(stdout.String(), dir) || strings.Contains(stdout.String(), path) {
+		t.Fatalf("stdout leaked local path %q:\n%s", path, stdout.String())
+	}
+
+	var report fsProbeReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.Path != "" {
+		t.Fatalf("Path = %q, want redacted empty path", report.Path)
+	}
+	if !report.PathRedacted {
+		t.Fatalf("PathRedacted = false, want true")
+	}
+	if report.Label != "shareable-apfs" {
+		t.Fatalf("Label = %q, want shareable-apfs", report.Label)
+	}
+	if report.AfterInsert.Space.LogicalFileBytes == 0 {
+		t.Fatalf("after insert space = %+v, want report body still populated", report.AfterInsert.Space)
+	}
+}
+
 func TestRunFilesystemProbeRejectsEmptyLabel(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"--label", "", "probe.db"}, &stdout, &stderr)

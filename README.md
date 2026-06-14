@@ -29,7 +29,7 @@ go run ./cmd/mmapreadersoak --readers 4 --rounds 5 --keys 128 /path/to/soak.db
 go run ./cmd/mmaptearlab --mode metadata /path/to/tear.db
 go run ./cmd/mmaptearlab --mode root /path/to/tear.db
 go run ./cmd/mmapplatform
-go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 --label local-fs /path/to/probe.db > probe.json
+go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 --label local-fs --redact-path /path/to/probe.db > probe.json
 go run ./cmd/fsprobesummary probe.json > probe-summary.md
 go run ./cmd/mmapcopycompact /path/to/source.db /path/to/compact.db
 go run ./cmd/mmapcompact /path/to/source.db

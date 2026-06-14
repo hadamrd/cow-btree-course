@@ -12,7 +12,8 @@ import (
 )
 
 type fsProbeReport struct {
-	Path         string                           `json:"path"`
+	Path         string                           `json:"path,omitempty"`
+	PathRedacted bool                             `json:"path_redacted,omitempty"`
 	Label        string                           `json:"label,omitempty"`
 	KeysInserted int                              `json:"keys_inserted"`
 	KeysDeleted  int                              `json:"keys_deleted"`
@@ -34,6 +35,7 @@ type fsProbePhase struct {
 type fsProbeOptions struct {
 	path       string
 	label      string
+	redactPath bool
 	keys       int
 	valueBytes int
 }
@@ -111,6 +113,8 @@ func parseArgs(args []string) (fsProbeOptions, error) {
 			options.label = args[i]
 		case strings.HasPrefix(arg, "--label="):
 			options.label = strings.TrimPrefix(arg, "--label=")
+		case arg == "--redact-path":
+			options.redactPath = true
 		case strings.HasPrefix(arg, "-"):
 			return fsProbeOptions{}, fmt.Errorf("unknown argument %q", arg)
 		default:
@@ -136,7 +140,7 @@ func parseArgs(args []string) (fsProbeOptions, error) {
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintf(stderr, "usage: mmapfsprobe [--keys N] [--value-bytes N] [--label NAME] DB.db\n")
+	fmt.Fprintf(stderr, "usage: mmapfsprobe [--keys N] [--value-bytes N] [--label NAME] [--redact-path] DB.db\n")
 }
 
 func labelWasExplicit(args []string) bool {
@@ -210,6 +214,7 @@ func runProbe(options fsProbeOptions) (fsProbeReport, error) {
 
 	report := fsProbeReport{
 		Path:         options.path,
+		PathRedacted: options.redactPath,
 		Label:        options.label,
 		KeysInserted: options.keys,
 		KeysDeleted:  keysDeleted,
@@ -223,6 +228,9 @@ func runProbe(options fsProbeOptions) (fsProbeReport, error) {
 	}
 	if punchErr != nil {
 		report.PunchError = punchErr.Error()
+	}
+	if options.redactPath {
+		report.Path = ""
 	}
 	return report, nil
 }
