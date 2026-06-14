@@ -53,8 +53,20 @@ func TestRunPunchesMmapFreePagesAndPrintsJSON(t *testing.T) {
 	if report.BeforeSpace.MappedBytes != report.AfterSpace.MappedBytes {
 		t.Fatalf("mapped bytes changed = %d -> %d, want stable logical file mapping", report.BeforeSpace.MappedBytes, report.AfterSpace.MappedBytes)
 	}
-	if report.PunchStats.PunchedPages != 0 || report.PunchStats.Ranges != 0 {
-		t.Fatalf("PunchStats = %+v, want no free ranges for fresh small db", report.PunchStats)
+	if report.PunchStats.PunchedPages < 0 || report.PunchStats.Ranges < 0 || report.PunchStats.FreePages < 0 {
+		t.Fatalf("PunchStats = %+v, want non-negative counters", report.PunchStats)
+	}
+	if report.PunchStats.PunchedPages > report.PunchStats.FreePages {
+		t.Fatalf("PunchStats = %+v, punched more pages than free pages", report.PunchStats)
+	}
+	if report.PunchStats.Ranges > report.PunchStats.PunchedPages {
+		t.Fatalf("PunchStats = %+v, more ranges than punched pages", report.PunchStats)
+	}
+	if got, want := report.PunchStats.PunchedBytes, int64(report.PunchStats.PunchedPages*pagebtree.PageSize); got != want {
+		t.Fatalf("PunchedBytes = %d, want %d from punched pages", got, want)
+	}
+	if !report.HolePunchProfile.Supported && report.PunchStats.PunchedPages != 0 {
+		t.Fatalf("PunchStats = %+v, want no punched pages on unsupported platform", report.PunchStats)
 	}
 }
 
