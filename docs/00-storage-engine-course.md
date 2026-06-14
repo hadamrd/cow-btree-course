@@ -575,10 +575,11 @@ that old pages are reusable. After recovery, the reader updates the slot to the
 actual recovered revision.
 
 Version-2 reader slots record PID, revision, claim token, and a process-start
-token when the platform exposes one. That extra token reduces the classic PID
-reuse problem: a cleanup scan can treat a live PID as stale when the stored
-start token no longer matches the process now using that PID. Version-1
-sidecars remain readable as untagged slots.
+token when the platform exposes one. Linux reads that token from `/proc`, and
+Darwin reads it with `sysctl`. That extra token reduces the classic PID reuse
+problem: a cleanup scan can treat a live PID as stale when the stored start
+token no longer matches the process now using that PID. Version-1 sidecars
+remain readable as untagged slots.
 
 ```mermaid
 sequenceDiagram
