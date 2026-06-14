@@ -8,6 +8,7 @@ type Tree struct {
 	nextPage                 PageID
 	length                   int
 	revision                 uint64
+	syncedRevision           uint64
 	degree                   int
 	keyOrder                 KeyOrder
 	activeReaders            map[uint64]int
@@ -276,10 +277,17 @@ func (t *Tree) Sync() error {
 	if t.readOnly {
 		return nil
 	}
+	var err error
 	if t.arena == nil {
-		return t.persistMeta()
+		err = t.persistMeta()
+	} else {
+		err = t.syncMmap()
 	}
-	return t.syncMmap()
+	if err != nil {
+		return err
+	}
+	t.syncedRevision = t.revision
+	return nil
 }
 
 // Compact trims reusable mmap pages from the physical end of the database file.

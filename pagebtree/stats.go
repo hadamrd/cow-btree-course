@@ -4,6 +4,7 @@ type Stats struct {
 	Root                     PageID
 	Len                      int
 	Revision                 uint64
+	SyncedRevision           uint64
 	Degree                   int
 	Height                   int
 	Pages                    int
@@ -41,6 +42,7 @@ type Stats struct {
 func statsFor(t *Tree) Stats {
 	stats := statsForSnapshot(t.pages, t.root, t.length, t.revision, t.degree)
 	stats.AllocatedPages = len(t.pages)
+	stats.SyncedRevision = t.syncedRevision
 	stats.RetiredPages = len(t.retired)
 	stats.FreePages = len(t.free)
 	stats.ActiveReaders = t.activeReaderCount()

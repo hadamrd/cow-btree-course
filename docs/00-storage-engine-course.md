@@ -371,6 +371,13 @@ sync, after metadata bytes are written, and before metadata sync, clearing the
 fault and calling `Sync` again publishes the already-visible commit durably
 enough to survive close/reopen.
 
+`Stats.Revision` is the current logical root revision. `Stats.SyncedRevision`
+is the last revision for which `Sync` returned successfully. After an unsynced
+write, `Revision` can be ahead of `SyncedRevision`. After a successful `Sync`,
+or after reopening a valid mmap metadata page, they match again. That counter is
+small, but it is useful teaching instrumentation because it makes "visible in
+this process" and "published through the mmap sync protocol" observable.
+
 `MmapOptions.TraceHook` can observe this path without parsing logs. A traced
 sync emits `mmap-sync-begin`, one `mmap-sync-data-range` event per coalesced
 dirty data-page run, `mmap-sync-data-synced`, `mmap-sync-meta-published`, and
@@ -393,6 +400,7 @@ Code to read:
 - Batch commit-sync API and sync-error contract: [`pagebtree/batch.go#L130-L220`](../pagebtree/batch.go#L130-L220)
 - Transaction commit-sync API: [`pagebtree/tx.go#L144-L185`](../pagebtree/tx.go#L144-L185)
 - Commit-sync retry tests: [`pagebtree/commit_sync_mmap_unix_test.go#L128-L358`](../pagebtree/commit_sync_mmap_unix_test.go#L128-L358)
+- Synced revision stats tests: [`pagebtree/commit_sync_mmap_unix_test.go#L134-L170`](../pagebtree/commit_sync_mmap_unix_test.go#L134-L170)
 
 ## Module 10: Dual Checked Metadata Pages
 

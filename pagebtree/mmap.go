@@ -1128,6 +1128,7 @@ func (t *Tree) applyMetaRecord(record metaRecord) {
 	t.nextPage = record.nextPage
 	t.length = record.length
 	t.revision = record.revision
+	t.syncedRevision = record.revision
 	t.degree = normalizeDegree(record.degree)
 	t.keyOrder = record.keyOrder
 	t.free = nil

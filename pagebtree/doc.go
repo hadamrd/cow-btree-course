@@ -143,9 +143,10 @@
 // or MmapOptions; Stats exposes its capacity, entries, hits, misses,
 // invalidations, evictions, range-prefetch window, range-prefetch hint-call
 // count, and exact pages covered by those hints, plus mmap warm-up hint-call
-// and page counts. Stats also reports reachable leaf, branch, and overflow page
-// counts plus used/free/capacity byte counts and the normalized repair-fill
-// policy. Insertion and delete
+// and page counts. Stats also reports logical Revision versus SyncedRevision,
+// the last revision for which Sync returned successfully, plus reachable leaf,
+// branch, and overflow page counts, used/free/capacity byte counts, and the
+// normalized repair-fill policy. Insertion and delete
 // redistribution use encoded cell byte footprints to choose leaf and branch
 // split points. Leaf and branch repair can also trigger on configurable low
 // byte occupancy at the minimum key count, and merge decisions require the

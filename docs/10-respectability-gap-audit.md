@@ -36,6 +36,8 @@ What is credible today:
 - Runtime profile flags for the active byte-balance policy: byte-aware split
   points, byte-aware delete redistribution, byte-fit merge checks, and the
   normalized low-fill repair threshold.
+- `Stats.SyncedRevision` to distinguish the current logical revision from the
+  last revision that completed `Sync`.
 - Reproducible Go microbenchmarks for page and mmap get, seek/next, forward and
   reverse bounded cursor, range, insert, delete, reopen, and sync paths.
 

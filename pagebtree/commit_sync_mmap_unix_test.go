@@ -46,6 +46,9 @@ func TestMmapWriteBatchCommitSyncDetailedSyncsChangedCommit(t *testing.T) {
 	if traceKindIndex(events, MmapTraceSyncEnd) < 0 {
 		t.Fatalf("CommitSyncDetailed trace events = %v, want sync end", events)
 	}
+	if got := tree.Stats().SyncedRevision; got != tree.Revision() {
+		t.Fatalf("SyncedRevision after CommitSyncDetailed = %d, want logical revision %d", got, tree.Revision())
+	}
 	if err := tree.Check(); err != nil {
 		t.Fatalf("Check after CommitSyncDetailed: %v", err)
 	}
@@ -122,6 +125,46 @@ func TestMmapWriteBatchCommitSyncDetailedReturnsSyncErrorWithResult(t *testing.T
 	}
 	if got, ok := tree.Get("bravo"); !ok || string(got) != "two" {
 		t.Fatalf("Get(bravo) after CommitSyncDetailed sync error = %q, %v; want logical commit visible", got, ok)
+	}
+	if got, want := tree.Stats().SyncedRevision, uint64(1); got != want {
+		t.Fatalf("SyncedRevision after CommitSyncDetailed sync error = %d, want previous synced revision %d", got, want)
+	}
+}
+
+func TestMmapStatsSyncedRevisionTracksSyncAndReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	if got := tree.Stats().SyncedRevision; got != tree.Revision() {
+		t.Fatalf("new mmap SyncedRevision = %d, want initial revision %d", got, tree.Revision())
+	}
+
+	tree.Put("alpha", []byte("one"))
+	afterPutRevision := tree.Revision()
+	if got := tree.Stats().SyncedRevision; got == afterPutRevision {
+		t.Fatalf("SyncedRevision after unsynced Put = %d, want older than logical revision %d", got, afterPutRevision)
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after Put: %v", err)
+	}
+	if got := tree.Stats().SyncedRevision; got != afterPutRevision {
+		t.Fatalf("SyncedRevision after Sync = %d, want %d", got, afterPutRevision)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close after Sync: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+	if got := reopened.Stats().SyncedRevision; got != reopened.Revision() {
+		t.Fatalf("reopened SyncedRevision = %d, want recovered revision %d", got, reopened.Revision())
 	}
 }
 

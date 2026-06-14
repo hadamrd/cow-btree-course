@@ -225,6 +225,7 @@ type batchTreeState struct {
 	nextPage          PageID
 	length            int
 	revision          uint64
+	syncedRevision    uint64
 	retired           []retiredPage
 	free              []PageID
 	metaFreelistRoot  PageID
@@ -240,6 +241,7 @@ func saveBatchTreeState(t *Tree) batchTreeState {
 		nextPage:          t.nextPage,
 		length:            t.length,
 		revision:          t.revision,
+		syncedRevision:    t.syncedRevision,
 		retired:           append([]retiredPage(nil), t.retired...),
 		free:              append([]PageID(nil), t.free...),
 		metaFreelistRoot:  t.metaFreelistRoot,
@@ -258,6 +260,7 @@ func (s batchTreeState) restore(t *Tree) {
 	t.nextPage = s.nextPage
 	t.length = s.length
 	t.revision = s.revision
+	t.syncedRevision = s.syncedRevision
 	t.retired = append([]retiredPage(nil), s.retired...)
 	t.free = append([]PageID(nil), s.free...)
 	t.metaFreelistRoot = s.metaFreelistRoot
