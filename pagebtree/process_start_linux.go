@@ -4,6 +4,7 @@ package pagebtree
 
 import (
 	"fmt"
+	"hash/fnv"
 	"os"
 	"strconv"
 	"strings"
@@ -31,4 +32,22 @@ func processStartTokenUnix(pid int) uint64 {
 		return 0
 	}
 	return start
+}
+
+func bootIDTokenUnix() uint64 {
+	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return 0
+	}
+	text := strings.TrimSpace(string(data))
+	if text == "" {
+		return 0
+	}
+	hash := fnv.New64a()
+	_, _ = hash.Write([]byte(text))
+	token := hash.Sum64()
+	if token == 0 {
+		return 1
+	}
+	return token
 }

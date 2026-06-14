@@ -16,13 +16,16 @@ import (
 
 const (
 	readerTableMagic      = "CBTRDR1\x00"
-	readerTableVersion    = uint64(2)
+	readerTableVersion    = uint64(3)
+	readerTableV2Version  = uint64(2)
 	readerTableV1Version  = uint64(1)
 	readerTableSlotCount  = 64
 	readerTableHeaderSize = 32
 	readerSlotV1Size      = 32
-	readerSlotSize        = 40
+	readerSlotV2Size      = 40
+	readerSlotSize        = 48
 	readerTableV1Size     = readerTableHeaderSize + readerTableSlotCount*readerSlotV1Size
+	readerTableV2Size     = readerTableHeaderSize + readerTableSlotCount*readerSlotV2Size
 	readerTableSize       = readerTableHeaderSize + readerTableSlotCount*readerSlotSize
 )
 
@@ -30,6 +33,7 @@ var (
 	readerTokenCounter uint64
 	pidAlive           = pidAliveUnix
 	processStartToken  = processStartTokenUnix
+	bootIDToken        = bootIDTokenUnix
 )
 
 type readerTable struct {
@@ -46,6 +50,7 @@ type readerSlot struct {
 	active       bool
 	pid          int
 	processStart uint64
+	bootID       uint64
 	revision     uint64
 	token        uint64
 }
@@ -105,6 +110,7 @@ func (r *readerTable) claim(revision uint64) error {
 				active:       true,
 				pid:          os.Getpid(),
 				processStart: processStartToken(os.Getpid()),
+				bootID:       bootIDToken(),
 				revision:     revision,
 				token:        token,
 			}); err != nil {
@@ -221,6 +227,7 @@ func (r *readerTable) scan(maxRevision uint64, cleanStale bool) (MmapReaderStats
 	stats := MmapReaderStats{
 		FormatVersion:              r.version,
 		ProcessStartTokenSupported: processStartToken(os.Getpid()) != 0,
+		BootIDTokenSupported:       bootIDToken() != 0,
 		Slots:                      readerTableSlotCount,
 	}
 	cleared := 0
@@ -235,6 +242,9 @@ func (r *readerTable) scan(maxRevision uint64, cleanStale bool) (MmapReaderStats
 			}
 			if current.processStart != 0 {
 				stats.ProcessStartSlots++
+			}
+			if current.bootID != 0 {
+				stats.BootIDSlots++
 			}
 			if !readerSlotAlive(current) {
 				stats.StaleSlots++
@@ -278,7 +288,7 @@ func (t *Tree) MmapReaderStats() (MmapReaderStats, error) {
 	return t.arena.readerTable.stats(t.revision)
 }
 
-// CleanStaleMmapReaders clears reader-table slots owned by dead processes.
+// CleanStaleMmapReaders clears reader-table slots owned by dead or reused owners.
 func (t *Tree) CleanStaleMmapReaders() (int, error) {
 	if t == nil || t.closed || t.arena == nil || t.arena.readerTable == nil {
 		return 0, nil
@@ -341,6 +351,10 @@ func (r *readerTable) setFormat(version uint64) error {
 		r.version = version
 		r.slotSize = readerSlotV1Size
 		r.tableSize = readerTableV1Size
+	case readerTableV2Version:
+		r.version = version
+		r.slotSize = readerSlotV2Size
+		r.tableSize = readerTableV2Size
 	case readerTableVersion:
 		r.version = version
 		r.slotSize = readerSlotSize
@@ -372,8 +386,11 @@ func (r *readerTable) readSlotLocked(slot int) (readerSlot, error) {
 		revision: binary.LittleEndian.Uint64(buf[16:24]),
 		token:    binary.LittleEndian.Uint64(buf[24:32]),
 	}
-	if r.slotSize >= readerSlotSize {
+	if r.slotSize >= readerSlotV2Size {
 		current.processStart = binary.LittleEndian.Uint64(buf[32:40])
+	}
+	if r.slotSize >= readerSlotSize {
+		current.bootID = binary.LittleEndian.Uint64(buf[40:48])
 	}
 	return current, nil
 }
@@ -386,8 +403,11 @@ func (r *readerTable) writeSlotLocked(slot int, value readerSlot) error {
 	binary.LittleEndian.PutUint64(buf[8:16], uint64(value.pid))
 	binary.LittleEndian.PutUint64(buf[16:24], value.revision)
 	binary.LittleEndian.PutUint64(buf[24:32], value.token)
-	if r.slotSize >= readerSlotSize {
+	if r.slotSize >= readerSlotV2Size {
 		binary.LittleEndian.PutUint64(buf[32:40], value.processStart)
+	}
+	if r.slotSize >= readerSlotSize {
+		binary.LittleEndian.PutUint64(buf[40:48], value.bootID)
 	}
 	_, err := r.file.WriteAt(buf, int64(readerTableHeaderSize+slot*r.slotSize))
 	return err
@@ -417,10 +437,10 @@ func (r *readerTable) ownsSlot(current readerSlot) bool {
 		return false
 	}
 	if current.processStart == 0 {
-		return true
+		return bootIDMatches(current)
 	}
 	start := processStartToken(current.pid)
-	return start == 0 || start == current.processStart
+	return (start == 0 || start == current.processStart) && bootIDMatches(current)
 }
 
 func readerSlotAlive(current readerSlot) bool {
@@ -428,10 +448,18 @@ func readerSlotAlive(current readerSlot) bool {
 		return false
 	}
 	if current.processStart == 0 {
-		return true
+		return bootIDMatches(current)
 	}
 	start := processStartToken(current.pid)
-	return start == 0 || start == current.processStart
+	return (start == 0 || start == current.processStart) && bootIDMatches(current)
+}
+
+func bootIDMatches(current readerSlot) bool {
+	if current.bootID == 0 {
+		return true
+	}
+	boot := bootIDToken()
+	return boot == 0 || boot == current.bootID
 }
 
 func pidAliveUnix(pid int) bool {

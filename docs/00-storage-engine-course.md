@@ -574,12 +574,15 @@ provisional zero revision is a conservative pin: while the reader is between
 that old pages are reusable. After recovery, the reader updates the slot to the
 actual recovered revision.
 
-Version-2 reader slots record PID, revision, claim token, and a process-start
-token when the platform exposes one. Linux reads that token from `/proc`, and
-Darwin reads it with `sysctl`. That extra token reduces the classic PID reuse
-problem: a cleanup scan can treat a live PID as stale when the stored start
-token no longer matches the process now using that PID. Version-1 sidecars
-remain readable as untagged slots.
+Version-3 reader slots record PID, revision, claim token, a process-start token,
+and a boot/session token when the platform exposes them. Linux reads process
+start from `/proc/<pid>/stat` and boot identity from
+`/proc/sys/kernel/random/boot_id`; Darwin reads process start from
+`kern.proc.pid` and boot identity from `kern.boottime`. These extra tokens reduce
+the classic PID reuse problem and the reboot/session ambiguity around stale
+sidecars: a cleanup scan can treat a live PID as stale when the stored owner
+tokens no longer match the process and boot now using that PID. Version-1 and
+version-2 sidecars remain readable as older, weaker slot formats.
 
 ```mermaid
 sequenceDiagram

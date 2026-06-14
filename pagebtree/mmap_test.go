@@ -5775,9 +5775,12 @@ func TestMmapReadOnlyPinsReaderTableBeforeLoadingMeta(t *testing.T) {
 func TestMmapReaderStatsReportsActiveReadOnlySlot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 	oldProcessStartToken := processStartToken
+	oldBootIDToken := bootIDToken
 	processStartToken = func(int) uint64 { return 12345 }
+	bootIDToken = func() uint64 { return 67890 }
 	defer func() {
 		processStartToken = oldProcessStartToken
+		bootIDToken = oldBootIDToken
 	}()
 
 	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
@@ -5820,6 +5823,11 @@ func TestMmapReaderStatsReportsActiveReadOnlySlot(t *testing.T) {
 		reader.Close()
 		t.Fatalf("reader stats process-start slots = %d, want one tagged slot", stats.ProcessStartSlots)
 	}
+	if stats.BootIDSlots != 1 {
+		writer.Close()
+		reader.Close()
+		t.Fatalf("reader stats boot-id slots = %d, want one tagged slot", stats.BootIDSlots)
+	}
 	if stats.FormatVersion != readerTableVersion {
 		writer.Close()
 		reader.Close()
@@ -5829,6 +5837,11 @@ func TestMmapReaderStatsReportsActiveReadOnlySlot(t *testing.T) {
 		writer.Close()
 		reader.Close()
 		t.Fatalf("ProcessStartTokenSupported = false, want true on this platform")
+	}
+	if !stats.BootIDTokenSupported {
+		writer.Close()
+		reader.Close()
+		t.Fatalf("BootIDTokenSupported = false, want true when boot token is available")
 	}
 
 	if err := reader.Close(); err != nil {
@@ -5885,6 +5898,50 @@ func TestMmapReaderTableOpensLegacyV1Sidecar(t *testing.T) {
 	}
 	if stats.ActiveSlots != 1 || stats.StaleSlots != 0 || stats.ProcessStartSlots != 0 || stats.FormatVersion != readerTableV1Version {
 		t.Fatalf("legacy reader stats = %+v, want one active untagged slot", stats)
+	}
+}
+
+func TestMmapReaderTableOpensLegacyV2Sidecar(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	legacy := make([]byte, readerTableV2Size)
+	copy(legacy[:8], readerTableMagic)
+	binary.LittleEndian.PutUint64(legacy[8:16], readerTableV2Version)
+	binary.LittleEndian.PutUint64(legacy[16:24], readerTableSlotCount)
+	processStart := processStartToken(os.Getpid())
+	if processStart == 0 {
+		processStart = 12345
+	}
+	slot := legacy[readerTableHeaderSize : readerTableHeaderSize+readerSlotV2Size]
+	binary.LittleEndian.PutUint64(slot[0:8], 1)
+	binary.LittleEndian.PutUint64(slot[8:16], uint64(os.Getpid()))
+	binary.LittleEndian.PutUint64(slot[16:24], 1)
+	binary.LittleEndian.PutUint64(slot[24:32], 99)
+	binary.LittleEndian.PutUint64(slot[32:40], processStart)
+	if err := os.WriteFile(path+".readers", legacy, 0o644); err != nil {
+		t.Fatalf("write legacy v2 reader table: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap with legacy v2 reader table: %v", err)
+	}
+	defer reopened.Close()
+	stats, err := reopened.MmapReaderStats()
+	if err != nil {
+		t.Fatalf("MmapReaderStats legacy v2 reader table: %v", err)
+	}
+	if stats.ActiveSlots != 1 || stats.StaleSlots != 0 || stats.ProcessStartSlots != 1 || stats.BootIDSlots != 0 || stats.FormatVersion != readerTableV2Version {
+		t.Fatalf("legacy v2 reader stats = %+v, want one active process-tagged slot", stats)
 	}
 }
 
@@ -5961,6 +6018,89 @@ func TestCleanStaleMmapReadersClearsReusedPIDSlots(t *testing.T) {
 	if stats.ActiveSlots != 0 || stats.StaleSlots != 0 || stats.ProcessStartSlots != 0 {
 		writer.Close()
 		t.Fatalf("reader stats after cleanup = %+v, want no active/stale tagged slots", stats)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+}
+
+func TestCleanStaleMmapReadersClearsRebootedOwnerSlots(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	oldPIDAlive := pidAlive
+	oldProcessStartToken := processStartToken
+	oldBootIDToken := bootIDToken
+	pidAlive = func(pid int) bool { return pid == os.Getpid() }
+	processStartToken = func(pid int) uint64 {
+		if pid == os.Getpid() {
+			return 222
+		}
+		return 0
+	}
+	bootIDToken = func() uint64 { return 444 }
+	defer func() {
+		pidAlive = oldPIDAlive
+		processStartToken = oldProcessStartToken
+		bootIDToken = oldBootIDToken
+	}()
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+
+	table, err := openReaderTable(path)
+	if err != nil {
+		writer.Close()
+		t.Fatalf("openReaderTable: %v", err)
+	}
+	if err := table.withLock(func() error {
+		return table.writeSlotLocked(0, readerSlot{
+			active:       true,
+			pid:          os.Getpid(),
+			processStart: 222,
+			bootID:       333,
+			revision:     writer.Revision(),
+			token:        99,
+		})
+	}); err != nil {
+		table.close()
+		writer.Close()
+		t.Fatalf("write rebooted reader slot: %v", err)
+	}
+	if err := table.close(); err != nil {
+		writer.Close()
+		t.Fatalf("close injected reader table: %v", err)
+	}
+
+	stats, err := writer.MmapReaderStats()
+	if err != nil {
+		writer.Close()
+		t.Fatalf("MmapReaderStats before cleanup: %v", err)
+	}
+	if stats.ActiveSlots != 0 || stats.StaleSlots != 1 || stats.ProcessStartSlots != 1 || stats.BootIDSlots != 1 {
+		writer.Close()
+		t.Fatalf("reader stats before cleanup = %+v, want one boot-id-tagged stale slot", stats)
+	}
+
+	cleared, err := writer.CleanStaleMmapReaders()
+	if err != nil {
+		writer.Close()
+		t.Fatalf("CleanStaleMmapReaders: %v", err)
+	}
+	if cleared != 1 {
+		writer.Close()
+		t.Fatalf("CleanStaleMmapReaders cleared %d slots, want 1", cleared)
+	}
+
+	stats, err = writer.MmapReaderStats()
+	if err != nil {
+		writer.Close()
+		t.Fatalf("MmapReaderStats after cleanup: %v", err)
+	}
+	if stats.ActiveSlots != 0 || stats.StaleSlots != 0 || stats.BootIDSlots != 0 {
+		writer.Close()
+		t.Fatalf("reader stats after cleanup = %+v, want no active/stale boot-tagged slots", stats)
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("Close writer: %v", err)

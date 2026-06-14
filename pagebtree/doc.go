@@ -137,12 +137,13 @@
 // Writable OpenMmap also validates live reader slots after recovering metadata
 // from an existing file. Writers combine those reader slots with in-process
 // snapshots before recycling retired pages, so read-only mmap handles can
-// coexist with a writer while pinning old copy-on-write pages. Version-2 reader
-// slots also store a process-start token when the platform exposes one, reducing
-// PID-reuse ambiguity during stale-slot cleanup; version-1 sidecars remain
-// readable. MmapReaderStats reports live, stale, and process-start-tagged
-// reader-table slots, and CleanStaleMmapReaders clears slots owned by dead or
-// detectably reused processes. Existing malformed reader-table sidecars and live
+// coexist with a writer while pinning old copy-on-write pages. Version-3 reader
+// slots also store process-start and boot/session tokens when the platform
+// exposes them, reducing PID-reuse and reboot/session ambiguity during stale-slot
+// cleanup; version-1 and version-2 sidecars remain readable. MmapReaderStats
+// reports live, stale, process-start-tagged, and boot-tagged reader-table slots,
+// and CleanStaleMmapReaders clears slots owned by dead or detectably reused
+// owners. Existing malformed reader-table sidecars and live
 // slots with impossible future revisions or zero claim tokens return
 // ErrReaderTable instead of being reset, because resetting them could forget
 // active reader watermarks; writer reclaim treats reader-table scan errors as a
