@@ -747,8 +747,9 @@ Serious pieces in this repository:
   reclaim decisions.
 - Explicit point write batches that publish one revision and can report
   per-operation old values through `CommitDetailed`.
-- A sorted-map model/fuzz target for put, delete, batch, range, cursor,
-  bounded cursor, reverse bounded cursor, and integrity-check operation streams.
+- A sorted-map model/fuzz target for put, delete, cursor delete, batch, range,
+  cursor, bounded cursor, reverse bounded cursor, and integrity-check operation
+  streams.
 - An mmap sorted-map model/fuzz target that injects sync/close/reopen cycles
   and overflow-heavy values.
 - A malformed mmap-image fuzz target that mutates metadata, page headers,
@@ -766,7 +767,8 @@ Still research or incomplete compared with a production engine:
 
 - No concurrency-heavy lock manager.
 - No full ACID transaction API; point write batches exist with detailed commit
-  reporting and panic rollback, but cursor/range-aware writes remain research
+  reporting and panic rollback, and tree-owned cursors can delete their current
+  live key, but richer cursor/range-aware write transactions remain research
   work.
 - No sparse-file hole punching.
 - No full vacuum that moves live pages.

@@ -41,7 +41,7 @@ func runPageTreeModel(t *testing.T, data []byte) {
 	model := modelMap{}
 	reader := modelReader{data: data}
 	for step := 0; step < 96 && reader.hasMore(); step++ {
-		op := reader.next() % 8
+		op := reader.next() % 9
 		switch op {
 		case 0:
 			key := reader.key()
@@ -101,6 +101,21 @@ func runPageTreeModel(t *testing.T, data []byte) {
 				start, end = end, start
 			}
 			assertReverseCursorBetweenMatchesModel(t, tree, model, start, end)
+		case 8:
+			key := reader.key()
+			cursor := tree.Cursor()
+			if cursor.Seek(key) {
+				deleteKey := cursor.Key()
+				want, exists := model.delete(deleteKey)
+				got, deleted := cursor.Delete()
+				if deleted != exists || !bytes.Equal(got, want) {
+					t.Fatalf("cursor Delete(%q) = %q, %v; want %q, %v", deleteKey, got, deleted, want, exists)
+				}
+				if cursor.Key() != deleteKey {
+					t.Fatalf("cursor key after Delete = %q, want snapshot key %q", cursor.Key(), deleteKey)
+				}
+			}
+			cursor.Close()
 		}
 		if err := tree.Check(); err != nil {
 			t.Fatalf("Check after step %d: %v", step, err)

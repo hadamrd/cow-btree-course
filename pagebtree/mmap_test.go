@@ -132,6 +132,62 @@ func TestMmapCursorPinsRetiredPages(t *testing.T) {
 	}
 }
 
+func TestMmapCursorDeletePersistsAndKeepsCursorSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 3, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 16; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	cursor := tree.Cursor()
+	if !cursor.Seek("key-05") {
+		t.Fatalf("cursor Seek(key-05) = false, want true")
+	}
+	old, deleted := cursor.Delete()
+	if !deleted || string(old) != "value-05" {
+		t.Fatalf("cursor Delete = %q, %v; want value-05, true", old, deleted)
+	}
+	if _, ok := tree.Get("key-05"); ok {
+		t.Fatalf("tree still contains key-05 after cursor Delete")
+	}
+	if got := cursor.Key(); got != "key-05" {
+		t.Fatalf("cursor key after Delete = %q, want snapshot key-05", got)
+	}
+	if got := string(cursor.Value()); got != "value-05" {
+		t.Fatalf("cursor value after Delete = %q, want snapshot value-05", got)
+	}
+	if !cursor.Next() || cursor.Key() != "key-06" {
+		t.Fatalf("cursor Next after Delete = %v key %q, want key-06", cursor.Valid(), cursor.Key())
+	}
+	cursor.Close()
+
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after cursor Delete: %v", err)
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after cursor Delete: %v", err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close after cursor Delete: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+	if _, ok := reopened.Get("key-05"); ok {
+		t.Fatalf("reopened tree contains key-05 after cursor Delete")
+	}
+	if got, ok := reopened.Get("key-06"); !ok || string(got) != "value-06" {
+		t.Fatalf("reopened Get(key-06) = %q, %v; want value-06, true", got, ok)
+	}
+}
+
 func TestMDBKernelProfileDescribesOpenLDAPStyleMmapCore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

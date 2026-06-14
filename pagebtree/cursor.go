@@ -177,6 +177,15 @@ func (c *Cursor) Value() []byte {
 	return cloneBytes(c.value)
 }
 
+// Delete removes the current key from the live tree when this cursor owns a
+// tree snapshot. The cursor itself keeps reading its original snapshot.
+func (c *Cursor) Delete() ([]byte, bool) {
+	if !c.Valid() || !c.owned || c.snapshot == nil || c.snapshot.tree == nil {
+		return nil, false
+	}
+	return c.snapshot.tree.Delete(c.key)
+}
+
 // Close releases resources held by the cursor.
 func (c *Cursor) Close() {
 	if c == nil || c.closed {

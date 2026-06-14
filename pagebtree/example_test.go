@@ -171,6 +171,27 @@ func ExampleCursor_Prev() {
 	// bravo bravo-value
 }
 
+func ExampleCursor_Delete() {
+	tree := pagebtree.New(2)
+	for _, key := range []string{"alpha", "bravo", "charlie"} {
+		tree.Put(key, []byte(key+"-value"))
+	}
+
+	cursor := tree.Cursor()
+	defer cursor.Close()
+
+	cursor.Seek("bravo")
+	old, deleted := cursor.Delete()
+	fmt.Println(string(old), deleted)
+	_, ok := tree.Get("bravo")
+	fmt.Println(ok)
+	fmt.Println(cursor.Key(), string(cursor.Value()))
+	// Output:
+	// bravo-value true
+	// false
+	// bravo bravo-value
+}
+
 func ExampleMmapTraceJSONLExporter() {
 	var out bytes.Buffer
 	exporter := pagebtree.NewMmapTraceJSONLExporter(&out)

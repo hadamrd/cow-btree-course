@@ -258,3 +258,67 @@ func TestSnapshotCursorDoesNotRegisterAnotherReader(t *testing.T) {
 		t.Fatalf("active readers after snapshot close = %d, want 0", got)
 	}
 }
+
+func TestCursorDeleteRemovesCurrentLiveKeyAndKeepsSnapshotIteration(t *testing.T) {
+	tree := New(3)
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	beforeRevision := tree.Revision()
+
+	cursor := tree.Cursor()
+	defer cursor.Close()
+	if !cursor.Seek("key-05") {
+		t.Fatalf("Seek(key-05) = false, want true")
+	}
+
+	old, deleted := cursor.Delete()
+	if !deleted || string(old) != "value-05" {
+		t.Fatalf("cursor Delete = %q, %v; want value-05, true", old, deleted)
+	}
+	if _, ok := tree.Get("key-05"); ok {
+		t.Fatalf("tree still contains key-05 after cursor Delete")
+	}
+	if tree.Len() != 11 {
+		t.Fatalf("tree Len after cursor Delete = %d, want 11", tree.Len())
+	}
+	if tree.Revision() == beforeRevision {
+		t.Fatalf("tree revision did not advance after cursor Delete")
+	}
+
+	if got := cursor.Key(); got != "key-05" {
+		t.Fatalf("cursor key after Delete = %q, want snapshot key-05", got)
+	}
+	if got := string(cursor.Value()); got != "value-05" {
+		t.Fatalf("cursor value after Delete = %q, want snapshot value-05", got)
+	}
+	if !cursor.Next() || cursor.Key() != "key-06" {
+		t.Fatalf("cursor Next after Delete = %v key %q, want key-06", cursor.Valid(), cursor.Key())
+	}
+}
+
+func TestCursorDeleteRequiresOwnedWritableCursor(t *testing.T) {
+	tree := New(2)
+	tree.Put("alpha", []byte("one"))
+	snapshot := tree.Snapshot()
+	borrowed := snapshot.Cursor()
+	if !borrowed.First() {
+		t.Fatalf("borrowed cursor First = false, want true")
+	}
+	if old, deleted := borrowed.Delete(); deleted || old != nil {
+		t.Fatalf("borrowed cursor Delete = %q, %v; want nil, false", old, deleted)
+	}
+	if _, ok := tree.Get("alpha"); !ok {
+		t.Fatalf("borrowed cursor deleted alpha; want no mutation")
+	}
+	borrowed.Close()
+	snapshot.Close()
+
+	readOnly := &Tree{readOnly: true}
+	readOnly.pages = map[PageID]*page{}
+	readOnlyCursor := readOnly.Cursor()
+	if old, deleted := readOnlyCursor.Delete(); deleted || old != nil {
+		t.Fatalf("read-only cursor Delete = %q, %v; want nil, false", old, deleted)
+	}
+	readOnlyCursor.Close()
+}
