@@ -98,7 +98,7 @@
 // while the sync error is returned.
 // A Snapshot requested after Close is inert and does not register a reader.
 // Post-close inspection and maintenance calls such as Stats, Sync, Advise,
-// DropMmapCache, MmapCacheStats, MmapReaderStats, and
+// DropMmapCache, MmapCacheStats, MmapSpaceStats, MmapReaderStats, and
 // CleanStaleMmapReaders do not touch the released mapping.
 // Reopen validation checks metadata format, version, database page size,
 // persisted degree, and bounds against the mapped file and declared capacity,
@@ -152,7 +152,9 @@
 // DropMmapCache syncs writable mmap trees before asking the kernel to evict
 // clean mapped tree pages with MADV_DONTNEED and Linux file-level DONTNEED
 // advice. MmapCacheStats uses mincore on Unix to show how many mapped OS pages
-// are resident in that kernel cache. Current-tree Get also keeps a small
+// are resident in that kernel cache. MmapSpaceStats uses stat(2) block counts
+// on Unix to compare logical file bytes with filesystem-reported allocated
+// bytes for sparse-file experiments. Current-tree Get also keeps a small
 // checksum-keyed cache of decoded branch routing metadata. That derived cache
 // is bounded by least-recently-used eviction and can be sized through Options
 // or MmapOptions; Stats exposes its capacity, entries, hits, misses,

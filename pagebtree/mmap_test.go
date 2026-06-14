@@ -901,6 +901,13 @@ func TestMmapClosedTreeMaintenanceAPIsAreNoOps(t *testing.T) {
 	if stats != (MmapCacheStats{}) {
 		t.Fatalf("MmapCacheStats after Close = %+v, want zero value", stats)
 	}
+	spaceStats, err := tree.MmapSpaceStats()
+	if err != nil {
+		t.Fatalf("MmapSpaceStats after Close error = %v, want nil", err)
+	}
+	if spaceStats != (MmapSpaceStats{}) {
+		t.Fatalf("MmapSpaceStats after Close = %+v, want zero value", spaceStats)
+	}
 }
 
 func TestMmapClosedTreeStatsIsZero(t *testing.T) {
@@ -4146,6 +4153,60 @@ func TestMemoryTreeMmapCacheStatsIsEmpty(t *testing.T) {
 	}
 	if stats != (MmapCacheStats{}) {
 		t.Fatalf("memory cache stats = %+v, want zero stats", stats)
+	}
+}
+
+func TestMmapSpaceStatsReportsLogicalAndAllocatedBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	for i := 0; i < 20; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	stats, err := tree.MmapSpaceStats()
+	if err != nil {
+		t.Fatalf("MmapSpaceStats: %v", err)
+	}
+	wantLogicalBytes := int64((64 + metaPageCount) * PageSize)
+	if stats.LogicalFileBytes != wantLogicalBytes {
+		t.Fatalf("LogicalFileBytes = %d, want %d", stats.LogicalFileBytes, wantLogicalBytes)
+	}
+	if stats.MappedBytes != int64(len(tree.arena.data)) {
+		t.Fatalf("MappedBytes = %d, want %d", stats.MappedBytes, len(tree.arena.data))
+	}
+	if stats.AllocatedBytes <= 0 {
+		t.Fatalf("AllocatedBytes = %d, want positive allocation evidence", stats.AllocatedBytes)
+	}
+	wantSparseBytes := stats.LogicalFileBytes - stats.AllocatedBytes
+	if wantSparseBytes < 0 {
+		wantSparseBytes = 0
+	}
+	if stats.SparseBytes != wantSparseBytes {
+		t.Fatalf("SparseBytes = %d, want max(logical-allocated,0) %d", stats.SparseBytes, wantSparseBytes)
+	}
+	if stats.FilesystemBlockBytes <= 0 {
+		t.Fatalf("FilesystemBlockBytes = %d, want positive block size", stats.FilesystemBlockBytes)
+	}
+	if stats.AllocatedFilesystemBlocks <= 0 {
+		t.Fatalf("AllocatedFilesystemBlocks = %d, want positive block count", stats.AllocatedFilesystemBlocks)
+	}
+}
+
+func TestMemoryTreeMmapSpaceStatsIsEmpty(t *testing.T) {
+	stats, err := New(2).MmapSpaceStats()
+	if err != nil {
+		t.Fatalf("memory MmapSpaceStats: %v", err)
+	}
+	if stats != (MmapSpaceStats{}) {
+		t.Fatalf("memory space stats = %+v, want zero stats", stats)
 	}
 }
 

@@ -166,6 +166,44 @@ func TestRunPrintsOptionalReaderAndCacheSections(t *testing.T) {
 	}
 }
 
+func TestRunPrintsOptionalSpaceSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inspect.db")
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	for i := range 32 {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--space", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.SpaceStats == nil {
+		t.Fatalf("SpaceStats = nil, want section with --space")
+	}
+	if report.SpaceStats.LogicalFileBytes == 0 || report.SpaceStats.AllocatedBytes == 0 {
+		t.Fatalf("SpaceStats = %+v, want logical and allocated bytes", *report.SpaceStats)
+	}
+	wantSparseBytes := report.SpaceStats.LogicalFileBytes - report.SpaceStats.AllocatedBytes
+	if wantSparseBytes < 0 {
+		wantSparseBytes = 0
+	}
+	if report.SpaceStats.SparseBytes != wantSparseBytes {
+		t.Fatalf("SparseBytes = %d, want max(logical-allocated,0) %d", report.SpaceStats.SparseBytes, wantSparseBytes)
+	}
+}
+
 func TestRunPrintsKeySample(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspect.db")
 	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})

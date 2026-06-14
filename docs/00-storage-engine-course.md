@@ -638,10 +638,12 @@ Code to read:
 
 Storage-engine observability has several layers:
 
-- Counters: `Stats`, `MmapReaderStats`, and `MmapCacheStats` tell you current
-  quantities. `Stats` includes reachable leaf/branch/overflow page counts,
-  total reachable page capacity/free bytes, and leaf/branch/overflow used-byte
-  buckets.
+- Counters: `Stats`, `MmapReaderStats`, `MmapCacheStats`, and `MmapSpaceStats`
+  tell you current quantities. `Stats` includes reachable leaf/branch/overflow
+  page counts, total reachable page capacity/free bytes, and
+  leaf/branch/overflow used-byte buckets. `MmapCacheStats` observes residency
+  in the kernel page cache; `MmapSpaceStats` observes logical file bytes versus
+  filesystem-reported allocated bytes for sparse-file experiments.
 - Validation reports: `Audit` tells you what the validator actually reached:
   reachable page IDs, reusable page IDs, retired page IDs, linked-leaf check
   state, and the same error that `Check` would return.
@@ -655,6 +657,7 @@ flowchart TD
     S["Stats"] --> C["counts: pages, readers, cache hits, byte fill"]
     A["Audit"] --> V["validation evidence: reachable/free/retired page IDs"]
     M["MmapCacheStats"] --> R["kernel residency via mincore"]
+    Z["MmapSpaceStats"] --> Y["logical vs allocated bytes via stat"]
     P["MDBKernelProfile"] --> K["design contract flags"]
     T["TraceHook"] --> E["decisions: sync ranges, recovery, growth, compact, reclaim"]
 
@@ -737,9 +740,10 @@ mmap database through `OpenMmapReadOnly`, runs `Audit`, and writes indented JSON
 with validity, stats, persisted key-order identity, comparator kind, readable
 names for both, reachable page IDs, free page IDs, retired page IDs, and
 linked-leaf validation state.
-`--readers` adds the mmap reader-table slot summary, and `--cache` adds kernel
-page-cache residency counts. `--pages` adds value-free page summaries with
-role, kind, byte occupancy, branch children, and next-page hints. `--keys N`
+`--readers` adds the mmap reader-table slot summary, `--cache` adds kernel
+page-cache residency counts, and `--space` adds logical-vs-allocated file-space
+counts. `--pages` adds value-free page summaries with role, kind, byte
+occupancy, branch children, and next-page hints. `--keys N`
 adds a bounded first/last key sample in the recovered comparator order without
 dumping values. `--trace TRACE.jsonl` reads value-free trace JSONL, counts
 events by kind, summarizes dirty data-page ranges, records the last traced
@@ -748,7 +752,7 @@ checks whether the last traced revision/root/nextPage matches the inspected
 database:
 
 ```bash
-go run ./cmd/mmapinspect --readers --cache --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db
+go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db
 ```
 
 Code to read:
@@ -759,6 +763,7 @@ Code to read:
 - Audit report tests: [`pagebtree/tree_test.go`](../pagebtree/tree_test.go), [`pagebtree/mmap_test.go`](../pagebtree/mmap_test.go)
 - Audit inspect command: [`cmd/mmapinspect/main.go`](../cmd/mmapinspect/main.go)
 - Audit inspect command tests: [`cmd/mmapinspect/main_test.go`](../cmd/mmapinspect/main_test.go)
+- Mmap space stats API: [`pagebtree/mmap_space.go`](../pagebtree/mmap_space.go), [`pagebtree/mmap_space_unix.go`](../pagebtree/mmap_space_unix.go)
 - Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
 - JSONL exporters: [`pagebtree/mmap_trace_export.go`](../pagebtree/mmap_trace_export.go)
 - JSONL exporter example: [`pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)

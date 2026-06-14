@@ -141,7 +141,7 @@ The modern middle is not to add a big database cache back on top of mmap. A more
 - range scans issue exact `WILLNEED` hints for known linked leaves
 - warm-up follows reachable tree and overflow pages, not the whole file
 - derived routing metadata is cached by page checksum, bounded by LRU
-- cache residency, warm-up hints, and prefetch hints are observable through stats
+- cache residency, file-space allocation, warm-up hints, and prefetch hints are observable through stats
 - recycling uses reader watermarks rather than global reader/writer exclusion
 - background work stays optional and bounded
 
@@ -151,7 +151,7 @@ flowchart TD
     BTree["B+tree structure"] --> Exact["exact prefetch / warm-up"]
     BTree --> Derived["derived branch-routing cache"]
     Readers["reader watermarks"] --> Reclaim["safe recycling"]
-    Metrics["residency and hint stats"] --> Tuning["measured tuning"]
+    Metrics["residency, allocation, and hint stats"] --> Tuning["measured tuning"]
 ```
 
 Open research tracks for this repo:
@@ -161,7 +161,7 @@ Open research tracks for this repo:
 - model multi-database catalogs inside one mapped file
 - make deletion fully byte-balanced with production-style occupancy targets
 - add a crash-order harness for metadata, freelist, reclaim, growth, and shrink
-- measure and harden sparse-file hole punching for interior free extents without moving live pages
+- harden sparse-file hole punching for interior free extents against filesystem-specific allocation behavior
 - compare exact structure-aware prefetch with Linux default readahead on large workloads
 - benchmark derived branch-routing cache hit rates against pure direct slotted-page search
 

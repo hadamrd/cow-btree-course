@@ -31,6 +31,7 @@ type inspectReport struct {
 	LeafLinksSkipped  bool                        `json:"leaf_links_skipped"`
 	ReaderStats       *pagebtree.MmapReaderStats  `json:"reader_stats,omitempty"`
 	CacheStats        *pagebtree.MmapCacheStats   `json:"cache_stats,omitempty"`
+	SpaceStats        *pagebtree.MmapSpaceStats   `json:"space_stats,omitempty"`
 	KeySample         *inspectKeySample           `json:"key_sample,omitempty"`
 	PageSummaries     []pagebtree.PageSummary     `json:"page_summaries,omitempty"`
 	TraceSummary      *inspectTraceSummary        `json:"trace_summary,omitempty"`
@@ -66,6 +67,7 @@ type inspectOptions struct {
 	path           string
 	readers        bool
 	cache          bool
+	space          bool
 	pages          bool
 	keySampleLimit int
 	tracePath      string
@@ -110,6 +112,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		report.CacheStats = &stats
 	}
+	if options.space {
+		stats, err := tree.MmapSpaceStats()
+		if err != nil {
+			fmt.Fprintf(stderr, "mmap inspect: space stats: %v\n", err)
+			return 1
+		}
+		report.SpaceStats = &stats
+	}
 	if options.keySampleLimit > 0 {
 		sample := inspectKeys(tree, options.keySampleLimit)
 		report.KeySample = &sample
@@ -143,6 +153,8 @@ func parseArgs(args []string) (inspectOptions, error) {
 			options.readers = true
 		case "--cache":
 			options.cache = true
+		case "--space":
+			options.space = true
 		case "--pages":
 			options.pages = true
 		case "--trace":
@@ -204,7 +216,7 @@ func parsePositiveLimit(raw string) (int, error) {
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintf(stderr, "usage: mmapinspect [--readers] [--cache] [--pages] [--keys N] [--trace TRACE.jsonl] DB.db\n")
+	fmt.Fprintf(stderr, "usage: mmapinspect [--readers] [--cache] [--space] [--pages] [--keys N] [--trace TRACE.jsonl] DB.db\n")
 }
 
 func inspectFromAudit(audit pagebtree.AuditReport, profile pagebtree.MDBKernelProfile) inspectReport {
