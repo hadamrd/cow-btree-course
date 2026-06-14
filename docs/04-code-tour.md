@@ -79,9 +79,10 @@ total reachable page capacity/free bytes, and used-byte buckets for leaves,
 branches, and overflow pages. Leaf and branch insertion now use that same
 concern when choosing split points, and delete redistribution uses byte-aware
 split points for both leaf and branch pages. Leaf and branch repair also have
-conservative low-fill triggers at the minimum key count. The remaining
-simplification is that merge-versus-redistribute policy is still not fully
-driven by byte occupancy.
+conservative low-fill triggers at the minimum key count, and merge decisions
+avoid collapsing siblings whose combined encoded bytes would overflow one page.
+The remaining simplification is that repair still does not use mature
+occupancy-target heuristics.
 
 ## Page-backed Tree
 

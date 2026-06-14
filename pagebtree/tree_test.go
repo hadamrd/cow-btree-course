@@ -372,6 +372,43 @@ func TestDeleteLeafRedistributionBalancesEncodedBytes(t *testing.T) {
 	}
 }
 
+func TestDeleteLeafMergeFallsBackToRedistributionWhenCombinedBytesOverflow(t *testing.T) {
+	tree := New(4)
+	leftID := PageID(1)
+	childID := PageID(2)
+	tree.nextPage = 3
+	left := tree.newPage(leftID, flagLeaf)
+	child := tree.newPage(childID, flagLeaf)
+	tree.pages[leftID] = left
+	tree.pages[childID] = child
+	value := bytes.Repeat([]byte("v"), 650)
+	tree.writeLeafEntries(left, []leafEntry{
+		{key: "key-00", value: value},
+		{key: "key-01", value: value},
+		{key: "key-02", value: value},
+		{key: "key-03", value: value},
+		{key: "key-04", value: value},
+	})
+	tree.writeLeafEntries(child, []leafEntry{
+		{key: "key-05", value: value},
+		{key: "key-06", value: value},
+	})
+
+	children := tree.mergeUnderfullLeaf([]PageID{leftID, childID}, 1)
+	if len(children) != 2 {
+		t.Fatalf("children after byte-overflow leaf repair = %v, want redistribution across two leaves", children)
+	}
+	if got := int(tree.pages[children[0]].slotCount()); got < minKeys(tree.degree) {
+		t.Fatalf("left leaf keys after redistribution = %d, want at least %d", got, minKeys(tree.degree))
+	}
+	if got := int(tree.pages[children[1]].slotCount()); got < minKeys(tree.degree) {
+		t.Fatalf("right leaf keys after redistribution = %d, want at least %d", got, minKeys(tree.degree))
+	}
+	if tree.Stats().OverflowPages != 0 {
+		t.Fatalf("overflow pages after byte-overflow leaf redistribution = %d, want 0", tree.Stats().OverflowPages)
+	}
+}
+
 func TestDeleteMergesByteUnderfullLeafAtMinimumKeyCount(t *testing.T) {
 	tree := New(3)
 	leftID := PageID(1)
@@ -555,6 +592,39 @@ func TestDeleteBranchRedistributionBalancesEncodedBytes(t *testing.T) {
 	}
 	if got, want := int(redistributedChild.slotCount()), 2; got != want {
 		t.Fatalf("right redistributed branch keys = %d, want %d for byte-balanced split", got, want)
+	}
+}
+
+func TestDeleteBranchMergeFallsBackToRedistributionWhenCombinedBytesOverflow(t *testing.T) {
+	tree := New(4)
+	leafIDs := make([]PageID, 0, 8)
+	for i := 0; i < 8; i++ {
+		id := PageID(i + 1)
+		key := fmt.Sprintf("key-%02d-", i) + strings.Repeat("x", 900)
+		leaf := tree.newPage(id, flagLeaf)
+		tree.pages[id] = leaf
+		tree.writeLeafEntries(leaf, []leafEntry{{key: key, value: []byte("value")}})
+		leafIDs = append(leafIDs, id)
+	}
+	leftBranchID := PageID(20)
+	childBranchID := PageID(21)
+	tree.nextPage = 30
+	leftBranch := tree.newPage(leftBranchID, flagBranch)
+	childBranch := tree.newPage(childBranchID, flagBranch)
+	tree.pages[leftBranchID] = leftBranch
+	tree.pages[childBranchID] = childBranch
+	tree.writeBranchChildren(leftBranch, leafIDs[:5])
+	tree.writeBranchChildren(childBranch, leafIDs[5:])
+
+	children := tree.mergeUnderfullBranch([]PageID{leftBranchID, childBranchID}, 1)
+	if len(children) != 2 {
+		t.Fatalf("children after byte-overflow branch repair = %v, want redistribution across two branches", children)
+	}
+	if got := int(tree.pages[children[0]].slotCount()); got < minKeys(tree.degree) {
+		t.Fatalf("left branch keys after redistribution = %d, want at least %d", got, minKeys(tree.degree))
+	}
+	if got := int(tree.pages[children[1]].slotCount()); got < minKeys(tree.degree) {
+		t.Fatalf("right branch keys after redistribution = %d, want at least %d", got, minKeys(tree.degree))
 	}
 }
 

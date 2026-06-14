@@ -128,5 +128,6 @@
 // counts plus used/free/capacity byte counts. Insertion and delete
 // redistribution use encoded cell byte footprints to choose leaf and branch
 // split points. Leaf and branch repair can also trigger on low byte occupancy
-// at the minimum key count.
+// at the minimum key count, and merge decisions require the combined encoded
+// page bytes to fit in one page.
 package pagebtree

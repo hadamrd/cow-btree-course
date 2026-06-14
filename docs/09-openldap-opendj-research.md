@@ -156,7 +156,7 @@ Open research tracks for this repo:
 - replace the simple sidecar reader table with a cache-line-aligned mmap lock region
 - add reader-table migration tooling for future incompatible sidecar formats
 - model multi-database catalogs inside one mapped file
-- make deletion fully byte-balanced, especially merge-versus-redistribute policy
+- make deletion fully byte-balanced with production-style occupancy targets
 - add a crash-order harness for metadata, freelist, reclaim, growth, and shrink
 - investigate sparse-file hole punching for interior free extents without moving live pages
 - compare exact structure-aware prefetch with Linux default readahead on large workloads

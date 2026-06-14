@@ -151,7 +151,7 @@ func (t *Tree) mergeUnderfullLeaf(children []PageID, index int) []PageID {
 		left := t.pages[children[index-1]]
 		if left != nil && left.isLeaf() {
 			merged := append(left.leafEntries(), child.leafEntries()...)
-			if len(merged) <= maxKeys(t.degree) {
+			if len(merged) <= maxKeys(t.degree) && leafEntriesFitPage(merged) {
 				leftID := t.copyPage(children[index-1])
 				left = t.pages[leftID]
 				children[index-1] = leftID
@@ -176,7 +176,7 @@ func (t *Tree) mergeUnderfullLeaf(children []PageID, index int) []PageID {
 		right := t.pages[children[index+1]]
 		if right != nil && right.isLeaf() {
 			merged := append(child.leafEntries(), right.leafEntries()...)
-			if len(merged) <= maxKeys(t.degree) {
+			if len(merged) <= maxKeys(t.degree) && leafEntriesFitPage(merged) {
 				rightID := t.copyPage(children[index+1])
 				right = t.pages[rightID]
 				children[index+1] = rightID
@@ -207,6 +207,14 @@ func (t *Tree) leafNeedsRepair(p *page) bool {
 	return count <= minKeys(t.degree) && p.slottedBytesUsed() < minLeafRepairFillBytes
 }
 
+func leafEntriesFitPage(entries []leafEntry) bool {
+	bytes := pageHeaderSize
+	for _, entry := range entries {
+		bytes += leafEntryCellBytes(entry)
+	}
+	return bytes <= PageSize
+}
+
 func (t *Tree) mergeUnderfullBranch(children []PageID, index int) []PageID {
 	if len(children) <= 1 || index < 0 || index >= len(children) {
 		return children
@@ -220,7 +228,7 @@ func (t *Tree) mergeUnderfullBranch(children []PageID, index int) []PageID {
 		left := t.pages[children[index-1]]
 		if left != nil && left.isBranch() {
 			mergedChildren := append(left.childIDs(), child.childIDs()...)
-			if len(mergedChildren) <= maxKeys(t.degree)+1 {
+			if len(mergedChildren) <= maxKeys(t.degree)+1 && t.branchChildrenFitPage(mergedChildren) {
 				leftID := t.copyPage(children[index-1])
 				left = t.pages[leftID]
 				children[index-1] = leftID
@@ -242,7 +250,7 @@ func (t *Tree) mergeUnderfullBranch(children []PageID, index int) []PageID {
 		right := t.pages[children[index+1]]
 		if right != nil && right.isBranch() {
 			mergedChildren := append(child.childIDs(), right.childIDs()...)
-			if len(mergedChildren) <= maxKeys(t.degree)+1 {
+			if len(mergedChildren) <= maxKeys(t.degree)+1 && t.branchChildrenFitPage(mergedChildren) {
 				t.writeBranchChildren(child, mergedChildren)
 				t.retirePage(children[index+1])
 				return append(children[:index+1], children[index+2:]...)
@@ -300,6 +308,10 @@ func (t *Tree) branchChildrenBytes(children []PageID) int {
 		bytes += branchCellBytes(key)
 	}
 	return bytes
+}
+
+func (t *Tree) branchChildrenFitPage(children []PageID) bool {
+	return t.branchChildrenBytes(children) <= PageSize
 }
 
 func (t *Tree) writeBranchChildren(p *page, children []PageID) {
