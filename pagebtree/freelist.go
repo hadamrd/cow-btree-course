@@ -59,6 +59,14 @@ func (t *Tree) reclaimRetiredPages() {
 }
 
 func (t *Tree) oldestReaderRevision() (uint64, bool) {
+	oldest, found, err := t.oldestReaderRevisionDetailed()
+	if err != nil {
+		return 0, true
+	}
+	return oldest, found
+}
+
+func (t *Tree) oldestReaderRevisionDetailed() (uint64, bool, error) {
 	var oldest uint64
 	found := false
 	for revision := range t.activeReaders {
@@ -70,14 +78,14 @@ func (t *Tree) oldestReaderRevision() (uint64, bool) {
 	if t.arena != nil && t.arena.readerTable != nil {
 		revision, hasReader, err := t.arena.readerTable.oldest(t.revision)
 		if err != nil {
-			return 0, true
+			return 0, true, err
 		}
 		if hasReader && (!found || revision < oldest) {
 			oldest = revision
 			found = true
 		}
 	}
-	return oldest, found
+	return oldest, found, nil
 }
 
 func (t *Tree) activeReaderCount() int {

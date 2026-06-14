@@ -66,6 +66,8 @@ This repository is still in memory, so `AllocatedPages` is a map size rather tha
 - `RetiredPages`: old page IDs waiting for readers to close.
 - `FreePages`: page IDs safe to reuse.
 - `ReusedPages`: count of allocations served from the freelist.
+- `ReclaimPressure`: retired pages split by oldest-reader watermark into
+  reader-pinned and immediately reclaimable counts.
 - `AllocatedPages`: number of page IDs currently represented in the in-memory page table.
 
 The tests in `pagebtree/freelist_test.go` prove that active readers prevent reuse and that closing readers releases retired pages to the freelist.

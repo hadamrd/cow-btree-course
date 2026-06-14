@@ -166,6 +166,67 @@ func TestRunPrintsOptionalReaderAndCacheSections(t *testing.T) {
 	}
 }
 
+func TestRunPrintsReclaimPressure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inspect.db")
+	writer, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	for i := range 48 {
+		writer.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close initial writer: %v", err)
+	}
+
+	reader, err := pagebtree.OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	defer reader.Close()
+
+	writer, err = pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+	for i := range 24 {
+		if _, ok := writer.Delete(fmt.Sprintf("key-%02d", i)); !ok {
+			writer.Close()
+			t.Fatalf("Delete key-%02d = false, want true", i)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer with active reader: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--readers", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	pressure := report.Stats.ReclaimPressure
+	if pressure.RetiredPages == 0 {
+		t.Fatalf("ReclaimPressure.RetiredPages = 0, want persisted retired pages")
+	}
+	if pressure.ReaderPinnedRetiredPages != report.Stats.RetiredPages {
+		t.Fatalf("ReaderPinnedRetiredPages = %d, want RetiredPages %d", pressure.ReaderPinnedRetiredPages, report.Stats.RetiredPages)
+	}
+	if pressure.ReclaimableRetiredPages != 0 || !pressure.BlockedByReaders {
+		t.Fatalf("ReclaimPressure = %+v, want reader-blocked retired pages", pressure)
+	}
+	if !pressure.HasOldestReaderRevision || pressure.OldestReaderRevision == 0 {
+		t.Fatalf("ReclaimPressure oldest reader = %+v, want reader watermark", pressure)
+	}
+	if report.ReaderStats == nil || !report.ReaderStats.HasOldestRevision {
+		t.Fatalf("ReaderStats = %+v, want active reader watermark", report.ReaderStats)
+	}
+}
+
 func TestRunPrintsOptionalSpaceSection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspect.db")
 	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})

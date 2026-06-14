@@ -3738,7 +3738,11 @@ func TestMmapReadOnlyAccessAdviceKeepsReadsWorking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenMmapReadOnly: %v", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if reader != nil {
+			_ = reader.Close()
+		}
+	}()
 
 	if err := reader.Advise(MmapAccessRandom); err != nil {
 		t.Fatalf("read-only Advise(random): %v", err)
@@ -5257,6 +5261,72 @@ func TestMmapReadOnlyCoexistsWithWriterAndPinsRecycling(t *testing.T) {
 	}
 	if err := concurrentWriter.Close(); err != nil {
 		t.Fatalf("Close concurrent writer: %v", err)
+	}
+}
+
+func TestMmapStatsReportsReaderPinnedReclaimPressure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	for i := range 48 {
+		writer.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	defer func() {
+		if reader != nil {
+			_ = reader.Close()
+		}
+	}()
+
+	writer, err = OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+	defer writer.Close()
+	for i := range 24 {
+		if _, ok := writer.Delete(fmt.Sprintf("key-%02d", i)); !ok {
+			t.Fatalf("Delete key-%02d = false, want true", i)
+		}
+	}
+
+	pinned := writer.Stats()
+	if pinned.ReclaimPressure.RetiredPages == 0 {
+		t.Fatalf("ReclaimPressure.RetiredPages = 0, want retired pages")
+	}
+	if pinned.ReclaimPressure.ReaderPinnedRetiredPages != pinned.RetiredPages {
+		t.Fatalf("ReaderPinnedRetiredPages = %d, want RetiredPages %d", pinned.ReclaimPressure.ReaderPinnedRetiredPages, pinned.RetiredPages)
+	}
+	if pinned.ReclaimPressure.ReclaimableRetiredPages != 0 {
+		t.Fatalf("ReclaimableRetiredPages = %d, want 0 while reader pins retired pages", pinned.ReclaimPressure.ReclaimableRetiredPages)
+	}
+	if !pinned.ReclaimPressure.HasOldestReaderRevision || pinned.ReclaimPressure.OldestReaderRevision == 0 {
+		t.Fatalf("ReclaimPressure oldest reader = %+v, want nonzero reader watermark", pinned.ReclaimPressure)
+	}
+	if !pinned.ReclaimPressure.BlockedByReaders {
+		t.Fatalf("BlockedByReaders = false, want true while reader pins retired pages")
+	}
+
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close reader: %v", err)
+	}
+	reader = nil
+	writer.Put("key-99", []byte("value-99"))
+	released := writer.Stats()
+	if released.ReclaimPressure.RetiredPages != 0 || released.ReclaimPressure.ReaderPinnedRetiredPages != 0 || released.ReclaimPressure.BlockedByReaders {
+		t.Fatalf("ReclaimPressure after reader release = %+v, want no retired pressure", released.ReclaimPressure)
+	}
+	if released.FreePages == 0 {
+		t.Fatalf("FreePages after reader release = 0, want reclaimed pages")
 	}
 }
 

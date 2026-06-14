@@ -152,7 +152,9 @@
 // slots with impossible future revisions or zero claim tokens return
 // ErrReaderTable instead of being reset, because resetting them could forget
 // active reader watermarks; writer reclaim treats reader-table scan errors as a
-// conservative pin on all retired pages.
+// conservative pin on all retired pages. Stats.ReclaimPressure exposes the same
+// watermark decision by separating retired pages pinned by readers from retired
+// pages immediately eligible for reuse.
 // Writable mmap handles can close while external reader-table slots still pin
 // retired pages because those pending retired records are published in metadata;
 // Close still returns ErrActiveReaders while in-process snapshots are active
@@ -175,7 +177,8 @@
 // invalidations, evictions, range-prefetch window, range-prefetch hint-call
 // count, and exact pages covered by those hints, plus mmap warm-up hint-call
 // and page counts. Stats also reports logical Revision versus SyncedRevision,
-// the last revision for which Sync returned successfully, plus reachable leaf,
+// the last revision for which Sync returned successfully, reclaim-pressure
+// counters, plus reachable leaf,
 // branch, and overflow page counts, used/free/capacity byte counts, and the
 // normalized repair-fill policy. Insertion and delete
 // redistribution use encoded cell byte footprints to choose leaf and branch

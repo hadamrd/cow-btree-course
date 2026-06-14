@@ -23,6 +23,7 @@ type Stats struct {
 	RetiredPages             int
 	FreePages                int
 	ActiveReaders            int
+	ReclaimPressure          ReclaimPressureStats
 	ReusedPages              int
 	Storage                  string
 	PageCacheEntries         int
@@ -39,6 +40,18 @@ type Stats struct {
 	MmapWarmupPages          int
 }
 
+// ReclaimPressureStats explains why retired pages can or cannot move to the
+// reusable freelist at the current reader watermark.
+type ReclaimPressureStats struct {
+	RetiredPages             int
+	ReaderPinnedRetiredPages int
+	ReclaimableRetiredPages  int
+	OldestReaderRevision     uint64
+	HasOldestReaderRevision  bool
+	BlockedByReaders         bool
+	ReaderTableScanFailed    bool
+}
+
 func statsFor(t *Tree) Stats {
 	stats := statsForSnapshot(t.pages, t.root, t.length, t.revision, t.degree)
 	stats.AllocatedPages = len(t.pages)
@@ -46,6 +59,7 @@ func statsFor(t *Tree) Stats {
 	stats.RetiredPages = len(t.retired)
 	stats.FreePages = len(t.free)
 	stats.ActiveReaders = t.activeReaderCount()
+	stats.ReclaimPressure = t.reclaimPressureStats()
 	stats.ReusedPages = t.reusedPages
 	stats.Storage = "memory"
 	if t.arena != nil {
@@ -64,6 +78,32 @@ func statsFor(t *Tree) Stats {
 	stats.RangePrefetchPages = t.rangePrefetchPages
 	stats.MmapWarmupHints = t.mmapWarmupHints
 	stats.MmapWarmupPages = t.mmapWarmupPages
+	return stats
+}
+
+func (t *Tree) reclaimPressureStats() ReclaimPressureStats {
+	stats := ReclaimPressureStats{
+		RetiredPages: len(t.retired),
+	}
+	if len(t.retired) == 0 {
+		return stats
+	}
+	oldest, hasReader, err := t.oldestReaderRevisionDetailed()
+	if err != nil {
+		stats.ReaderTableScanFailed = true
+		hasReader = true
+		oldest = 0
+	}
+	stats.OldestReaderRevision = oldest
+	stats.HasOldestReaderRevision = hasReader
+	for _, retired := range t.retired {
+		if hasReader && oldest <= retired.revision {
+			stats.ReaderPinnedRetiredPages++
+			continue
+		}
+		stats.ReclaimableRetiredPages++
+	}
+	stats.BlockedByReaders = stats.ReaderPinnedRetiredPages > 0
 	return stats
 }
 

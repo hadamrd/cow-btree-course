@@ -600,6 +600,10 @@ sequenceDiagram
 The table is fail-closed. A malformed active slot with a future revision or a
 zero claim token returns `ErrReaderTable`. Writer reclaim then conservatively
 keeps retired pages pinned instead of recycling from an untrusted watermark.
+`Stats.ReclaimPressure` exposes that same decision surface: total retired
+pages, how many are pinned by the oldest reader watermark, how many would be
+reclaimable at the current watermark, the oldest reader revision when known,
+and whether a reader-table scan failure forced the conservative pin.
 
 Code to read:
 
@@ -652,8 +656,10 @@ Storage-engine observability has several layers:
 - Counters: `Stats`, `MmapReaderStats`, `MmapCacheStats`, and `MmapSpaceStats`
   tell you current quantities. `Stats` includes reachable leaf/branch/overflow
   page counts, total reachable page capacity/free bytes, and
-  leaf/branch/overflow used-byte buckets. `MmapCacheStats` observes residency
-  in the kernel page cache; `MmapSpaceStats` observes logical file bytes versus
+  leaf/branch/overflow used-byte buckets. It also includes reclaim-pressure
+  counters that separate reader-pinned retired pages from immediately
+  reclaimable retired pages. `MmapCacheStats` observes residency in the kernel
+  page cache; `MmapSpaceStats` observes logical file bytes versus
   filesystem-reported allocated bytes plus filesystem and mount identity where
   available for sparse-file experiments.
 - Validation reports: `Audit` tells you what the validator actually reached:
@@ -668,7 +674,7 @@ Storage-engine observability has several layers:
 
 ```mermaid
 flowchart TD
-    S["Stats"] --> C["counts: pages, readers, cache hits, byte fill"]
+    S["Stats"] --> C["counts: pages, readers, reclaim pressure, cache hits, byte fill"]
     A["Audit"] --> V["validation evidence: reachable/free/retired page IDs"]
     M["MmapCacheStats"] --> R["kernel residency via mincore"]
     Z["MmapSpaceStats"] --> Y["logical vs allocated bytes + filesystem/mount identity"]
@@ -762,10 +768,12 @@ page IDs, and linked-leaf validation state.
 page-cache residency counts, and `--space` adds logical-vs-allocated file-space
 counts plus the hole-punch capability profile. `--pages` adds value-free page
 summaries with role, kind, byte occupancy, branch children, metadata record
-counts, reclaim revision bounds, and next-page hints. `--keys N`
-adds a bounded first/last key sample in the recovered comparator order without
-dumping values. `--trace TRACE.jsonl` reads value-free trace JSONL, counts
-events by kind, summarizes dirty data-page ranges, summarizes sparse-hole
+counts, reclaim revision bounds, and next-page hints. Reclaim-pressure counters
+are included in the base `Stats` block so a reader-pinned freelist stall is
+visible without dumping values. `--keys N` adds a bounded first/last key sample
+in the recovered comparator order without dumping values. `--trace TRACE.jsonl`
+reads value-free trace JSONL, counts events by kind, summarizes dirty data-page
+ranges, summarizes sparse-hole
 punched ranges/pages/bytes and skipped fallback-recoverable pages, records the
 last traced revision/root/nextPage/maxPages geometry, reports trace failure
 reasons, and checks whether the last traced revision/root/nextPage matches the

@@ -171,6 +171,7 @@ func auditBaseStats(t *Tree) Stats {
 		RetiredPages:      len(t.retired),
 		FreePages:         len(t.free),
 		ActiveReaders:     t.activeReaderCount(),
+		ReclaimPressure:   t.reclaimPressureStats(),
 		ReusedPages:       t.reusedPages,
 		PageCacheCapacity: t.pageCache.snapshot().Capacity,
 		Storage:           "memory",
