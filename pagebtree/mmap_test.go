@@ -6861,6 +6861,68 @@ func TestMmapTreeOpensLegacyV2ChainedFreelistFixture(t *testing.T) {
 	}
 }
 
+func TestAuditReportsReclaimMetadataRevisionBounds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 2048})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	defer tree.Close()
+
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+
+	clear(tree.arena.dirtyPages)
+	tree.revision += 10
+	retiredCount := reclaimPageCapacity + 17
+	tree.retired = make([]retiredPage, retiredCount)
+	for i := range tree.retired {
+		tree.retired[i] = retiredPage{
+			id:       firstTreePageID + 1 + PageID(i),
+			revision: tree.revision - uint64(i%5),
+		}
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(retiredCount)
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("reclaim metadata Sync: %v", err)
+	}
+
+	audit := tree.Audit()
+	if !audit.Valid() {
+		t.Fatalf("Audit error = %v", audit.Error)
+	}
+	if len(audit.MetadataPageIDs) < 2 {
+		t.Fatalf("MetadataPageIDs = %v, want multi-page reclaim chain", audit.MetadataPageIDs)
+	}
+	reclaimSummaries := 0
+	for _, summary := range audit.PageSummaries {
+		if summary.Role != "metadata" {
+			continue
+		}
+		reclaimSummaries++
+		if summary.Kind != "reclaim" {
+			t.Fatalf("metadata summary = %+v, want reclaim kind", summary)
+		}
+		if summary.MetadataRecords == 0 {
+			t.Fatalf("metadata summary = %+v, want records", summary)
+		}
+		if summary.MinRetiredRevision == 0 || summary.MaxRetiredRevision == 0 {
+			t.Fatalf("metadata summary = %+v, want reclaim revision bounds", summary)
+		}
+		if summary.MinRetiredRevision > summary.MaxRetiredRevision {
+			t.Fatalf("metadata summary = %+v, want min revision <= max revision", summary)
+		}
+		if summary.MaxRetiredRevision > tree.revision {
+			t.Fatalf("metadata summary = %+v, max revision above tree revision %d", summary, tree.revision)
+		}
+	}
+	if reclaimSummaries != len(audit.MetadataPageIDs) {
+		t.Fatalf("reclaim summaries = %d, want MetadataPageIDs count %d", reclaimSummaries, len(audit.MetadataPageIDs))
+	}
+}
+
 func TestMmapSyncUpgradesLegacyMetadataInAlternateSlot(t *testing.T) {
 	path := copyMmapFixture(t, "testdata/mmap-v1-inline-freelist.db")
 	legacyIndex, legacy := newestMetaPage(t, path)

@@ -762,7 +762,7 @@ page IDs, and linked-leaf validation state.
 page-cache residency counts, and `--space` adds logical-vs-allocated file-space
 counts plus the hole-punch capability profile. `--pages` adds value-free page
 summaries with role, kind, byte occupancy, branch children, metadata record
-counts, and next-page hints. `--keys N`
+counts, reclaim revision bounds, and next-page hints. `--keys N`
 adds a bounded first/last key sample in the recovered comparator order without
 dumping values. `--trace TRACE.jsonl` reads value-free trace JSONL, counts
 events by kind, summarizes dirty data-page ranges, summarizes sparse-hole

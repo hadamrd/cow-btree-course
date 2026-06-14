@@ -26,18 +26,20 @@ type AuditReport struct {
 // are present. Children is populated for branch pages; NextPage is populated for
 // linked leaves and overflow pages when their next pointer is nonzero.
 type PageSummary struct {
-	ID              PageID   `json:"id"`
-	Role            string   `json:"role"`
-	Kind            string   `json:"kind"`
-	Keys            int      `json:"keys,omitempty"`
-	Separators      int      `json:"separators,omitempty"`
-	Children        []PageID `json:"children,omitempty"`
-	NextPage        PageID   `json:"next_page,omitempty"`
-	MetadataRecords int      `json:"metadata_records,omitempty"`
-	BytesUsed       int      `json:"bytes_used,omitempty"`
-	BytesFree       int      `json:"bytes_free,omitempty"`
-	BytesCapacity   int      `json:"bytes_capacity,omitempty"`
-	RetiredRevision uint64   `json:"retired_revision,omitempty"`
+	ID                 PageID   `json:"id"`
+	Role               string   `json:"role"`
+	Kind               string   `json:"kind"`
+	Keys               int      `json:"keys,omitempty"`
+	Separators         int      `json:"separators,omitempty"`
+	Children           []PageID `json:"children,omitempty"`
+	NextPage           PageID   `json:"next_page,omitempty"`
+	MetadataRecords    int      `json:"metadata_records,omitempty"`
+	MinRetiredRevision uint64   `json:"min_retired_revision,omitempty"`
+	MaxRetiredRevision uint64   `json:"max_retired_revision,omitempty"`
+	BytesUsed          int      `json:"bytes_used,omitempty"`
+	BytesFree          int      `json:"bytes_free,omitempty"`
+	BytesCapacity      int      `json:"bytes_capacity,omitempty"`
+	RetiredRevision    uint64   `json:"retired_revision,omitempty"`
 }
 
 // Valid reports whether Audit found no validation error.
@@ -259,12 +261,29 @@ func summarizePage(id PageID, p *page, role string, retiredRevision uint64) Page
 	case p.flags()&flagReclaim != 0:
 		summary.NextPage = p.reclaimNext()
 		summary.MetadataRecords = p.reclaimCount()
+		summary.MinRetiredRevision, summary.MaxRetiredRevision = reclaimRevisionBounds(p.reclaimRecords())
 		summary.BytesUsed = reclaimPayloadOffset + p.reclaimCount()*reclaimRecordSize
 	default:
 		summary.BytesUsed = PageSize
 	}
 	summary.BytesFree = summary.BytesCapacity - summary.BytesUsed
 	return summary
+}
+
+func reclaimRevisionBounds(records []reclaimRecord) (uint64, uint64) {
+	var minRevision, maxRevision uint64
+	for _, record := range records {
+		if record.revision == 0 {
+			continue
+		}
+		if minRevision == 0 || record.revision < minRevision {
+			minRevision = record.revision
+		}
+		if record.revision > maxRevision {
+			maxRevision = record.revision
+		}
+	}
+	return minRevision, maxRevision
 }
 
 func pageKind(p *page) string {

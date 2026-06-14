@@ -201,7 +201,7 @@ pinned revision. `--cache` adds `mincore`-backed mapped/resident page counts,
 and `--space` adds `stat(2)` logical-vs-allocated file-space counts plus the
 hole-punch capability profile for sparse experiments. `--pages` adds value-free
 page summaries with role, kind, byte occupancy, branch children, metadata record
-counts, and next-page hints. `--keys N` adds a bounded first/last key
+counts, reclaim revision bounds, and next-page hints. `--keys N` adds a bounded first/last key
 sample in the recovered comparator order without dumping values. `--trace
 TRACE.jsonl` reads value-free trace output, counts event kinds, keeps a bounded
 ordered timeline of the first storage phases, summarizes dirty data-page ranges,

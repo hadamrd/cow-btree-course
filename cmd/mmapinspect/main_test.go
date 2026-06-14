@@ -334,6 +334,75 @@ func TestRunPrintsMetadataPageSummaries(t *testing.T) {
 	}
 }
 
+func TestRunPrintsReclaimMetadataRevisionBounds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inspect.db")
+	writer, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 4096})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	large := bytes.Repeat([]byte("x"), pagebtree.PageSize+64)
+	for i := range 180 {
+		writer.Put(fmt.Sprintf("key-%03d", i), large)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close initial writer: %v", err)
+	}
+
+	reader, err := pagebtree.OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	defer reader.Close()
+
+	writer, err = pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 4096})
+	if err != nil {
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+	for i := range 180 {
+		if _, ok := writer.Delete(fmt.Sprintf("key-%03d", i)); !ok {
+			writer.Close()
+			t.Fatalf("Delete key-%03d = false, want true", i)
+		}
+	}
+	if stats := writer.Stats(); stats.RetiredPages <= 0 || stats.FreePages != 0 {
+		writer.Close()
+		t.Fatalf("writer stats before close = retired:%d free:%d, want reader-pinned retired pages", stats.RetiredPages, stats.FreePages)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer with active reader: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--pages", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if len(report.MetadataPageIDs) < 2 {
+		t.Fatalf("MetadataPageIDs = %v, want multi-page reclaim metadata", report.MetadataPageIDs)
+	}
+	reclaimSummaries := 0
+	for _, summary := range report.PageSummaries {
+		if summary.Role != "metadata" {
+			continue
+		}
+		reclaimSummaries++
+		if summary.Kind != "reclaim" || summary.MetadataRecords == 0 {
+			t.Fatalf("metadata summary = %+v, want reclaim records", summary)
+		}
+		if summary.MinRetiredRevision == 0 || summary.MaxRetiredRevision == 0 || summary.MinRetiredRevision > summary.MaxRetiredRevision {
+			t.Fatalf("metadata summary = %+v, want reclaim revision bounds", summary)
+		}
+	}
+	if reclaimSummaries != len(report.MetadataPageIDs) {
+		t.Fatalf("reclaim summaries = %d, want MetadataPageIDs count %d", reclaimSummaries, len(report.MetadataPageIDs))
+	}
+}
+
 func TestRunCorrelatesTraceJSONL(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "inspect.db")
