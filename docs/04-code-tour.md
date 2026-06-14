@@ -78,8 +78,10 @@ only keys. `Stats` reports reachable leaf, branch, and overflow page counts,
 total reachable page capacity/free bytes, and used-byte buckets for leaves,
 branches, and overflow pages. Leaf and branch insertion now use that same
 concern when choosing split points, and delete redistribution uses byte-aware
-split points for both leaf and branch pages. The remaining simplification is
-that branch repair is still triggered by key counts rather than byte occupancy.
+split points for both leaf and branch pages. Leaf and branch repair also have
+conservative low-fill triggers at the minimum key count. The remaining
+simplification is that merge-versus-redistribute policy is still not fully
+driven by byte occupancy.
 
 ## Page-backed Tree
 

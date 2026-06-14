@@ -565,8 +565,8 @@ func TestMmapTreePersistsBranchBorrowBeforeDelete(t *testing.T) {
 	if old, deleted := tree.Delete("key-10"); !deleted || string(old) != "value-10" {
 		t.Fatalf("Delete(key-10) = %q, %v; want value-10, true", old, deleted)
 	}
-	if got := branchChildCountsBelowRoot(tree); !slices.Equal(got, []int{4, 3}) {
-		t.Fatalf("mmap branch child counts after borrow = %v, want [4 3]", got)
+	if got := branchChildCountsBelowRoot(tree); !slices.Equal(got, []int{3, 4}) {
+		t.Fatalf("mmap branch child counts after borrow and low-fill repair = %v, want [3 4]", got)
 	}
 	if err := tree.Check(); err != nil {
 		t.Fatalf("Check after branch borrow: %v", err)
@@ -581,8 +581,8 @@ func TestMmapTreePersistsBranchBorrowBeforeDelete(t *testing.T) {
 	}
 	defer reopened.Close()
 
-	if got := branchChildCountsBelowRoot(reopened); !slices.Equal(got, []int{4, 3}) {
-		t.Fatalf("reopened branch child counts after borrow = %v, want [4 3]", got)
+	if got := branchChildCountsBelowRoot(reopened); !slices.Equal(got, []int{3, 4}) {
+		t.Fatalf("reopened branch child counts after borrow and low-fill repair = %v, want [3 4]", got)
 	}
 	if err := reopened.Check(); err != nil {
 		t.Fatalf("Check after reopen: %v", err)

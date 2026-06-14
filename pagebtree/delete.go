@@ -2,7 +2,10 @@ package pagebtree
 
 import "slices"
 
-const minLeafRepairFillBytes = PageSize / 4
+const (
+	minLeafRepairFillBytes   = PageSize / 4
+	minBranchRepairFillBytes = PageSize / 4
+)
 
 // Delete removes key from the current root version.
 //
@@ -10,8 +13,8 @@ const minLeafRepairFillBytes = PageSize / 4
 // search path before changing page bytes. It merges or redistributes underfull
 // leaf siblings, borrows before descending into minimum-fill branches when a
 // sibling can lend, merges or redistributes underfull branch siblings, then
-// rebuilds branch separators and collapses a one-child root. Leaf repair can
-// also trigger on low byte fill at the minimum key count. Leaf and branch
+// rebuilds branch separators and collapses a one-child root. Leaf and branch
+// repair can also trigger on low byte fill at the minimum key count, and
 // redistribution choose split points with encoded cell byte footprints.
 func (t *Tree) Delete(key string) ([]byte, bool) {
 	old, deleted, changed := t.deleteStaged(key)
@@ -209,7 +212,7 @@ func (t *Tree) mergeUnderfullBranch(children []PageID, index int) []PageID {
 		return children
 	}
 	child := t.pages[children[index]]
-	if child == nil || !child.isBranch() || int(child.slotCount()) >= minKeys(t.degree) {
+	if child == nil || !child.isBranch() || !t.branchNeedsRepair(child) {
 		return children
 	}
 
@@ -254,6 +257,14 @@ func (t *Tree) mergeUnderfullBranch(children []PageID, index int) []PageID {
 		}
 	}
 	return children
+}
+
+func (t *Tree) branchNeedsRepair(p *page) bool {
+	count := int(p.slotCount())
+	if count < minKeys(t.degree) {
+		return true
+	}
+	return count <= minKeys(t.degree) && p.slottedBytesUsed() < minBranchRepairFillBytes
 }
 
 func (t *Tree) branchChildSplitIndex(children []PageID) int {

@@ -558,6 +558,35 @@ func TestDeleteBranchRedistributionBalancesEncodedBytes(t *testing.T) {
 	}
 }
 
+func TestDeleteMergesByteUnderfullBranchAtMinimumKeyCount(t *testing.T) {
+	tree := New(3)
+	leafIDs := make([]PageID, 0, 6)
+	for i := 0; i < 6; i++ {
+		id := PageID(i + 1)
+		leaf := tree.newPage(id, flagLeaf)
+		tree.pages[id] = leaf
+		tree.writeLeafEntries(leaf, []leafEntry{{key: fmt.Sprintf("key-%02d", i), value: []byte("value")}})
+		leafIDs = append(leafIDs, id)
+	}
+	leftBranchID := PageID(20)
+	childBranchID := PageID(21)
+	tree.nextPage = 30
+	leftBranch := tree.newPage(leftBranchID, flagBranch)
+	childBranch := tree.newPage(childBranchID, flagBranch)
+	tree.pages[leftBranchID] = leftBranch
+	tree.pages[childBranchID] = childBranch
+	tree.writeBranchChildren(leftBranch, leafIDs[:3])
+	tree.writeBranchChildren(childBranch, leafIDs[3:])
+
+	children := tree.mergeUnderfullBranch([]PageID{leftBranchID, childBranchID}, 1)
+	if len(children) != 1 {
+		t.Fatalf("children after byte-underfull branch merge = %v, want one merged branch", children)
+	}
+	if got, want := int(tree.pages[children[0]].slotCount()), 5; got != want {
+		t.Fatalf("merged branch key count = %d, want %d", got, want)
+	}
+}
+
 func TestDeleteBorrowsBranchChildBeforeDescent(t *testing.T) {
 	tree := New(3)
 	seedBranchRedistributionAfterDeleteTree(tree)
@@ -569,8 +598,8 @@ func TestDeleteBorrowsBranchChildBeforeDescent(t *testing.T) {
 		t.Fatalf("Delete(key-10) = %q, %v; want value-10, true", old, deleted)
 	}
 
-	if got := branchChildCountsBelowRoot(tree); !reflect.DeepEqual(got, []int{4, 3}) {
-		t.Fatalf("branch child counts after pre-descent borrow = %v, want [4 3]", got)
+	if got := branchChildCountsBelowRoot(tree); !reflect.DeepEqual(got, []int{3, 4}) {
+		t.Fatalf("branch child counts after pre-descent borrow and low-fill repair = %v, want [3 4]", got)
 	}
 	if err := tree.Check(); err != nil {
 		t.Fatalf("Check after pre-descent branch borrow: %v", err)

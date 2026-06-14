@@ -215,9 +215,8 @@ degree-based maximum key count, uses byte-aware split points for leaf and branch
 overflow, and has additional overflow handling for large values that do not fit
 well inside a leaf page. Leaf delete redistribution reuses the same byte-aware
 split policy, and branch delete redistribution chooses a byte-aware child split.
-Leaf repair can also trigger on low byte occupancy when the leaf is at the
-minimum key count; branch repair is still triggered by degree/key-count
-thresholds.
+Leaf and branch repair can also trigger on low byte occupancy when the page is
+at the minimum key count.
 
 Code to read:
 
@@ -250,9 +249,9 @@ flowchart TD
 
 This is not a full production delete implementation. It has real merge and
 redistribution behavior, and both leaf and branch redistribution choose
-byte-aware split points. Leaf repair now has a conservative byte-occupancy
-trigger, but branch repair still stops short of using byte occupancy as the
-underfull/merge trigger across variable-size records.
+byte-aware split points. Leaf and branch repair now have conservative
+byte-occupancy triggers, but the merge-versus-redistribute choice still stops
+short of a true byte-occupancy policy across variable-size records.
 
 Code to read:
 
@@ -769,8 +768,8 @@ Still research or incomplete compared with a production engine:
 - No pluggable comparator or locale/collation layer; byte-key APIs use the
   persisted bytewise page order.
 - Insertion and delete redistribution use byte-aware split-point selection, and
-  leaf repair has a low-byte-occupancy trigger; branch repair still uses key
-  counts rather than byte occupancy.
+  leaf/branch repair have low-byte-occupancy triggers at the minimum key count;
+  merge-versus-redistribute choice still needs a fuller byte-occupancy policy.
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.
 - No benchstat baseline history or CI performance gate yet.
