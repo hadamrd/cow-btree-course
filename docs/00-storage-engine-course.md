@@ -508,9 +508,11 @@ stateDiagram-v2
 ```
 
 This is why deleting half the keys does not necessarily shrink the database
-file. Many pages become reusable inside the file, but the file remains allocated
-until a tail compaction can trim a contiguous free suffix. Interior free pages
-are reusable by the engine but still part of the file's allocated range.
+file. Many pages become reusable inside the file, but the logical file length
+shrinks only when tail compaction can trim a contiguous free suffix. Interior
+free pages are reusable by the engine. On supported filesystems, they may also
+become sparse holes, but their page IDs still remain inside the file's logical
+range.
 
 There are two different compaction ideas in the repository:
 
@@ -527,6 +529,10 @@ There are two different compaction ideas in the repository:
   while active mmap readers hold shared file locks, then renames the compact
   file over the source. It is still not online vacuum because it refuses active
   readers and writers instead of relocating pages underneath them.
+- Sparse-hole punching: `Tree.PunchFreeMmapPages()` preserves page IDs and file
+  length, skips pages reachable from any valid fallback metadata root, then asks
+  supported filesystems to deallocate physical blocks for coalesced free-page
+  extents.
 
 ```mermaid
 flowchart LR
@@ -537,6 +543,7 @@ flowchart LR
     C --> K["Check + Compact destination"]
     K --> X["exclusive source file lock"]
     X --> N["rename smaller replacement file"]
+    A --> P["PunchFreeMmapPages<br/>same file length"]
 ```
 
 Code to read:
@@ -547,6 +554,8 @@ Code to read:
 - Tail compaction mechanics: [`pagebtree/mmap.go#L408-L482`](../pagebtree/mmap.go#L408-L482)
 - Offline copy-compaction API: [`pagebtree/copy_compact.go#L23-L104`](../pagebtree/copy_compact.go#L23-L104)
 - Guarded replacement API: [`pagebtree/compact_replace_unix.go#L12-L70`](../pagebtree/compact_replace_unix.go#L12-L70)
+- Sparse-hole safety filter: [`pagebtree/mmap_punch_unix.go#L7-L80`](../pagebtree/mmap_punch_unix.go#L7-L80)
+- Linux hole-punch primitive: [`pagebtree/mmap_punch_linux.go#L10-L27`](../pagebtree/mmap_punch_linux.go#L10-L27)
 - Copy-compaction command: [`cmd/mmapcopycompact/main.go#L10-L25`](../cmd/mmapcopycompact/main.go#L10-L25)
 - Compact-replacement command: [`cmd/mmapcompact/main.go#L10-L25`](../cmd/mmapcompact/main.go#L10-L25)
 - Copy-compaction behavior tests: [`pagebtree/mmap_test.go#L1993-L2086`](../pagebtree/mmap_test.go#L1993-L2086)
@@ -886,7 +895,8 @@ Still research or incomplete compared with a production engine:
   `CommitSyncDetailed` provide explicit commit-then-sync helpers, but
   concurrency stress and filesystem-specific fsync guarantees remain research
   work.
-- No sparse-file hole punching.
+- Sparse-file hole punching is experimental and Linux-backed; portability,
+  physical-allocation measurement, and operational policy remain open.
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with true power-fail fault injection;
   sync publication, transaction sync publication, mmap growth, compact shrink,

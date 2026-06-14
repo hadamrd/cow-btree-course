@@ -161,7 +161,7 @@ Open research tracks for this repo:
 - model multi-database catalogs inside one mapped file
 - make deletion fully byte-balanced with production-style occupancy targets
 - add a crash-order harness for metadata, freelist, reclaim, growth, and shrink
-- investigate sparse-file hole punching for interior free extents without moving live pages
+- measure and harden sparse-file hole punching for interior free extents without moving live pages
 - compare exact structure-aware prefetch with Linux default readahead on large workloads
 - benchmark derived branch-routing cache hit rates against pure direct slotted-page search
 

@@ -3833,6 +3833,134 @@ func TestMmapDropCacheAdvisesBackingFileAfterSync(t *testing.T) {
 	}
 }
 
+func TestMmapPunchFreePagesCoalescesFreeListRanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	for i := 0; i < 80; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	for i := 0; i < 60; i++ {
+		tree.Delete(fmt.Sprintf("key-%02d", i))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after deletes: %v", err)
+	}
+	tree.Put("rotation-key", []byte("rotation-value"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after metadata rotation: %v", err)
+	}
+	tree.reclaimRetiredPages()
+	free := append([]PageID(nil), tree.free...)
+	if len(free) < 2 {
+		t.Fatalf("free pages after deletes = %v, want at least two pages to punch", free)
+	}
+	recoverable, err := tree.recoverableMmapPages()
+	if err != nil {
+		t.Fatalf("recoverableMmapPages: %v", err)
+	}
+	var wantPunched []PageID
+	for _, id := range free {
+		if !recoverable[id] {
+			wantPunched = append(wantPunched, id)
+		}
+	}
+	if len(wantPunched) == 0 {
+		t.Fatalf("free pages after metadata rotation are all still recoverable: free=%v recoverable=%v", free, recoverable)
+	}
+	wantRanges := coalescedPageRanges(wantPunched)
+
+	var gotRanges []pageRange
+	restore := stubPunchFileRange(func(file *os.File, startPage, endPage PageID) error {
+		gotRanges = append(gotRanges, pageRange{start: startPage, end: endPage})
+		return nil
+	})
+	defer restore()
+
+	stats, err := tree.PunchFreeMmapPages()
+	if err != nil {
+		t.Fatalf("PunchFreeMmapPages: %v", err)
+	}
+	if !slices.Equal(gotRanges, wantRanges) {
+		t.Fatalf("punched ranges = %v, want %v from free pages %v", gotRanges, wantRanges, free)
+	}
+	if stats.FreePages != len(free) || stats.PunchedPages != len(wantPunched) || stats.Ranges != len(wantRanges) {
+		t.Fatalf("punch stats = %+v, want free %d punched %d ranges %d", stats, len(free), len(wantPunched), len(wantRanges))
+	}
+	if stats.SkippedRecoverablePages != len(free)-len(wantPunched) {
+		t.Fatalf("SkippedRecoverablePages = %d, want %d", stats.SkippedRecoverablePages, len(free)-len(wantPunched))
+	}
+	if stats.PunchedBytes != int64(len(wantPunched)*PageSize) {
+		t.Fatalf("PunchedBytes = %d, want %d", stats.PunchedBytes, len(wantPunched)*PageSize)
+	}
+	if !slices.Equal(tree.free, free) {
+		t.Fatalf("free list after punch = %v, want preserved %v", tree.free, free)
+	}
+
+	for i := 80; i < 90; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after reuse: %v", err)
+	}
+	for i := 80; i < 90; i++ {
+		got, ok := tree.Get(fmt.Sprintf("key-%02d", i))
+		if !ok || string(got) != fmt.Sprintf("value-%02d", i) {
+			t.Fatalf("Get reused key-%02d = %q, %v", i, got, ok)
+		}
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after punched-page reuse: %v", err)
+	}
+}
+
+func TestMmapPunchFreePagesDoesNotPunchReaderPinnedRetiredPages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	snapshot := tree.Snapshot()
+	defer snapshot.Close()
+	for i := 0; i < 20; i++ {
+		tree.Delete(fmt.Sprintf("key-%02d", i))
+	}
+	if len(tree.retired) == 0 {
+		t.Fatalf("retired pages after deletes = 0, want reader-pinned retired pages")
+	}
+
+	var gotRanges []pageRange
+	restore := stubPunchFileRange(func(file *os.File, startPage, endPage PageID) error {
+		gotRanges = append(gotRanges, pageRange{start: startPage, end: endPage})
+		return nil
+	})
+	defer restore()
+
+	stats, err := tree.PunchFreeMmapPages()
+	if err != nil {
+		t.Fatalf("PunchFreeMmapPages with active reader: %v", err)
+	}
+	if len(gotRanges) != 0 {
+		t.Fatalf("punched ranges with active reader = %v, want none", gotRanges)
+	}
+	if stats.PunchedPages != 0 || stats.FreePages != 0 {
+		t.Fatalf("punch stats with active reader = %+v, want no free pages", stats)
+	}
+}
+
 func TestMmapWarmTreeAdvisesOnlyReachablePages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -7050,6 +7178,14 @@ func createSparseFile(t *testing.T, path string, size int64) {
 	}
 	if err := file.Close(); err != nil {
 		t.Fatalf("Close sparse file: %v", err)
+	}
+}
+
+func stubPunchFileRange(punch func(file *os.File, startPage, endPage PageID) error) func() {
+	original := punchFileRange
+	punchFileRange = punch
+	return func() {
+		punchFileRange = original
 	}
 }
 

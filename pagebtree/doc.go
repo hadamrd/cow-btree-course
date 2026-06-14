@@ -87,7 +87,11 @@
 // the data file and parent directory. Compact can trim unused mapped capacity
 // and a suffix of already-free page ids when no snapshot is active; if
 // compacted metadata publication fails, the temporary in-memory compaction state
-// is restored. Close returns
+// is restored. PunchFreeMmapPages is an experimental sparse-file maintenance
+// hook for supported platforms: it asks the filesystem to deallocate already
+// reusable mmap pages without changing file length or removing those page IDs
+// from the freelist, and it skips free pages that a still-valid fallback
+// metadata root could recover. Close returns
 // ErrActiveReaders for mmap-backed trees while snapshots are active, because
 // those snapshots still read slices backed by the mapping. If close-time Sync
 // fails but the mmap resources are still released, the handle is marked closed

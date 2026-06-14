@@ -23,6 +23,9 @@ What is credible today:
   file without overwriting existing destination artifacts, plus a guarded
   offline replacement path that rejects active readers and writers before
   renaming the compact file into place.
+- Experimental sparse-hole punching for already-free mmap page extents on
+  supported filesystems, with fallback-metadata and reader-watermark safety
+  filters.
 - A bounded derived branch-routing cache that does not duplicate raw page bytes.
 - Opt-in mmap trace events for sync phases and failures, recovery candidate
   accept/reject decisions, growth and compact remap success/failure geometry,
@@ -103,6 +106,7 @@ These are the files a serious reader should inspect before trusting any claim:
 | mmap sync publishes dirty data before checked metadata | [`pagebtree/mmap.go#L1317-L1344`](../pagebtree/mmap.go#L1317-L1344) |
 | mmap readers are tracked through a sidecar table | [`pagebtree/reader_table_unix.go#L42-L64`](../pagebtree/reader_table_unix.go#L42-L64), [`pagebtree/reader_table_unix.go#L74-L181`](../pagebtree/reader_table_unix.go#L74-L181) |
 | Branch-routing cache is derived metadata, not a raw page cache | [`pagebtree/page_cache.go#L7-L20`](../pagebtree/page_cache.go#L7-L20), [`pagebtree/page_cache.go#L52-L80`](../pagebtree/page_cache.go#L52-L80) |
+| Sparse-hole punching avoids live and fallback-recoverable pages | [`pagebtree/mmap_punch_unix.go#L7-L45`](../pagebtree/mmap_punch_unix.go#L7-L45), [`pagebtree/mmap_punch_unix.go#L47-L80`](../pagebtree/mmap_punch_unix.go#L47-L80), [`pagebtree/mmap_punch_linux.go#L10-L27`](../pagebtree/mmap_punch_linux.go#L10-L27) |
 | Process-exit crash probes exist, but are still not power-fail proof | [`pagebtree/mmap_process_crash_test.go#L20-L92`](../pagebtree/mmap_process_crash_test.go#L20-L92) |
 
 ## P0 Gaps
@@ -127,8 +131,8 @@ research frontier.
 | --- | --- | --- | --- |
 | Byte-balanced pages | Variable-size records make key-count balancing weak. | Started: `Stats` now reports reachable leaf/branch/overflow page counts plus total and per-kind used bytes, free bytes, capacity, and normalized repair-fill policy; `MDBKernelProfile` reports the active byte-policy flags and threshold; insertion and delete redistribution choose legal leaf/branch split points by encoded cell byte footprint, large inline values can spill to overflow pages, leaf/branch repair have configurable low-byte triggers at the minimum key count, and merge decisions require combined bytes to fit in one page. | Replace conservative thresholds with production-style occupancy targets and workload-tested heuristics. |
 | Prefix compression | Interior separators and leaf keys waste space without compression. | Keys are stored plainly in every cell. | Add an optional page-local prefix-compressed leaf format version. |
-| Online vacuum / page relocation | Tail compaction cannot reclaim interior holes to the filesystem. | Started: `Compact` trims only a contiguous free suffix and never moves live pages; `CopyCompactMmap` copies live records into a fresh compact mmap tree; `CompactMmapFile` takes the writer mutex, rejects active mmap readers via exclusive source-file lock, resets the reader sidecar, and renames the compact file into place. | Attempt online page relocation or sparse-hole experiments. |
-| Sparse-file punching | Reusable interior pages remain allocated by the filesystem. | Interior free pages stay inside the file. | Experiment with hole punching for page-size-aligned free extents while preserving mmap semantics. |
+| Online vacuum / page relocation | Tail compaction cannot reclaim interior holes to the filesystem. | Started: `Compact` trims only a contiguous free suffix and never moves live pages; `CopyCompactMmap` copies live records into a fresh compact mmap tree; `CompactMmapFile` takes the writer mutex, rejects active mmap readers via exclusive source-file lock, resets the reader sidecar, and renames the compact file into place; `PunchFreeMmapPages` can release physical blocks behind safe free extents without relocating live pages. | Attempt true online page relocation and measure when sparse punching is useful. |
+| Sparse-file punching | Reusable interior pages should not always keep physical blocks allocated. | Started: `PunchFreeMmapPages` coalesces safe free page IDs into page-aligned ranges, skips pages still reachable from either valid metadata slot, respects reader-pinned retirement by reclaiming only safe retired pages first, preserves the freelist and file length, and uses Linux `fallocate(PUNCH_HOLE|KEEP_SIZE)` when available. | Add physical allocation observability, filesystem matrix notes, trace events, and platform-specific implementations beyond Linux. |
 | Multi-process robustness | Reader tables need stronger owner identity than PID alone. | Slots use PID, revision, and token, with stale PID cleanup and fail-closed validation. | Include boot/session identity or start time to reduce PID reuse ambiguity. |
 | Observability | A serious engine should explain stalls, reclaim pressure, and recovery decisions. | Started: `MmapOptions.TraceHook` emits structured value-free `MmapTraceEvent` records for sync phases, timed per-range dirty data-page flushes, sync failures, recovery candidate accept/reject decisions, growth and compact remap success/failure geometry, freelist/reclaim metadata rollback page spans, stale reader cleanup counts, and obsolete metadata-page reclaim decisions. `MmapTraceJSONLExporter`, `MmapTraceAsyncJSONLExporter`, and `cmd/mmaptrace-demo` provide workload JSONL export paths for experiments, with bounded async drop accounting and docs that call out the redaction boundary if applications add their own key/value fields. `Stats` exposes counters, `Stats.SyncedRevision` distinguishes logical versus successfully synced revision, `AuditReport` exposes validation traversal evidence and value-free page summaries, `cmd/mmapinspect` prints read-only audit JSON including numeric and named key-order/comparator identity plus optional reader-table, cache-residency, page-summary, bounded key-sample, and JSONL trace-correlation sections, and `MmapCacheStats` exposes kernel residency. | Add workload dashboards, trace timelines, or external observability adapters. |
 | Benchmarks | Without benchmarks, optimization claims are weak. | Started: `pagebtree/bench_test.go` covers page and mmap point `Get`, cursor seek/next, forward and reverse bounded cursor scans, bounded range scans, sequential insert/delete, mmap sync-after-put, mmap delete+sync, and mmap reopen validation. `cmd/benchsummary` converts raw Go benchmark output into a stable Markdown table for local baseline notes, and `docs/11-benchmarking-and-baselines.md` documents repeat-count, `benchmem`, raw-output, and summary workflow. | Add larger workload profiles, benchstat comparison history, and CI/manual performance gate guidance. |
@@ -225,8 +229,9 @@ The new copy-compaction path is deliberately offline:
 
 This closes the first useful step toward vacuuming: interior free pages can be
 removed from a replacement file and that file can now be swapped in while
-refusing active readers/writers. It does not yet solve online relocation or
-sparse-hole punching inside the active database.
+refusing active readers/writers. It does not yet solve online relocation inside
+the active database. Sparse-hole punching is now a separate experiment on free
+extents; it preserves page IDs and file length instead of rebuilding the tree.
 
 Code to read:
 
