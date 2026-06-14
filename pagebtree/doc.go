@@ -10,6 +10,9 @@
 // owns the serialized writer path, persists reclaim records, has a reader
 // table, relies on the kernel page cache for raw bytes, and only caches derived
 // branch-routing metadata.
+// It also exposes byte-balance policy flags: byte-aware split points, byte-aware
+// delete redistribution, byte-fit merge checks, and the normalized repair-fill
+// threshold used when minimum-key pages are sparsely occupied by bytes.
 // The profile also reports that derived cache's capacity and live counters, so
 // experiments can distinguish kernel page-cache behavior from Go-side routing
 // reuse.

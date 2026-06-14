@@ -579,7 +579,8 @@ Code to read:
 - Linked-leaf range prefetch calls: [`pagebtree/search.go#L97-L180`](../pagebtree/search.go#L97-L180)
 - Derived branch-routing cache: [`pagebtree/page_cache.go#L5-L33`](../pagebtree/page_cache.go#L5-L33)
 - Cache lookup by page checksum: [`pagebtree/page_cache.go#L52-L80`](../pagebtree/page_cache.go#L52-L80)
-- Profile flags for kernel cache vs heap cache: [`pagebtree/kernel_profile.go#L90-L99`](../pagebtree/kernel_profile.go#L90-L99)
+- Profile byte-policy flags: [`pagebtree/kernel_profile.go#L29-L36`](../pagebtree/kernel_profile.go#L29-L36)
+- Profile flags for kernel cache vs heap cache: [`pagebtree/kernel_profile.go#L104-L113`](../pagebtree/kernel_profile.go#L104-L113)
 
 ## Module 15: Observability Without Hiding the Engine
 
@@ -589,7 +590,9 @@ Storage-engine observability has several layers:
   quantities. `Stats` includes reachable leaf/branch/overflow page counts,
   total reachable page capacity/free bytes, and leaf/branch/overflow used-byte
   buckets.
-- Profiles: `MDBKernelProfile` tells you which design mechanics are active.
+- Profiles: `MDBKernelProfile` tells you which design mechanics are active,
+  including mmap/kernel-cache mechanics and the byte-balance policy used by
+  split, delete redistribution, merge, and repair decisions.
 - Trace events: `MmapOptions.TraceHook` tells you which path the engine took.
 
 ```mermaid

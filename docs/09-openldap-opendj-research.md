@@ -76,6 +76,9 @@ fmt.Println(profile.DualCheckedMetaPages)    // true
 fmt.Println(profile.ReaderTable)             // true
 fmt.Println(profile.KernelPageCache)         // true
 fmt.Println(profile.RawHeapPageCache)        // false
+fmt.Println(profile.ByteAwareSplitPoints)    // true
+fmt.Println(profile.ByteFitDeleteMerges)     // true
+fmt.Println(profile.MinRepairPageFillPercent)
 fmt.Println(profile.DerivedBranchRoutingCache)
 fmt.Println(profile.DerivedBranchRoutingCacheCapacity)
 fmt.Println(profile.DerivedBranchRoutingCacheHits)

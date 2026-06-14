@@ -30,6 +30,9 @@ What is credible today:
   metadata-page reclaim decisions.
 - Snapshot-backed cursors for incremental ordered reads.
 - A persisted mmap key-order identifier for the current bytewise page ordering.
+- Runtime profile flags for the active byte-balance policy: byte-aware split
+  points, byte-aware delete redistribution, byte-fit merge checks, and the
+  normalized low-fill repair threshold.
 - Reproducible Go microbenchmarks for page and mmap get, seek/next, range,
   insert, delete, reopen, and sync paths.
 
@@ -53,7 +56,7 @@ research frontier.
 
 | Gap | Why it matters | Current state | Next useful slice |
 | --- | --- | --- | --- |
-| Byte-balanced pages | Variable-size records make key-count balancing weak. | Started: `Stats` now reports reachable leaf/branch/overflow page counts plus total and per-kind used bytes, free bytes, capacity, and normalized repair-fill policy; insertion and delete redistribution choose legal leaf/branch split points by encoded cell byte footprint, large inline values can spill to overflow pages, leaf/branch repair have configurable low-byte triggers at the minimum key count, and merge decisions require combined bytes to fit in one page. | Replace conservative thresholds with production-style occupancy targets and workload-tested heuristics. |
+| Byte-balanced pages | Variable-size records make key-count balancing weak. | Started: `Stats` now reports reachable leaf/branch/overflow page counts plus total and per-kind used bytes, free bytes, capacity, and normalized repair-fill policy; `MDBKernelProfile` reports the active byte-policy flags and threshold; insertion and delete redistribution choose legal leaf/branch split points by encoded cell byte footprint, large inline values can spill to overflow pages, leaf/branch repair have configurable low-byte triggers at the minimum key count, and merge decisions require combined bytes to fit in one page. | Replace conservative thresholds with production-style occupancy targets and workload-tested heuristics. |
 | Prefix compression | Interior separators and leaf keys waste space without compression. | Keys are stored plainly in every cell. | Add an optional page-local prefix-compressed leaf format version. |
 | Online vacuum / page relocation | Tail compaction cannot reclaim interior holes to the filesystem. | Started: `Compact` trims only a contiguous free suffix and never moves live pages; `CopyCompactMmap` copies live records into a fresh compact mmap tree; `CompactMmapFile` takes the writer mutex, rejects active mmap readers via exclusive source-file lock, resets the reader sidecar, and renames the compact file into place. | Attempt online page relocation or sparse-hole experiments. |
 | Sparse-file punching | Reusable interior pages remain allocated by the filesystem. | Interior free pages stay inside the file. | Experiment with hole punching for page-size-aligned free extents while preserving mmap semantics. |

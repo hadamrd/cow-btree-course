@@ -136,9 +136,10 @@ func TestMDBKernelProfileDescribesOpenLDAPStyleMmapCore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
 	tree, err := OpenMmap(path, MmapOptions{
-		Degree:            2,
-		MaxPages:          64,
-		PageCacheCapacity: 8,
+		Degree:                   2,
+		MaxPages:                 64,
+		PageCacheCapacity:        8,
+		MinRepairPageFillPercent: 40,
 	})
 	if err != nil {
 		t.Fatalf("OpenMmap create: %v", err)
@@ -176,6 +177,12 @@ func TestMDBKernelProfileDescribesOpenLDAPStyleMmapCore(t *testing.T) {
 	}
 	if !profile.SlottedPages || !profile.CopyOnWrite || !profile.BPlusTreePages {
 		t.Fatalf("page kernel flags = slotted:%v cow:%v bplus:%v; want all true", profile.SlottedPages, profile.CopyOnWrite, profile.BPlusTreePages)
+	}
+	if !profile.ByteAwareSplitPoints || !profile.ByteAwareDeleteRedistribution || !profile.ByteFitDeleteMerges || !profile.ConfigurableRepairFill {
+		t.Fatalf("byte policy flags = splits:%v redistribution:%v merges:%v repair:%v; want all true", profile.ByteAwareSplitPoints, profile.ByteAwareDeleteRedistribution, profile.ByteFitDeleteMerges, profile.ConfigurableRepairFill)
+	}
+	if profile.MinRepairPageFillPercent != 40 {
+		t.Fatalf("MinRepairPageFillPercent = %d, want 40", profile.MinRepairPageFillPercent)
 	}
 	if !profile.DualCheckedMetaPages || !profile.SerializedWriter || !profile.ReaderTable {
 		t.Fatalf("mmap kernel flags = meta:%v writer:%v readers:%v; want all true", profile.DualCheckedMetaPages, profile.SerializedWriter, profile.ReaderTable)

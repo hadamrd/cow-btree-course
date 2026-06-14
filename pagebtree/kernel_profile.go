@@ -26,17 +26,22 @@ type MDBKernelProfile struct {
 	ActiveReaders int
 	DirtyPages    int
 
-	SlottedPages              bool
-	BPlusTreePages            bool
-	CopyOnWrite               bool
-	DualCheckedMetaPages      bool
-	SerializedWriter          bool
-	ReaderTable               bool
-	ReaderPinnedRecycling     bool
-	PersistedReclaimRecords   bool
-	KernelPageCache           bool
-	RawHeapPageCache          bool
-	DerivedBranchRoutingCache bool
+	SlottedPages                  bool
+	BPlusTreePages                bool
+	CopyOnWrite                   bool
+	ByteAwareSplitPoints          bool
+	ByteAwareDeleteRedistribution bool
+	ByteFitDeleteMerges           bool
+	ConfigurableRepairFill        bool
+	MinRepairPageFillPercent      int
+	DualCheckedMetaPages          bool
+	SerializedWriter              bool
+	ReaderTable                   bool
+	ReaderPinnedRecycling         bool
+	PersistedReclaimRecords       bool
+	KernelPageCache               bool
+	RawHeapPageCache              bool
+	DerivedBranchRoutingCache     bool
 
 	DerivedBranchRoutingCacheCapacity      int
 	DerivedBranchRoutingCacheEntries       int
@@ -53,15 +58,20 @@ type MDBKernelProfile struct {
 // and kernel page-cache pieces that make the OpenLDAP-style kernel interesting.
 func (t *Tree) MDBKernelProfile() MDBKernelProfile {
 	profile := MDBKernelProfile{
-		Name:                  "openldap-mdb-inspired",
-		Storage:               "memory",
-		PageSize:              PageSize,
-		KeyOrder:              KeyOrderBytewise,
-		SlottedPages:          true,
-		BPlusTreePages:        true,
-		CopyOnWrite:           true,
-		ReaderPinnedRecycling: true,
-		RawHeapPageCache:      false,
+		Name:                          "openldap-mdb-inspired",
+		Storage:                       "memory",
+		PageSize:                      PageSize,
+		KeyOrder:                      KeyOrderBytewise,
+		SlottedPages:                  true,
+		BPlusTreePages:                true,
+		CopyOnWrite:                   true,
+		ByteAwareSplitPoints:          true,
+		ByteAwareDeleteRedistribution: true,
+		ByteFitDeleteMerges:           true,
+		ConfigurableRepairFill:        true,
+		MinRepairPageFillPercent:      DefaultMinRepairPageFillPercent,
+		ReaderPinnedRecycling:         true,
+		RawHeapPageCache:              false,
 	}
 	if t == nil {
 		return profile
@@ -74,6 +84,7 @@ func (t *Tree) MDBKernelProfile() MDBKernelProfile {
 	profile.Revision = t.revision
 	profile.Keys = t.length
 	profile.Pages = countProfilePages(t)
+	profile.MinRepairPageFillPercent = t.minRepairPageFillPercent
 	profile.ReusablePages = len(t.free)
 	profile.RetiredPages = len(t.retired)
 	profile.ActiveReaders = t.activeReaderCount()

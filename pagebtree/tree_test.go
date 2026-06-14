@@ -35,7 +35,7 @@ func TestPutAndGetKeysFromPageBackedTree(t *testing.T) {
 }
 
 func TestMDBKernelProfileDescribesMemoryCoreWithoutMmapMechanics(t *testing.T) {
-	tree := NewWithOptions(2, Options{PageCacheCapacity: 4})
+	tree := NewWithOptions(2, Options{PageCacheCapacity: 4, MinRepairPageFillPercent: 40})
 	for i := 0; i < 16; i++ {
 		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
 	}
@@ -55,6 +55,12 @@ func TestMDBKernelProfileDescribesMemoryCoreWithoutMmapMechanics(t *testing.T) {
 	}
 	if !profile.SlottedPages || !profile.BPlusTreePages || !profile.CopyOnWrite {
 		t.Fatalf("page flags = slotted:%v bplus:%v cow:%v; want all true", profile.SlottedPages, profile.BPlusTreePages, profile.CopyOnWrite)
+	}
+	if !profile.ByteAwareSplitPoints || !profile.ByteAwareDeleteRedistribution || !profile.ByteFitDeleteMerges || !profile.ConfigurableRepairFill {
+		t.Fatalf("byte policy flags = splits:%v redistribution:%v merges:%v repair:%v; want all true", profile.ByteAwareSplitPoints, profile.ByteAwareDeleteRedistribution, profile.ByteFitDeleteMerges, profile.ConfigurableRepairFill)
+	}
+	if profile.MinRepairPageFillPercent != 40 {
+		t.Fatalf("MinRepairPageFillPercent = %d, want 40", profile.MinRepairPageFillPercent)
 	}
 	if profile.DualCheckedMetaPages || profile.SerializedWriter || profile.ReaderTable {
 		t.Fatalf("mmap flags = meta:%v writer:%v readers:%v; want all false for memory tree", profile.DualCheckedMetaPages, profile.SerializedWriter, profile.ReaderTable)
