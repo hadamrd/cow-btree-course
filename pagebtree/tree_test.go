@@ -299,6 +299,43 @@ func TestDeleteRedistributesUnderfullLeafWhenMergeCannotFit(t *testing.T) {
 	snapshot.Close()
 }
 
+func TestDeleteLeafRedistributionBalancesEncodedBytes(t *testing.T) {
+	tree := New(3)
+	leftID := PageID(1)
+	childID := PageID(2)
+	tree.nextPage = 3
+	left := tree.newPage(leftID, flagLeaf)
+	child := tree.newPage(childID, flagLeaf)
+	tree.pages[leftID] = left
+	tree.pages[childID] = child
+	large := bytes.Repeat([]byte("l"), 1500)
+	small := []byte("s")
+	tree.writeLeafEntries(left, []leafEntry{
+		{key: "key-00", value: large},
+		{key: "key-01", value: large},
+		{key: "key-02", value: small},
+		{key: "key-03", value: small},
+		{key: "key-04", value: small},
+	})
+	tree.writeLeafEntries(child, []leafEntry{{key: "key-05", value: small}})
+
+	children := tree.mergeUnderfullLeaf([]PageID{leftID, childID}, 1)
+	if len(children) != 2 {
+		t.Fatalf("children after redistribution = %v, want two leaves", children)
+	}
+	redistributedLeft := tree.pages[children[0]]
+	redistributedChild := tree.pages[children[1]]
+	if got, want := int(redistributedLeft.slotCount()), 2; got != want {
+		t.Fatalf("left redistributed slot count = %d, want %d for byte-balanced split", got, want)
+	}
+	if got, want := int(redistributedChild.slotCount()), 4; got != want {
+		t.Fatalf("right redistributed slot count = %d, want %d for byte-balanced split", got, want)
+	}
+	if redistributedLeft.slottedBytesUsed() < redistributedChild.slottedBytesUsed() {
+		t.Fatalf("left redistributed bytes = %d, right = %d; want large records kept on heavier left side", redistributedLeft.slottedBytesUsed(), redistributedChild.slottedBytesUsed())
+	}
+}
+
 func TestDeleteMergesUnderfullBranchAndCollapsesRoot(t *testing.T) {
 	tree := New(3)
 	seedBranchMergeAfterDeleteTree(tree)

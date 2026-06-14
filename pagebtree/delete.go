@@ -8,8 +8,9 @@ import "slices"
 // search path before changing page bytes. It merges or redistributes underfull
 // leaf siblings, borrows before descending into minimum-fill branches when a
 // sibling can lend, merges or redistributes underfull branch siblings, then
-// rebuilds branch separators and collapses a one-child root. It deliberately
-// stops short of byte-balanced redistribution.
+// rebuilds branch separators and collapses a one-child root. Leaf
+// redistribution uses encoded cell byte footprints; branch redistribution is
+// still key-count based.
 func (t *Tree) Delete(key string) ([]byte, bool) {
 	old, deleted, changed := t.deleteStaged(key)
 	if changed {
@@ -158,7 +159,7 @@ func (t *Tree) mergeUnderfullLeaf(children []PageID, index int) []PageID {
 			leftID := t.copyPage(children[index-1])
 			left = t.pages[leftID]
 			children[index-1] = leftID
-			split := len(merged) / 2
+			split := leafSplitIndex(merged, t.degree)
 			t.writeLeafEntries(left, merged[:split])
 			left.setNextLeaf(children[index])
 			t.writeLeafEntries(child, merged[split:])
@@ -183,7 +184,7 @@ func (t *Tree) mergeUnderfullLeaf(children []PageID, index int) []PageID {
 			rightID := t.copyPage(children[index+1])
 			right = t.pages[rightID]
 			children[index+1] = rightID
-			split := len(merged) / 2
+			split := leafSplitIndex(merged, t.degree)
 			t.writeLeafEntries(child, merged[:split])
 			child.setNextLeaf(rightID)
 			t.writeLeafEntries(right, merged[split:])

@@ -108,7 +108,7 @@ sequenceDiagram
     Delete->>Meta: publish new root page id
 ```
 
-The implementation is intentionally conservative. Insertion chooses leaf and branch split points by encoded cell bytes, but deletion still merges an underfull leaf with a leaf sibling when the combined records fit in one page, or redistributes records by key count when a sibling can lend but the pair cannot fit in one page. It applies the same key-count idea to branch pages: before descending into a minimum-fill branch it can borrow one child from a sibling, then it merges underfull branch siblings when their combined child list fits in one branch page, or redistributes the combined child list when it does not. `Tree.Check` and mmap recovery enforce the result by rejecting non-root leaves or branches below `degree-1` keys. That demonstrates the important deletion shape change while keeping the code readable. It still does not implement byte-balanced sibling redistribution.
+The implementation is intentionally conservative. Insertion chooses leaf and branch split points by encoded cell bytes. Deletion still merges an underfull leaf with a leaf sibling when the combined records fit in one page; when the pair cannot fit, it redistributes leaf records with the same byte-aware split policy. Branch deletion still applies a key-count idea: before descending into a minimum-fill branch it can borrow one child from a sibling, then it merges underfull branch siblings when their combined child list fits in one branch page, or redistributes the combined child list when it does not. `Tree.Check` and mmap recovery enforce the result by rejecting non-root leaves or branches below `degree-1` keys. That demonstrates the important deletion shape change while keeping the code readable. It still does not implement byte-balanced branch redistribution.
 
 ## Walking Branch Pages
 
@@ -198,7 +198,7 @@ The page package models page identity, root publication, and slotted cell storag
 - The implementation rewrites a copied page from decoded entries during insertion and deletion; it does not do in-place cell compaction.
 - `Get`, branch range traversal, and bounded leaf scans search slots directly, but insertion still decodes page contents before rewriting the copied page.
 - Current-tree `Range`, `RangeFrom`, and `RangeBetween` use next-leaf links only when no active reader can make them stale; snapshot ranges still use a recursive tree walk.
-- Insertion chooses byte-aware leaf and branch split points and byte-full leaf rewrites spill inline cells to overflow pages; delete can merge or key-redistribute underfull leaf and branch siblings, but the tree still does not do byte-balanced redistribution between siblings.
+- Insertion chooses byte-aware leaf and branch split points, leaf delete redistribution is byte-aware, and byte-full leaf rewrites spill inline cells to overflow pages; branch delete redistribution remains key-count based.
 - `Delete` removes records, retires overflow pages, borrows before descending into minimum-fill branches, merges or redistributes underfull leaves and branches, removes empty children, and collapses a one-child root.
 - Branch pages contain separator keys and child page ids; values live in leaves.
 - Disk persistence is introduced in the mmap chapter.

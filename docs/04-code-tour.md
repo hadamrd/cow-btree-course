@@ -76,9 +76,10 @@ If you add new write operations, keep that discipline. Any helper that mutates a
 `pagebtree/stats.go` goes further because page engines care about bytes, not
 only keys. `Stats` reports reachable leaf, branch, and overflow page counts,
 total reachable page capacity/free bytes, and used-byte buckets for leaves,
-branches, and overflow pages. Leaf insertion now uses that same concern when
-choosing a split point, while delete redistribution remains intentionally
-key-count based.
+branches, and overflow pages. Leaf and branch insertion now use that same
+concern when choosing split points, and leaf delete redistribution reuses the
+leaf split policy. Branch delete redistribution remains intentionally key-count
+based.
 
 ## Page-backed Tree
 

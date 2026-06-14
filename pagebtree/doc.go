@@ -126,6 +126,7 @@
 // count, and exact pages covered by those hints, plus mmap warm-up hint-call
 // and page counts. Stats also reports reachable leaf, branch, and overflow page
 // counts plus used/free/capacity byte counts. Insertion uses encoded cell byte
-// footprints to choose leaf and branch split points, while deletion
-// redistribution remains key-count based.
+// footprints to choose leaf and branch split points, and leaf delete
+// redistribution uses the same split policy. Branch delete redistribution
+// remains key-count based.
 package pagebtree

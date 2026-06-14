@@ -213,7 +213,8 @@ flowchart TD
 The code still favors clarity over byte-perfect production balancing. It has a
 degree-based maximum key count, uses byte-aware split points for leaf and branch
 overflow, and has additional overflow handling for large values that do not fit
-well inside a leaf page. Delete redistribution is still mostly key-count based.
+well inside a leaf page. Leaf delete redistribution reuses the same byte-aware
+split policy; branch delete redistribution is still key-count based.
 
 Code to read:
 
@@ -245,8 +246,9 @@ flowchart TD
 ```
 
 This is not a full production delete implementation. It has real merge and
-redistribution behavior, but it intentionally stops short of byte-balanced page
-packing across variable-size records.
+redistribution behavior. Leaf redistribution is byte-aware, but branch
+redistribution still stops short of byte-balanced page packing across
+variable-size records.
 
 Code to read:
 
@@ -762,8 +764,8 @@ Still research or incomplete compared with a production engine:
   large-reclaim spill have process-exit probes.
 - No pluggable comparator or locale/collation layer; byte-key APIs use the
   persisted bytewise page order.
-- Insertion has byte-aware leaf and branch split-point selection, but deletion
-  still has no byte-balanced redistribution across variable-size records.
+- Insertion and leaf delete redistribution use byte-aware split-point selection,
+  but branch delete redistribution is still key-count based.
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.
 - No benchstat baseline history or CI performance gate yet.
