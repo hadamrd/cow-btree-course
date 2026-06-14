@@ -358,6 +358,13 @@ then reopens the same file from the parent process. A crash before dirty data
 sync recovers the old root. A crash after metadata bytes are written recovers
 the new root.
 
+The same publication boundary now covers metadata format upgrades.
+`TestMmapLegacyMetadataUpgradeProcessCrashMatrixClassifiesRecoveryRoot` opens a
+real version-1 metadata fixture in a child process, kills that child during the
+upgrade `Sync`, and reopens from the parent. A crash before dirty data sync
+keeps the old v1 metadata and leaves the upgrade retryable; after metadata bytes
+are written, recovery accepts the v2 metadata in the alternate slot.
+
 `WriteBatch.CommitSync` and `ReadWriteTx.CommitSync` are the ergonomic durable
 commit helpers: they commit, then call `Sync` only when the commit changed the
 tree. Their `CommitSyncDetailed` variants return the same per-operation
@@ -950,8 +957,8 @@ Serious pieces in this repository:
   accepted image to pass `Tree.Check`.
 - Process-exit crash probes that kill a child writer at sync-publication,
   transaction-sync-publication, mmap-growth, compact-shrink, large-freelist
-  spill, and large-reclaim spill fault points, then reopen the same database
-  from a fresh process.
+  spill, large-reclaim spill, and legacy metadata-upgrade fault points, then
+  reopen the same database from a fresh process.
 - Reproducible microbenchmarks for page and mmap get, seek/next, forward and
   reverse bounded cursor, bounded range, insert, delete, reopen, and sync paths.
   Run a short local pass with

@@ -238,6 +238,47 @@ func TestMmapLargeReclaimProcessCrashMatrixClassifiesReaderPinnedRetiredPages(t 
 	}
 }
 
+func TestMmapLegacyMetadataUpgradeProcessCrashMatrixClassifiesRecoveryRoot(t *testing.T) {
+	if os.Getenv(mmapCrashChildEnv) == "1" {
+		runMmapLegacyUpgradeProcessCrashChild(t)
+		return
+	}
+
+	tests := []struct {
+		name        string
+		fault       mmapFaultPoint
+		wantUpgrade bool
+	}{
+		{
+			name:        "before data sync",
+			fault:       mmapFaultBeforeDataSync,
+			wantUpgrade: false,
+		},
+		{
+			name:        "after metadata write",
+			fault:       mmapFaultAfterMetaWrite,
+			wantUpgrade: true,
+		},
+		{
+			name:        "before metadata sync",
+			fault:       mmapFaultBeforeMetaSync,
+			wantUpgrade: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := copyMmapFixture(t, "testdata/mmap-v1-inline-freelist.db")
+			_, legacy := newestMetaPage(t, path)
+			if legacy.version != 1 {
+				t.Fatalf("legacy fixture metadata version = %d, want 1", legacy.version)
+			}
+			runMmapLegacyUpgradeProcessCrash(t, path, tt.fault)
+			assertMmapLegacyUpgradeProcessCrashRecovered(t, path, tt.fault, legacy, tt.wantUpgrade)
+		})
+	}
+}
+
 func TestMmapReadOnlyChildProcessPinsRecyclingUntilRelease(t *testing.T) {
 	if os.Getenv(mmapReaderHoldChildEnv) == "1" {
 		runMmapReadOnlyHoldChildProcess(t)
@@ -429,6 +470,12 @@ func runMmapLargeReclaimProcessCrash(t *testing.T, path string, fault mmapFaultP
 
 	runMmapProcessCrashChild(t, path, fault, "^TestMmapLargeReclaimProcessCrashMatrixClassifiesReaderPinnedRetiredPages$", "large-reclaim")
 	return reader
+}
+
+func runMmapLegacyUpgradeProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
+	t.Helper()
+
+	runMmapProcessCrashChild(t, path, fault, "^TestMmapLegacyMetadataUpgradeProcessCrashMatrixClassifiesRecoveryRoot$", "legacy-upgrade")
 }
 
 func runMmapProcessCrashChild(t *testing.T, path string, fault mmapFaultPoint, testPattern string, label string) {
@@ -807,6 +854,35 @@ func runMmapLargeReclaimProcessCrashChild(t *testing.T) {
 	t.Fatalf("large-reclaim child Sync completed without hitting fault %s", fault)
 }
 
+func runMmapLegacyUpgradeProcessCrashChild(t *testing.T) {
+	t.Helper()
+
+	path := os.Getenv(mmapCrashPathEnv)
+	fault := mmapFaultPoint(os.Getenv(mmapCrashFaultEnv))
+	if path == "" || fault == "" {
+		t.Fatalf("missing legacy-upgrade crash child env path=%q fault=%q", path, fault)
+	}
+	tree, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap legacy-upgrade child open: %v", err)
+	}
+	defer tree.Close()
+	if !tree.metadataUpgradePending {
+		t.Fatalf("legacy-upgrade child metadataUpgradePending = false, want legacy upgrade pending")
+	}
+	tree.arena.markDirtyPage(tree.root)
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			os.Exit(mmapCrashChildExitCode)
+		}
+		return nil
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("legacy-upgrade child Sync before process crash: %v", err)
+	}
+	t.Fatalf("legacy-upgrade child Sync completed without hitting fault %s", fault)
+}
+
 func assertMmapProcessCrashRecoveryRoot(t *testing.T, path string, fault mmapFaultPoint, wantNewRoot bool) {
 	t.Helper()
 
@@ -931,5 +1007,55 @@ func assertMmapLargeReclaimProcessCrashRecovered(t *testing.T, path string, faul
 	}
 	if afterWrite.RetiredPages < retiredCount {
 		t.Fatalf("RetiredPages after write with live reader after large-reclaim process crash at %s = %d, want at least %d", fault, afterWrite.RetiredPages, retiredCount)
+	}
+}
+
+func assertMmapLegacyUpgradeProcessCrashRecovered(t *testing.T, path string, fault mmapFaultPoint, legacy metaRecord, wantUpgrade bool) {
+	t.Helper()
+
+	upgradeIndex := int((legacy.revision + 1) % metaPageCount)
+	upgraded, upgradedOK := metaPageRecordAt(t, path, upgradeIndex)
+	if wantUpgrade {
+		if !upgradedOK {
+			t.Fatalf("upgrade metadata slot %d missing after process crash at %s", upgradeIndex, fault)
+		}
+		if upgraded.version != 2 || upgraded.revision != legacy.revision+1 {
+			t.Fatalf("upgrade metadata after process crash at %s = version %d revision %d, want version 2 revision %d", fault, upgraded.version, upgraded.revision, legacy.revision+1)
+		}
+		if upgraded.freeCount != legacy.freeCount {
+			t.Fatalf("upgrade metadata free count after process crash at %s = %d, want %d", fault, upgraded.freeCount, legacy.freeCount)
+		}
+	} else if upgradedOK && upgraded.revision == legacy.revision+1 {
+		t.Fatalf("process crash at %s left checksum-valid upgraded metadata in slot %d: %+v", fault, upgradeIndex, upgraded)
+	}
+
+	recovered, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap after legacy-upgrade process crash at %s: %v", fault, err)
+	}
+	defer recovered.Close()
+	if err := recovered.Check(); err != nil {
+		t.Fatalf("Check after legacy-upgrade process crash at %s: %v", fault, err)
+	}
+	if got, ok := recovered.Get("key-19"); !ok || string(got) != "value-19" {
+		t.Fatalf("Get(key-19) after legacy-upgrade process crash at %s = %q, %v; want value-19, true", fault, got, ok)
+	}
+	if got := recovered.Stats().FreePages; got != int(legacy.freeCount) {
+		t.Fatalf("FreePages after legacy-upgrade process crash at %s = %d, want %d", fault, got, legacy.freeCount)
+	}
+	if wantUpgrade {
+		if recovered.metadataUpgradePending {
+			t.Fatalf("metadataUpgradePending after recovered upgraded metadata at %s = true, want false", fault)
+		}
+		if got := recovered.Revision(); got != legacy.revision+1 {
+			t.Fatalf("Revision after recovered upgraded metadata at %s = %d, want %d", fault, got, legacy.revision+1)
+		}
+		return
+	}
+	if !recovered.metadataUpgradePending {
+		t.Fatalf("metadataUpgradePending after old metadata recovery at %s = false, want retryable upgrade pending", fault)
+	}
+	if got := recovered.Revision(); got != legacy.revision {
+		t.Fatalf("Revision after old metadata recovery at %s = %d, want %d", fault, got, legacy.revision)
 	}
 }
