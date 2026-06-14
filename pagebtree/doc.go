@@ -76,8 +76,9 @@
 // before returning the error. MmapOptions.TraceHook can observe sync phases,
 // timed dirty data-page sync ranges, sync failures, recovery candidate
 // rejection/acceptance, growth and compact remap success/failure geometry,
-// freelist/reclaim metadata rollback, stale reader cleanup, and obsolete
-// metadata-page reclaim decisions as structured events.
+// sparse-hole punch begin/range/end/failure decisions, freelist/reclaim
+// metadata rollback, stale reader cleanup, and obsolete metadata-page reclaim
+// decisions as structured events.
 // MmapTraceJSONLExporter adapts those events to newline-delimited JSON for
 // experiments. MmapTraceAsyncJSONLExporter adds a bounded background queue when
 // an experiment must keep trace I/O off the storage hook and can tolerate
@@ -91,7 +92,8 @@
 // hook for supported platforms: it asks the filesystem to deallocate already
 // reusable mmap pages without changing file length or removing those page IDs
 // from the freelist, and it skips free pages that a still-valid fallback
-// metadata root could recover. Close returns
+// metadata root could recover; trace events expose attempted ranges, aggregate
+// counts, skipped fallback-recoverable pages, and failure reasons. Close returns
 // ErrActiveReaders for mmap-backed trees while snapshots are active, because
 // those snapshots still read slices backed by the mapping. If close-time Sync
 // fails but the mmap resources are still released, the handle is marked closed

@@ -3968,6 +3968,133 @@ func TestMmapPunchFreePagesDoesNotPunchReaderPinnedRetiredPages(t *testing.T) {
 	}
 }
 
+func TestMmapTraceHookReportsPunchFreePages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	for i := 0; i < 80; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	for i := 0; i < 60; i++ {
+		tree.Delete(fmt.Sprintf("key-%02d", i))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after deletes: %v", err)
+	}
+	tree.Put("rotation-key", []byte("rotation-value"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after metadata rotation: %v", err)
+	}
+	tree.reclaimRetiredPages()
+	free := append([]PageID(nil), tree.free...)
+	recoverable, err := tree.recoverableMmapPages()
+	if err != nil {
+		t.Fatalf("recoverableMmapPages: %v", err)
+	}
+	var wantPunched []PageID
+	for _, id := range free {
+		if !recoverable[id] {
+			wantPunched = append(wantPunched, id)
+		}
+	}
+	wantRanges := coalescedPageRanges(wantPunched)
+	if len(wantRanges) == 0 {
+		t.Fatalf("want at least one punched range from free=%v recoverable=%v", free, recoverable)
+	}
+
+	var events []MmapTraceEvent
+	tree.traceHook = func(event MmapTraceEvent) {
+		events = append(events, event)
+	}
+	restore := stubPunchFileRange(func(file *os.File, startPage, endPage PageID) error {
+		return nil
+	})
+	defer restore()
+
+	stats, err := tree.PunchFreeMmapPages()
+	if err != nil {
+		t.Fatalf("PunchFreeMmapPages: %v", err)
+	}
+	wantKinds := append([]MmapTraceEventKind{MmapTracePunchBegin}, repeatTraceKind(MmapTracePunchRange, len(wantRanges))...)
+	wantKinds = append(wantKinds, MmapTracePunchEnd)
+	if got := traceKinds(events); !slices.Equal(got, wantKinds) {
+		t.Fatalf("punch trace kinds = %v, want %v", got, wantKinds)
+	}
+	for i, wantRange := range wantRanges {
+		event := events[i+1]
+		if event.StartPage != wantRange.start || event.EndPage != wantRange.end {
+			t.Fatalf("range event %d = [%d,%d), want [%d,%d)", i, event.StartPage, event.EndPage, wantRange.start, wantRange.end)
+		}
+		if event.PunchedPages != int(wantRange.end-wantRange.start) {
+			t.Fatalf("range event %d PunchedPages = %d, want %d", i, event.PunchedPages, wantRange.end-wantRange.start)
+		}
+	}
+	end := events[len(events)-1]
+	if end.FreePages != stats.FreePages || end.SkippedRecoverablePages != stats.SkippedRecoverablePages {
+		t.Fatalf("end free/skipped = %d/%d, want %d/%d", end.FreePages, end.SkippedRecoverablePages, stats.FreePages, stats.SkippedRecoverablePages)
+	}
+	if end.PunchRanges != stats.Ranges || end.PunchedPages != stats.PunchedPages || end.PunchedBytes != stats.PunchedBytes {
+		t.Fatalf("end punch stats = ranges %d pages %d bytes %d, want %+v", end.PunchRanges, end.PunchedPages, end.PunchedBytes, stats)
+	}
+}
+
+func TestMmapTraceHookReportsPunchFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+	for i := 0; i < 40; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	for i := 0; i < 25; i++ {
+		tree.Delete(fmt.Sprintf("key-%02d", i))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after deletes: %v", err)
+	}
+	tree.Put("rotation-key", []byte("rotation-value"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after metadata rotation: %v", err)
+	}
+	tree.reclaimRetiredPages()
+
+	var events []MmapTraceEvent
+	tree.traceHook = func(event MmapTraceEvent) {
+		events = append(events, event)
+	}
+	wantErr := errors.New("punch boom")
+	restore := stubPunchFileRange(func(file *os.File, startPage, endPage PageID) error {
+		return wantErr
+	})
+	defer restore()
+
+	_, err = tree.PunchFreeMmapPages()
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("PunchFreeMmapPages error = %v, want %v", err, wantErr)
+	}
+	if got := traceKinds(events); len(got) < 2 || got[0] != MmapTracePunchBegin || got[len(got)-1] != MmapTracePunchFailed {
+		t.Fatalf("punch failure trace kinds = %v, want begin ... failed", got)
+	}
+	failed := events[len(events)-1]
+	if failed.Reason != wantErr.Error() {
+		t.Fatalf("failure reason = %q, want %q", failed.Reason, wantErr.Error())
+	}
+	if failed.StartPage == 0 || failed.EndPage == 0 {
+		t.Fatalf("failure range = [%d,%d), want attempted page range", failed.StartPage, failed.EndPage)
+	}
+}
+
 func TestMmapWarmTreeAdvisesOnlyReachablePages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -7277,6 +7404,14 @@ func traceKinds(events []MmapTraceEvent) []MmapTraceEventKind {
 	kinds := make([]MmapTraceEventKind, 0, len(events))
 	for _, event := range events {
 		kinds = append(kinds, event.Kind)
+	}
+	return kinds
+}
+
+func repeatTraceKind(kind MmapTraceEventKind, count int) []MmapTraceEventKind {
+	kinds := make([]MmapTraceEventKind, count)
+	for i := range kinds {
+		kinds[i] = kind
 	}
 	return kinds
 }

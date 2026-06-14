@@ -13,9 +13,11 @@ func (t *Tree) PunchFreeMmapPages() (MmapHolePunchStats, error) {
 		return stats, nil
 	}
 	t.reclaimRetiredPages()
+	t.emitMmapTracePunch(MmapTracePunchBegin, stats, "")
 
 	recoverable, err := t.recoverableMmapPages()
 	if err != nil {
+		t.emitMmapTracePunchFailure(stats, 0, 0, err)
 		return stats, err
 	}
 	free := make([]PageID, 0, len(t.free))
@@ -34,13 +36,16 @@ func (t *Tree) PunchFreeMmapPages() (MmapHolePunchStats, error) {
 	}
 	for _, pageRange := range coalescedPageRanges(free) {
 		if err := punchFileRange(t.arena.file, pageRange.start, pageRange.end); err != nil {
+			t.emitMmapTracePunchFailure(stats, pageRange.start, pageRange.end, err)
 			return stats, err
 		}
 		pages := int(pageRange.end - pageRange.start)
 		stats.Ranges++
 		stats.PunchedPages += pages
 		stats.PunchedBytes += int64(pages * PageSize)
+		t.emitMmapTracePunchRange(pageRange.start, pageRange.end)
 	}
+	t.emitMmapTracePunch(MmapTracePunchEnd, stats, "")
 	return stats, nil
 }
 

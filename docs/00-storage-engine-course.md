@@ -684,8 +684,11 @@ events carry old/new mapped capacity, old/new `nextPage`, and resulting file
 size; their failure events also carry the returned error reason, so a failed
 remap is visible without parsing logs. Dirty sync range events carry
 `StartPage`, `EndPage`, and `DurationNanos`, so slow write stalls can be tied
-back to concrete page-id intervals. Reader cleanup events report how many
-dead-PID slots were cleared from the sidecar reader table.
+back to concrete page-id intervals. Sparse-hole punch events report skipped
+fallback-recoverable pages, every punched half-open page range, aggregate
+punched pages and bytes, and the attempted range plus error reason on failure.
+Reader cleanup events report how many dead-PID slots were cleared from the
+sidecar reader table.
 
 The hook is synchronous and should stay lightweight. In a real product you
 can start with `NewMmapTraceJSONLExporter`, which writes one lower-snake-field
@@ -776,10 +779,12 @@ Code to read:
 - Growth trace emissions: [`pagebtree/mmap.go#L346-L411`](../pagebtree/mmap.go#L346-L411)
 - Compact trace emissions: [`pagebtree/mmap.go#L426-L505`](../pagebtree/mmap.go#L426-L505)
 - Reader cleanup trace emission: [`pagebtree/reader_table_unix.go#L262-L272`](../pagebtree/reader_table_unix.go#L262-L272)
+- Sparse-hole trace emissions: [`pagebtree/mmap_punch_unix.go`](../pagebtree/mmap_punch_unix.go), [`pagebtree/mmap_trace_unix.go`](../pagebtree/mmap_trace_unix.go)
 - Reclaim and rollback trace tests: [`pagebtree/mmap_test.go#L2962-L3163`](../pagebtree/mmap_test.go#L2962-L3163)
 - Growth and compact trace tests: [`pagebtree/mmap_test.go#L3165-L3382`](../pagebtree/mmap_test.go#L3165-L3382)
 - Sync and recovery trace tests: [`pagebtree/mmap_test.go#L3712-L3911`](../pagebtree/mmap_test.go#L3712-L3911)
 - Reader cleanup trace test: [`pagebtree/mmap_test.go#L5132-L5183`](../pagebtree/mmap_test.go#L5132-L5183)
+- Sparse-hole trace tests: [`pagebtree/mmap_test.go`](../pagebtree/mmap_test.go)
 
 ## Module 16: OpenLDAP/LMDB Versus OpenDJ/Berkeley JE
 

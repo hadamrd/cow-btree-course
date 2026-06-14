@@ -34,13 +34,25 @@ func TestMmapTraceJSONLExporterWritesStableFields(t *testing.T) {
 		NextPage: 12,
 		MaxPages: 64,
 	})
+	hook(MmapTraceEvent{
+		Kind:                    MmapTracePunchEnd,
+		Revision:                8,
+		Root:                    3,
+		NextPage:                12,
+		MaxPages:                64,
+		FreePages:               9,
+		SkippedRecoverablePages: 2,
+		PunchRanges:             3,
+		PunchedPages:            7,
+		PunchedBytes:            7 * PageSize,
+	})
 	if err := exporter.Err(); err != nil {
 		t.Fatalf("exporter Err = %v, want nil", err)
 	}
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("exported %d JSONL records, want 2: %q", len(lines), buf.String())
+	if len(lines) != 3 {
+		t.Fatalf("exported %d JSONL records, want 3: %q", len(lines), buf.String())
 	}
 	first := decodeTraceJSONLine(t, lines[0])
 	if first["kind"] != string(MmapTraceSyncDataRange) {
@@ -65,6 +77,17 @@ func TestMmapTraceJSONLExporterWritesStableFields(t *testing.T) {
 	}
 	if _, ok := second["start_page"]; ok {
 		t.Fatalf("sync-end record included empty start_page: %#v", second)
+	}
+
+	third := decodeTraceJSONLine(t, lines[2])
+	if third["kind"] != string(MmapTracePunchEnd) {
+		t.Fatalf("third kind = %v, want %q", third["kind"], MmapTracePunchEnd)
+	}
+	if third["free_pages"] != float64(9) || third["skipped_recoverable_pages"] != float64(2) {
+		t.Fatalf("punch free/skipped fields = %#v", third)
+	}
+	if third["punch_ranges"] != float64(3) || third["punched_pages"] != float64(7) || third["punched_bytes"] != float64(7*PageSize) {
+		t.Fatalf("punch range/page/byte fields = %#v", third)
 	}
 }
 

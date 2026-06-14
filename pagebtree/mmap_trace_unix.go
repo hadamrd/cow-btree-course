@@ -108,6 +108,47 @@ func (t *Tree) emitMmapTraceMetaError(kind MmapTraceEventKind, metaPage []byte, 
 	t.traceHook(event)
 }
 
+func (t *Tree) emitMmapTracePunch(kind MmapTraceEventKind, stats MmapHolePunchStats, reason string) {
+	if t == nil || t.traceHook == nil {
+		return
+	}
+	event := t.mmapTraceEvent(kind, nil, -1, reason)
+	event.FreePages = stats.FreePages
+	event.SkippedRecoverablePages = stats.SkippedRecoverablePages
+	event.PunchRanges = stats.Ranges
+	event.PunchedPages = stats.PunchedPages
+	event.PunchedBytes = stats.PunchedBytes
+	t.traceHook(event)
+}
+
+func (t *Tree) emitMmapTracePunchRange(startPage, endPage PageID) {
+	if t == nil || t.traceHook == nil {
+		return
+	}
+	event := t.mmapTraceEvent(MmapTracePunchRange, nil, -1, "")
+	event.StartPage = startPage
+	event.EndPage = endPage
+	pages := int(endPage - startPage)
+	event.PunchedPages = pages
+	event.PunchedBytes = int64(pages * PageSize)
+	t.traceHook(event)
+}
+
+func (t *Tree) emitMmapTracePunchFailure(stats MmapHolePunchStats, startPage, endPage PageID, err error) {
+	if t == nil || t.traceHook == nil || err == nil {
+		return
+	}
+	event := t.mmapTraceEvent(MmapTracePunchFailed, nil, -1, err.Error())
+	event.StartPage = startPage
+	event.EndPage = endPage
+	event.FreePages = stats.FreePages
+	event.SkippedRecoverablePages = stats.SkippedRecoverablePages
+	event.PunchRanges = stats.Ranges
+	event.PunchedPages = stats.PunchedPages
+	event.PunchedBytes = stats.PunchedBytes
+	t.traceHook(event)
+}
+
 func (t *Tree) mmapTraceEvent(kind MmapTraceEventKind, record *metaRecord, slot int, reason string) MmapTraceEvent {
 	event := MmapTraceEvent{
 		Kind:         kind,
