@@ -203,8 +203,12 @@ the validity bit, validation error if any, stats including reclaim pressure,
 persisted `key_order`, `key_order_name`, `key_comparator`,
 `key_comparator_name`, reachable page IDs, free page IDs, retired page IDs,
 metadata page IDs for persisted
-freelist/reclaim chains, and leaf-link validation state. `--readers` closes the
-command's own read-only handle before reading the sidecar through
+freelist/reclaim chains, leaf-link validation state, and `metadata_recovery`
+candidate events. Those events are collected by `InspectMmapRecovery`, which
+maps the database read-only, runs the same checked metadata and root-page
+recovery used by normal open, and reports rejected and accepted metadata
+candidates without dumping keys or values. `--readers` closes the command's own
+read-only handle before reading the sidecar through
 `InspectMmapReaderStats`, so reader-table output reports the workload's readers
 rather than an extra inspector slot. It includes active/stale slots and oldest
 pinned revision. `--cache` adds `mincore`-backed mapped/resident page counts,

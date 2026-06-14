@@ -337,61 +337,8 @@ func (t *Tree) CleanStaleMmapReaders() (int, error) {
 }
 
 func inspectMmapRecoveredRevision(path string) (uint64, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	if err := lockFile(file, false); err != nil {
-		file.Close()
-		return 0, err
-	}
-
-	info, err := file.Stat()
-	if err != nil {
-		unlockFile(file)
-		file.Close()
-		return 0, err
-	}
-	if err := validateExistingMmapFileSize(info.Size()); err != nil {
-		unlockFile(file)
-		file.Close()
-		return 0, err
-	}
-
-	size := int(info.Size())
-	data, err := mmapBytes(int(file.Fd()), 0, size, unix.PROT_READ, unix.MAP_SHARED)
-	if err != nil {
-		unlockFile(file)
-		file.Close()
-		return 0, err
-	}
-	arena := &mmapArena{
-		file:     file,
-		path:     path,
-		data:     data,
-		maxPages: int(info.Size()/PageSize) - metaPageCount,
-		locked:   true,
-		readOnly: true,
-	}
-	tree := &Tree{
-		pages:                    map[PageID]*page{},
-		nextPage:                 firstTreePageID,
-		keyOrder:                 KeyOrderBytewise,
-		keyComparator:            keyComparatorForOrder(KeyOrderBytewise),
-		arena:                    arena,
-		readOnly:                 true,
-		pageCache:                newPageCache(DefaultPageCacheCapacity),
-		rangePrefetchLeafWindow:  DefaultRangePrefetchLeafWindow,
-		minRepairPageFillPercent: DefaultMinRepairPageFillPercent,
-	}
-	if err := tree.loadMeta(); err != nil {
-		return 0, errors.Join(err, arena.close())
-	}
-	revision := tree.revision
-	if err := arena.close(); err != nil {
-		return 0, err
-	}
-	return revision, nil
+	_, revision, err := inspectMmapRecovery(path)
+	return revision, err
 }
 
 func (r *readerTable) ensureFileLocked() error {

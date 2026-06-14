@@ -778,7 +778,9 @@ For an operator-style read-only validation snapshot, `cmd/mmapinspect` opens an
 mmap database through `OpenMmapReadOnly`, runs `Audit`, and writes indented JSON
 with validity, stats, persisted key-order identity, comparator kind, readable
 names for both, reachable page IDs, free page IDs, retired page IDs, metadata
-page IDs, and linked-leaf validation state.
+page IDs, linked-leaf validation state, and `metadata_recovery` candidate
+events showing which checked metadata records were accepted or rejected during
+the same recovery path normal open uses.
 `--readers` closes that inspection handle first, then uses
 `InspectMmapReaderStats` to add the mmap reader-table slot summary without
 claiming an inspector slot. `--cache` adds kernel page-cache residency counts,

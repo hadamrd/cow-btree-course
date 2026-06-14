@@ -30,6 +30,7 @@ type inspectReport struct {
 	FreePageIDs       []pagebtree.PageID                 `json:"free_page_ids"`
 	RetiredPageIDs    []pagebtree.PageID                 `json:"retired_page_ids"`
 	MetadataPageIDs   []pagebtree.PageID                 `json:"metadata_page_ids,omitempty"`
+	MetadataRecovery  []pagebtree.MmapTraceEvent         `json:"metadata_recovery,omitempty"`
 	LeafLinksChecked  bool                               `json:"leaf_links_checked"`
 	LeafLinksSkipped  bool                               `json:"leaf_links_skipped"`
 	ReaderStats       *pagebtree.MmapReaderStats         `json:"reader_stats,omitempty"`
@@ -126,6 +127,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if !options.pages {
 		report.PageSummaries = nil
 	}
+	recovery, err := pagebtree.InspectMmapRecovery(options.path)
+	if err != nil {
+		fmt.Fprintf(stderr, "mmap inspect: metadata recovery: %v\n", err)
+		return 1
+	}
+	report.MetadataRecovery = recovery
 	if options.cache {
 		stats, err := tree.MmapCacheStats()
 		if err != nil {

@@ -120,6 +120,56 @@ func TestRunPrintsPersistedKeyOrder(t *testing.T) {
 	}
 }
 
+func TestRunPrintsMetadataRecoveryCandidates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inspect.db")
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync older root: %v", err)
+	}
+	olderRevision := tree.Revision()
+	tree.Put("bravo", []byte("two"))
+	newerRevision := tree.Revision()
+	newestRoot := tree.Stats().Root
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+	corruptInspectPagePayload(t, path, newestRoot)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.Stats.Revision != olderRevision {
+		t.Fatalf("reported revision = %d, want fallback revision %d", report.Stats.Revision, olderRevision)
+	}
+	var sawRejectedNewest, sawAcceptedOlder bool
+	for _, event := range report.MetadataRecovery {
+		switch event.Kind {
+		case pagebtree.MmapTraceRecoveryCandidateRejected:
+			if event.Revision == newerRevision && event.Reason != "" {
+				sawRejectedNewest = true
+			}
+		case pagebtree.MmapTraceRecoveryCandidateAccepted:
+			if event.Revision == olderRevision && event.Reason == "" {
+				sawAcceptedOlder = true
+			}
+		}
+	}
+	if !sawRejectedNewest || !sawAcceptedOlder {
+		t.Fatalf("MetadataRecovery = %+v, want rejected newest revision %d and accepted older revision %d", report.MetadataRecovery, newerRevision, olderRevision)
+	}
+}
+
 func TestRunPrintsOptionalReaderAndCacheSections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspect.db")
 	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})
@@ -778,5 +828,23 @@ func TestRunRejectsUnknownFlag(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unknown option") {
 		t.Fatalf("stderr = %q, want unknown option", stderr.String())
+	}
+}
+
+func corruptInspectPagePayload(t *testing.T, path string, id pagebtree.PageID) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile corrupt page %d: %v", id, err)
+	}
+	defer file.Close()
+
+	offset := int64(id)*pagebtree.PageSize + pagebtree.PageSize - 1
+	if _, err := file.WriteAt([]byte{0xff}, offset); err != nil {
+		t.Fatalf("WriteAt corrupt page %d: %v", id, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("Sync corrupt page %d: %v", id, err)
 	}
 }

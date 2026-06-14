@@ -96,7 +96,9 @@
 // metadata root could recover; trace events expose attempted ranges, aggregate
 // counts, skipped fallback-recoverable pages, and failure reasons.
 // MmapHolePunchProfile reports the build's sparse-hole primitive or unsupported
-// reason before running an experiment. Close returns
+// reason before running an experiment. InspectMmapRecovery reports value-free
+// accepted/rejected checked-metadata recovery candidates without claiming a
+// reader slot. Close returns
 // ErrActiveReaders for mmap-backed trees while snapshots are active, because
 // those snapshots still read slices backed by the mapping. If close-time Sync
 // fails but the mmap resources are still released, the handle is marked closed

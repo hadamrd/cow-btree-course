@@ -104,6 +104,10 @@ func InspectMmapReaderStats(path string) (MmapReaderStats, error) {
 	return MmapReaderStats{}, nil
 }
 
+func InspectMmapRecovery(path string) ([]MmapTraceEvent, error) {
+	return nil, nil
+}
+
 func (t *Tree) CleanStaleMmapReaders() (int, error) {
 	return 0, nil
 }
