@@ -684,6 +684,11 @@ The trace schema is intentionally value-free: it reports page IDs, revisions,
 counts, ranges, durations, slots, and failure reasons, but it does not include
 application keys or values. If an embedding application adds its own trace
 fields around this hook, redact at that application boundary before export.
+If exporting itself may block the write path, use `NewMmapTraceAsyncJSONLExporter`
+with a bounded queue. It drains JSONL from a background goroutine, `Close`
+flushes queued events and returns the first encode/write error, and `Dropped`
+reports events skipped because the queue was full or already closed. That makes
+trace pressure visible instead of hiding stalls inside the storage hook.
 
 ```go
 exporter := pagebtree.NewMmapTraceJSONLExporter(os.Stdout)
@@ -693,6 +698,20 @@ tree, _ := pagebtree.OpenMmap("trace.db", pagebtree.MmapOptions{
 // mutate, Sync, Close...
 if err := exporter.Err(); err != nil {
     // exporting failed
+}
+```
+
+```go
+async := pagebtree.NewMmapTraceAsyncJSONLExporter(os.Stdout, 1024)
+tree, _ := pagebtree.OpenMmap("trace.db", pagebtree.MmapOptions{
+    TraceHook: async.Hook(),
+})
+// mutate, Sync, Close...
+if err := async.Close(); err != nil {
+    // exporting failed
+}
+if async.Dropped() > 0 {
+    // trace queue was too small for the workload
 }
 ```
 
@@ -728,7 +747,7 @@ Code to read:
 - Audit inspect command: [`cmd/mmapinspect/main.go`](../cmd/mmapinspect/main.go)
 - Audit inspect command tests: [`cmd/mmapinspect/main_test.go`](../cmd/mmapinspect/main_test.go)
 - Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
-- JSONL exporter: [`pagebtree/mmap_trace_export.go#L9-L72`](../pagebtree/mmap_trace_export.go#L9-L72)
+- JSONL exporters: [`pagebtree/mmap_trace_export.go`](../pagebtree/mmap_trace_export.go)
 - JSONL exporter example: [`pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)
 - JSONL trace demo command: [`cmd/mmaptrace-demo/main.go`](../cmd/mmaptrace-demo/main.go)
 - Hook option on mmap open: [`pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
