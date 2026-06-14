@@ -146,6 +146,12 @@ func (s *Snapshot) CursorBytesBetween(start []byte, end []byte) *Cursor {
 	return s.CursorBetween(keyFromBytes(start), keyFromBytes(end))
 }
 
+// CursorBytesBetween opens a transaction cursor over opaque byte keys greater
+// than or equal to start and less than end.
+func (tx *ReadWriteTx) CursorBytesBetween(start []byte, end []byte) *TxCursor {
+	return tx.CursorBetween(keyFromBytes(start), keyFromBytes(end))
+}
+
 // SeekBytes positions the cursor at the first opaque byte key greater than or
 // equal to key.
 func (c *Cursor) SeekBytes(key []byte) bool {
@@ -158,4 +164,18 @@ func (c *Cursor) KeyBytes() []byte {
 		return nil
 	}
 	return bytesFromKey(c.key)
+}
+
+// SeekBytes positions the transaction cursor at the first opaque byte key
+// greater than or equal to key.
+func (c *TxCursor) SeekBytes(key []byte) bool {
+	return c.Seek(keyFromBytes(key))
+}
+
+// KeyBytes returns a copy of the current transaction cursor opaque byte key.
+func (c *TxCursor) KeyBytes() []byte {
+	if !c.Valid() {
+		return nil
+	}
+	return bytesFromKey(c.Key())
 }

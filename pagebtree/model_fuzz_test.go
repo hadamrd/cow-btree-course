@@ -135,7 +135,7 @@ func runPageTreeModel(t *testing.T, data []byte) {
 			tx := tree.BeginReadWrite()
 			txModel := model.clone()
 			for i := 0; i < count; i++ {
-				switch reader.next() % 4 {
+				switch reader.next() % 5 {
 				case 0:
 					key := reader.key()
 					tx.Delete(key)
@@ -148,6 +148,23 @@ func runPageTreeModel(t *testing.T, data []byte) {
 					}
 					tx.DeleteRange(start, end)
 					txModel.deleteRange(start, end)
+				case 2:
+					start := reader.key()
+					end := reader.key()
+					if compareStrings(end, start) < 0 {
+						start, end = end, start
+					}
+					seek := reader.key()
+					cursor := tx.CursorBetween(start, end)
+					if cursor.Seek(seek) {
+						deleteKey := cursor.Key()
+						got, deleted := cursor.Delete()
+						want, exists := txModel.delete(deleteKey)
+						if deleted != exists || !bytes.Equal(got, want) {
+							t.Fatalf("tx cursor Delete(%q) = %q, %v; want %q, %v", deleteKey, got, deleted, want, exists)
+						}
+					}
+					cursor.Close()
 				default:
 					key := reader.key()
 					value := reader.value()

@@ -113,6 +113,30 @@ func ExampleTree_BeginReadWrite() {
 	// charlie three
 }
 
+func ExampleReadWriteTx_CursorBetween() {
+	tree := pagebtree.New(2)
+	for _, key := range []string{"alpha", "bravo", "charlie", "delta"} {
+		tree.Put(key, []byte(key+"-value"))
+	}
+
+	tx := tree.BeginReadWrite()
+	cursor := tx.CursorBetween("bravo", "delta")
+	old, deleted := cursor.Delete()
+	cursor.Close()
+
+	_, visibleBeforeCommit := tree.Get("bravo")
+	tx.Commit()
+	_, visibleAfterCommit := tree.Get("bravo")
+
+	fmt.Println(deleted, string(old))
+	fmt.Println(visibleBeforeCommit)
+	fmt.Println(visibleAfterCommit)
+	// Output:
+	// true bravo-value
+	// true
+	// false
+}
+
 func ExampleWriteBatch_CommitDetailed() {
 	tree := pagebtree.New(2)
 	tree.Put("alpha", []byte("one"))

@@ -24,8 +24,8 @@
 // publishes one new revision if any staged operation changed the tree.
 // BeginReadWrite opens a small read-write transaction facade over the same
 // batch machinery. It adds read-your-writes Get, RangeBetween over the staged
-// view, and transaction-visible DeleteRange expansion before publishing through
-// Commit.
+// view, transaction-visible DeleteRange expansion, and transaction cursors that
+// can stage Delete for their current key before publishing through Commit.
 // CommitDetailed reports per-operation old values and explicit invalid commit
 // errors, and restores the pre-commit tree state if a staged mutation panics
 // before publication. Snapshots and cursors keep reading their older roots. A
