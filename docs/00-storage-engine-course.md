@@ -365,10 +365,11 @@ tree. Their `CommitSyncDetailed` variants return the same per-operation
 still describes the logical commit visible in the current process, but the
 returned error means durable publication is not proven. That is intentionally
 explicit; it avoids pretending that a failed `msync` can be hidden behind a
-boolean commit result. The mmap fault tests also prove the retry path: after
-forced failures before dirty data sync, after metadata bytes are written, and
-before metadata sync, clearing the fault and calling `Sync` again publishes the
-already-visible commit durably enough to survive close/reopen.
+boolean commit result. The mmap fault tests also prove the retry path for both
+batches and read-write transactions: after forced failures before dirty data
+sync, after metadata bytes are written, and before metadata sync, clearing the
+fault and calling `Sync` again publishes the already-visible commit durably
+enough to survive close/reopen.
 
 `MmapOptions.TraceHook` can observe this path without parsing logs. A traced
 sync emits `mmap-sync-begin`, one `mmap-sync-data-range` event per coalesced
@@ -391,7 +392,7 @@ Code to read:
 - Transaction process-crash sync proof: [`pagebtree/mmap_process_crash_test.go#L57-L91`](../pagebtree/mmap_process_crash_test.go#L57-L91)
 - Batch commit-sync API and sync-error contract: [`pagebtree/batch.go#L130-L220`](../pagebtree/batch.go#L130-L220)
 - Transaction commit-sync API: [`pagebtree/tx.go#L144-L185`](../pagebtree/tx.go#L144-L185)
-- Commit-sync retry tests: [`pagebtree/commit_sync_mmap_unix_test.go#L126-L213`](../pagebtree/commit_sync_mmap_unix_test.go#L126-L213)
+- Commit-sync retry tests: [`pagebtree/commit_sync_mmap_unix_test.go#L128-L358`](../pagebtree/commit_sync_mmap_unix_test.go#L128-L358)
 
 ## Module 10: Dual Checked Metadata Pages
 

@@ -257,3 +257,102 @@ func TestMmapReadWriteTxCommitSyncDetailedSyncsChangedCommit(t *testing.T) {
 		t.Fatalf("Get(bravo) after tx CommitSyncDetailed = %q, %v; want two, true", got, ok)
 	}
 }
+
+func TestMmapReadWriteTxCommitSyncDetailedFaultsRemainRetryable(t *testing.T) {
+	tests := []struct {
+		name  string
+		fault mmapFaultPoint
+	}{
+		{
+			name:  "before data sync",
+			fault: mmapFaultBeforeDataSync,
+		},
+		{
+			name:  "after metadata write",
+			fault: mmapFaultAfterMetaWrite,
+		},
+		{
+			name:  "before metadata sync",
+			fault: mmapFaultBeforeMetaSync,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "course.db")
+			assertTxCommitSyncRetryPublishesAfterFault(t, path, tt.fault)
+		})
+	}
+}
+
+func assertTxCommitSyncRetryPublishesAfterFault(t *testing.T, path string, fault mmapFaultPoint) {
+	t.Helper()
+
+	var events []MmapTraceEvent
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 128,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	tree.Put("remove", []byte("gone"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	events = nil
+
+	forced := fmt.Errorf("forced %s fault", fault)
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == fault {
+			return forced
+		}
+		return nil
+	}
+	tx := tree.BeginReadWrite()
+	tx.Put("bravo", []byte("two"))
+	tx.Delete("remove")
+	result, err := tx.CommitSyncDetailed()
+	if !errors.Is(err, forced) {
+		t.Fatalf("tx CommitSyncDetailed fault %s error = %v, want forced error", fault, err)
+	}
+	if !result.Changed || len(result.Operations) != 2 {
+		t.Fatalf("tx CommitSyncDetailed fault %s result = %+v, want two changed operations", fault, result)
+	}
+	if got, ok := tree.Get("bravo"); !ok || string(got) != "two" {
+		t.Fatalf("Get(bravo) after tx CommitSyncDetailed fault %s = %q, %v; want logical commit visible", fault, got, ok)
+	}
+	if got, ok := tree.Get("remove"); ok {
+		t.Fatalf("Get(remove) after tx CommitSyncDetailed fault %s = %q, true; want logical delete visible", fault, got)
+	}
+	if traceKindIndex(events, MmapTraceSyncFailed) < 0 {
+		t.Fatalf("tx CommitSyncDetailed fault %s trace events = %v, want sync failed", fault, events)
+	}
+
+	tree.arena.faultInjector = nil
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("retry Sync after tx CommitSyncDetailed fault %s: %v", fault, err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close after tx retry Sync fault %s: %v", fault, err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen after tx retry Sync fault %s: %v", fault, err)
+	}
+	defer reopened.Close()
+	if got, ok := reopened.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("reopened Get(alpha) after tx retry Sync fault %s = %q, %v; want one, true", fault, got, ok)
+	}
+	if got, ok := reopened.Get("bravo"); !ok || string(got) != "two" {
+		t.Fatalf("reopened Get(bravo) after tx retry Sync fault %s = %q, %v; want two, true", fault, got, ok)
+	}
+	if got, ok := reopened.Get("remove"); ok {
+		t.Fatalf("reopened Get(remove) after tx retry Sync fault %s = %q, true; want deleted", fault, got)
+	}
+}

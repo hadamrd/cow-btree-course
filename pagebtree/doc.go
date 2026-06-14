@@ -34,15 +34,15 @@
 // commit-then-Sync boundary for callers that want one API call to publish and
 // request durability. If Sync fails, the returned commit result still describes
 // the logical commit visible in the current process, but durable publication is
-// not proven; tests cover retrying Sync after injected data-sync and
-// metadata-publication faults. Snapshots and cursors keep reading their older
-// roots. A cursor opened from Tree owns a snapshot and must be closed to release
-// the reader pin; CursorBetween adds a half-open upper bound for incremental
-// range reads, Last/Prev traverse the same snapshot in reverse, and Delete
-// removes the current key from the live tree for tree-owned cursors while the
-// cursor keeps reading its original snapshot. A cursor opened from Snapshot
-// borrows that snapshot and does not register another reader. Leaf sibling-link
-// repair is deferred while a
+// not proven; batch and transaction tests cover retrying Sync after injected
+// data-sync and metadata-publication faults. Snapshots and cursors keep reading
+// their older roots. A cursor opened from Tree owns a snapshot and must be
+// closed to release the reader pin; CursorBetween adds a half-open upper bound
+// for incremental range reads, Last/Prev traverse the same snapshot in reverse,
+// and Delete removes the current key from the live tree for tree-owned cursors
+// while the cursor keeps reading its original snapshot. A cursor opened from
+// Snapshot borrows that snapshot and does not register another reader. Leaf
+// sibling-link repair is deferred while a
 // snapshot or cursor is active, because rewriting those headers in place would
 // mutate bytes visible to the old root.
 // Current-tree Range, RangeFrom, and RangeBetween use those leaf links when no
