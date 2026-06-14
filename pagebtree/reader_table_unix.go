@@ -215,11 +215,15 @@ func (r *readerTable) close() error {
 }
 
 func (r *readerTable) scan(maxRevision uint64, cleanStale bool) (MmapReaderStats, int, error) {
-	stats := MmapReaderStats{Slots: readerTableSlotCount}
-	cleared := 0
 	if r == nil {
 		return MmapReaderStats{}, 0, nil
 	}
+	stats := MmapReaderStats{
+		FormatVersion:              r.version,
+		ProcessStartTokenSupported: processStartToken(os.Getpid()) != 0,
+		Slots:                      readerTableSlotCount,
+	}
+	cleared := 0
 	err := r.withLock(func() error {
 		for slot := 0; slot < readerTableSlotCount; slot++ {
 			current, err := r.readSlotLocked(slot)

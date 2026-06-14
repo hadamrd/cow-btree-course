@@ -5820,6 +5820,16 @@ func TestMmapReaderStatsReportsActiveReadOnlySlot(t *testing.T) {
 		reader.Close()
 		t.Fatalf("reader stats process-start slots = %d, want one tagged slot", stats.ProcessStartSlots)
 	}
+	if stats.FormatVersion != readerTableVersion {
+		writer.Close()
+		reader.Close()
+		t.Fatalf("reader table format version = %d, want %d", stats.FormatVersion, readerTableVersion)
+	}
+	if !stats.ProcessStartTokenSupported {
+		writer.Close()
+		reader.Close()
+		t.Fatalf("ProcessStartTokenSupported = false, want true on this platform")
+	}
 
 	if err := reader.Close(); err != nil {
 		writer.Close()
@@ -5873,7 +5883,7 @@ func TestMmapReaderTableOpensLegacyV1Sidecar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MmapReaderStats legacy reader table: %v", err)
 	}
-	if stats.ActiveSlots != 1 || stats.StaleSlots != 0 || stats.ProcessStartSlots != 0 {
+	if stats.ActiveSlots != 1 || stats.StaleSlots != 0 || stats.ProcessStartSlots != 0 || stats.FormatVersion != readerTableV1Version {
 		t.Fatalf("legacy reader stats = %+v, want one active untagged slot", stats)
 	}
 }

@@ -12,10 +12,12 @@ var ErrReaderTable = errors.New("mmap reader table invalid")
 // longer matches that PID. ProcessStartSlots counts slots carrying that stronger
 // owner tag. Stale slots can be cleared with CleanStaleMmapReaders.
 type MmapReaderStats struct {
-	Slots             int
-	ActiveSlots       int
-	StaleSlots        int
-	ProcessStartSlots int
-	OldestRevision    uint64
-	HasOldestRevision bool
+	FormatVersion              uint64
+	ProcessStartTokenSupported bool
+	Slots                      int
+	ActiveSlots                int
+	StaleSlots                 int
+	ProcessStartSlots          int
+	OldestRevision             uint64
+	HasOldestRevision          bool
 }
