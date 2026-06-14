@@ -34,6 +34,7 @@ type txWorkloadReport struct {
 	ReaderPinnedRetiredPages    int                             `json:"reader_pinned_retired_pages,omitempty"`
 	ReaderPinnedFreePages       int                             `json:"reader_pinned_free_pages,omitempty"`
 	ReaderPinnedReclaimPressure *pagebtree.ReclaimPressureStats `json:"reader_pinned_reclaim_pressure,omitempty"`
+	ReaderProcesses             int                             `json:"reader_processes,omitempty"`
 	FinalStats                  pagebtree.Stats                 `json:"final_stats"`
 	TransactionConflictKind     string                          `json:"transaction_conflict_kind"`
 }
@@ -46,6 +47,11 @@ type txWorkloadOptions struct {
 	transactions int
 	deleteEvery  int
 	readers      int
+	readerProcs  int
+	childReader  bool
+	childReady   string
+	childRelease string
+	childKey     string
 }
 
 func main() {
@@ -58,6 +64,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "mmap tx workload: %v\n", err)
 		printUsage(stderr)
 		return 2
+	}
+	if options.childReader {
+		if err := runChildReader(options); err != nil {
+			fmt.Fprintf(stderr, "mmap tx workload child: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 
 	var traceFile *os.File
@@ -156,12 +169,48 @@ func parseArgs(args []string) (txWorkloadOptions, error) {
 				return txWorkloadOptions{}, fmt.Errorf("--readers expects a positive integer: %w", err)
 			}
 			options.readers = readers
+		case arg == "--reader-processes":
+			value, ok := nextArg(args, &i)
+			if !ok {
+				return txWorkloadOptions{}, fmt.Errorf("--reader-processes expects a positive integer")
+			}
+			readerProcs, err := parsePositiveInt(value)
+			if err != nil {
+				return txWorkloadOptions{}, fmt.Errorf("--reader-processes expects a positive integer: %w", err)
+			}
+			options.readerProcs = readerProcs
+		case strings.HasPrefix(arg, "--reader-processes="):
+			readerProcs, err := parsePositiveInt(strings.TrimPrefix(arg, "--reader-processes="))
+			if err != nil {
+				return txWorkloadOptions{}, fmt.Errorf("--reader-processes expects a positive integer: %w", err)
+			}
+			options.readerProcs = readerProcs
 		case arg == "--label":
 			value, ok := nextArg(args, &i)
 			if !ok {
 				return txWorkloadOptions{}, fmt.Errorf("--label expects a value")
 			}
 			options.label = value
+		case arg == "--child-reader":
+			options.childReader = true
+		case arg == "--ready":
+			value, ok := nextArg(args, &i)
+			if !ok || value == "" {
+				return txWorkloadOptions{}, fmt.Errorf("--ready expects a path")
+			}
+			options.childReady = value
+		case arg == "--release":
+			value, ok := nextArg(args, &i)
+			if !ok || value == "" {
+				return txWorkloadOptions{}, fmt.Errorf("--release expects a path")
+			}
+			options.childRelease = value
+		case arg == "--key":
+			value, ok := nextArg(args, &i)
+			if !ok || value == "" {
+				return txWorkloadOptions{}, fmt.Errorf("--key expects a key")
+			}
+			options.childKey = value
 		case strings.HasPrefix(arg, "--label="):
 			options.label = strings.TrimPrefix(arg, "--label=")
 		case arg == "--trace":
@@ -190,6 +239,9 @@ func parseArgs(args []string) (txWorkloadOptions, error) {
 	if options.path == "" {
 		return txWorkloadOptions{}, fmt.Errorf("expected one DB path")
 	}
+	if options.childReader && (options.childReady == "" || options.childRelease == "" || options.childKey == "") {
+		return txWorkloadOptions{}, fmt.Errorf("child reader requires --ready, --release, and --key")
+	}
 	if strings.TrimSpace(options.label) != options.label || (options.label == "" && labelWasExplicit(args)) {
 		return txWorkloadOptions{}, fmt.Errorf("--label must be non-empty and must not have leading or trailing whitespace")
 	}
@@ -216,7 +268,7 @@ func parsePositiveInt(text string) (int, error) {
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintln(stderr, "usage: mmaptxworkload [--transactions N] [--delete-every N] [--readers N] [--label NAME] [--trace TRACE.jsonl] [--redact-path] DB.db")
+	fmt.Fprintln(stderr, "usage: mmaptxworkload [--transactions N] [--delete-every N] [--readers N] [--reader-processes N] [--label NAME] [--trace TRACE.jsonl] [--redact-path] DB.db")
 }
 
 func labelWasExplicit(args []string) bool {
@@ -253,6 +305,7 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 		Transactions:            options.transactions,
 		DeleteEvery:             options.deleteEvery,
 		Readers:                 options.readers,
+		ReaderProcesses:         options.readerProcs,
 		TransactionConflictKind: string(pagebtree.MmapTraceTxConflict),
 	}
 	if !options.redactPath {
@@ -266,7 +319,14 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 	defer func() {
 		_ = closeReadOnlyReaders(readers)
 	}()
-	if options.readers > 0 {
+
+	readerProcesses, err := startReaderProcesses(options.path, options.readerProcs)
+	if err != nil {
+		return txWorkloadReport{}, err
+	}
+	defer cleanupReaderProcesses(readerProcesses)
+
+	if options.readers+options.readerProcs > 0 {
 		readerStats, err := tree.MmapReaderStats()
 		if err != nil {
 			return txWorkloadReport{}, err
@@ -320,7 +380,7 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 		return txWorkloadReport{}, err
 	}
 
-	if options.readers > 0 {
+	if options.readers+options.readerProcs > 0 {
 		pinned := tree.Stats()
 		report.ReaderPinnedRetiredPages = pinned.RetiredPages
 		report.ReaderPinnedFreePages = pinned.FreePages
@@ -330,6 +390,10 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 			return txWorkloadReport{}, err
 		}
 		readers = nil
+		if err := releaseReaderProcesses(readerProcesses); err != nil {
+			return txWorkloadReport{}, err
+		}
+		readerProcesses = nil
 		tree.Put("reader-release-reclaim-trigger", []byte("done"))
 		if err := tree.Sync(); err != nil {
 			return txWorkloadReport{}, err

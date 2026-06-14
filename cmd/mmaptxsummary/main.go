@@ -27,6 +27,7 @@ type txReport struct {
 	ReaderPinnedRetiredPages    int               `json:"reader_pinned_retired_pages,omitempty"`
 	ReaderPinnedFreePages       int               `json:"reader_pinned_free_pages,omitempty"`
 	ReaderPinnedReclaimPressure txReclaimPressure `json:"reader_pinned_reclaim_pressure,omitempty"`
+	ReaderProcesses             int               `json:"reader_processes,omitempty"`
 	FinalStats                  txStats           `json:"final_stats"`
 	TransactionConflictKind     string            `json:"transaction_conflict_kind"`
 }
@@ -144,7 +145,7 @@ func rowForReport(report txReport, inputName string) txRow {
 		report:             reportName(report, inputName),
 		transactions:       strconv.Itoa(report.Transactions),
 		deleteEvery:        optionalInt(report.DeleteEvery),
-		readers:            fmt.Sprintf("%d/%d", report.Readers, report.ActiveReadersObserved),
+		readers:            readersCell(report),
 		committed:          strconv.Itoa(report.Committed),
 		conflicted:         strconv.Itoa(report.Conflicted),
 		deletedCommitted:   optionalInt(report.DeletedCommittedKeys),
@@ -160,6 +161,13 @@ func rowForReport(report txReport, inputName string) txRow {
 		finalFree:          strconv.Itoa(report.FinalStats.FreePages),
 		conflictKind:       report.TransactionConflictKind,
 	}
+}
+
+func readersCell(report txReport) string {
+	if report.ReaderProcesses > 0 {
+		return fmt.Sprintf("%d+%d/%d", report.Readers, report.ReaderProcesses, report.ActiveReadersObserved)
+	}
+	return fmt.Sprintf("%d/%d", report.Readers, report.ActiveReadersObserved)
 }
 
 func reportName(report txReport, inputName string) string {

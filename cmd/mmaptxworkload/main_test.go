@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -196,6 +197,32 @@ func TestRunCanReportReaderPinnedTransactionWorkload(t *testing.T) {
 	}
 	if report.FinalStats.FreePages == 0 {
 		t.Fatalf("FinalStats.FreePages = 0, want reusable pages after readers close")
+	}
+}
+
+func TestCommandCanReportReaderProcessPinnedTransactionWorkload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "txworkload.db")
+	cmd := exec.Command("go", "run", ".", "--transactions", "8", "--delete-every", "2", "--reader-processes", "1", path)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run mmaptxworkload failed: %v\n%s", err, output)
+	}
+
+	var report txWorkloadReport
+	if err := json.Unmarshal(output, &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", string(output), err)
+	}
+	if report.Readers != 0 || report.ReaderProcesses != 1 || report.ActiveReadersObserved != 1 {
+		t.Fatalf("Readers/ReaderProcesses/ActiveReadersObserved = %d/%d/%d, want 0/1/1", report.Readers, report.ReaderProcesses, report.ActiveReadersObserved)
+	}
+	if report.ReaderPinnedRetiredPages == 0 {
+		t.Fatalf("ReaderPinnedRetiredPages = 0, want retired pages blocked by child process reader")
+	}
+	if !report.ReaderPinnedReclaimPressure.BlockedByReaders {
+		t.Fatalf("ReaderPinnedReclaimPressure = %+v, want blocked-by-readers", report.ReaderPinnedReclaimPressure)
+	}
+	if report.FinalStats.RetiredPages != 0 {
+		t.Fatalf("FinalStats.RetiredPages = %d, want reclaimed after child reader exits", report.FinalStats.RetiredPages)
 	}
 }
 

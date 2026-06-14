@@ -204,9 +204,11 @@ optimistic conflicts, can mix deterministic staged deletes into successful
 transactions with `--delete-every N`, reopens the database to verify which
 staged writes survived and which staged deletes stayed deleted, can hold
 read-only mmap handles with `--readers N` to report reader-pinned reclaim
-pressure, and optionally writes value-free trace JSONL. `--redact-path` omits
-local database and trace paths from the JSON report while still writing the
-trace file at the supplied path:
+pressure, can hold separate read-only child processes with
+`--reader-processes N` to exercise process-owned reader-table slots, and
+optionally writes value-free trace JSONL. `--redact-path` omits local database
+and trace paths from the JSON report while still writing the trace file at the
+supplied path:
 
 ```bash
 go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --label local-tx --trace tx-trace.jsonl --redact-path txworkload.db > tx-report.json
@@ -214,10 +216,10 @@ go run ./cmd/mmaptxsummary tx-report.json
 go run ./cmd/mmaptracesummary tx-trace.jsonl
 ```
 
-Checked examples live under [`txworkloads/`](txworkloads/). They are generated
-from redacted JSON reports and verified by
-`scripts/verify-tx-workload-artifacts.sh`, which keeps the Markdown summary in
-sync with the reports and rejects path leakage.
+Checked same-process and child-process reader examples live under
+[`txworkloads/`](txworkloads/). They are generated from redacted JSON reports
+and verified by `scripts/verify-tx-workload-artifacts.sh`, which keeps the
+Markdown summary in sync with the reports and rejects path leakage.
 
 For a one-shot read-only integrity snapshot, `cmd/mmapinspect` opens the
 database with `OpenMmapReadOnly`, runs `Audit`, and prints indented JSON with

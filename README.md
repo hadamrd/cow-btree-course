@@ -28,6 +28,7 @@ go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap
 go run ./cmd/mmappunch --trace punch-trace.jsonl /path/to/source.db
 go run ./cmd/mmapreadersoak --readers 4 --rounds 5 --keys 128 /path/to/soak.db
 go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --label local-tx --trace tx-trace.jsonl --redact-path /path/to/txworkload.db > tx-report.json
+go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --reader-processes 1 --label process-tx --trace process-tx-trace.jsonl --redact-path /path/to/process-txworkload.db > process-tx-report.json
 go run ./cmd/mmaptxsummary tx-report.json > tx-summary.md
 go run ./cmd/mmaptearlab --mode metadata /path/to/tear.db
 go run ./cmd/mmaptearlab --mode root /path/to/tear.db

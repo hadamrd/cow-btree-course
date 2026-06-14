@@ -97,6 +97,23 @@ func TestRunPrefersMmapTxWorkloadLabelOverInputName(t *testing.T) {
 	}
 }
 
+func TestRunSummarizesMmapTxWorkloadReaderProcesses(t *testing.T) {
+	report := strings.Replace(sampleTxWorkloadReport, `"path_redacted": true,`, `"label": "process-pinned-local",
+  "path_redacted": true,`, 1)
+	report = strings.Replace(report, `"readers": 2,`, `"readers": 0,
+  "reader_processes": 1,`, 1)
+	report = strings.Replace(report, `"active_readers_observed": 2,`, `"active_readers_observed": 1,`, 1)
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, strings.NewReader(report), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "| process-pinned-local | 8 | 2 | 0+1/1 |") {
+		t.Fatalf("stdout missing reader-process count:\n%s", stdout.String())
+	}
+}
+
 func TestRunAcceptsMultipleMmapTxWorkloadReports(t *testing.T) {
 	dir := t.TempDir()
 	first := filepath.Join(dir, "first.json")

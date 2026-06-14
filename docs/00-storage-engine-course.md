@@ -802,10 +802,11 @@ read-write transaction `CommitSyncDetailed` calls with forced optimistic
 conflicts, can stage deterministic deletes inside successful transactions with
 `--delete-every N`, verifies reopened committed/deleted/conflicted key counts,
 can hold read-only mmap handles with `--readers N` to report reader-pinned
-reclaim pressure during the workload, and can write value-free trace JSONL. Use
-`--redact-path` when the JSON report will be shared or checked in; the command
-still uses the real database and trace paths internally, but omits them from the
-report:
+reclaim pressure during the workload, can hold separate read-only child
+processes with `--reader-processes N` to exercise process-owned reader-table
+slots, and can write value-free trace JSONL. Use `--redact-path` when the JSON
+report will be shared or checked in; the command still uses the real database
+and trace paths internally, but omits them from the report:
 
 ```bash
 go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --label local-tx --trace tx-trace.jsonl --redact-path txworkload.db > tx-report.json
@@ -814,10 +815,10 @@ go run ./cmd/mmaptracesummary tx-trace.jsonl
 ```
 
 The checked examples under [`txworkloads/`](txworkloads/) keep one redacted
-reader-pinned transaction report and its generated Markdown summary in the
-repository. `scripts/verify-tx-workload-artifacts.sh` regenerates the table and
-fails if a sample exposes a database path, exposes a trace path, or lacks a
-stable label.
+same-process reader report, one child-process reader report, and their
+generated Markdown summary in the repository.
+`scripts/verify-tx-workload-artifacts.sh` regenerates the table and fails if a
+sample exposes a database path, exposes a trace path, or lacks a stable label.
 
 This is not a concurrency scheduler or an ACID stress rig. It is a small
 repeatable input for studying the sync path, conflict abort path, reader-table
