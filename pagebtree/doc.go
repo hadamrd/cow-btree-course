@@ -79,7 +79,7 @@
 // rejection/acceptance, growth and compact remap success/failure geometry,
 // sparse-hole punch begin/range/end/failure decisions, freelist/reclaim
 // metadata rollback, stale reader cleanup, and obsolete metadata-page reclaim
-// decisions as structured events.
+// decisions, plus transaction conflicts as structured events.
 // MmapTraceJSONLExporter adapts those events to newline-delimited JSON for
 // experiments. MmapTraceAsyncJSONLExporter adds a bounded background queue when
 // an experiment must keep trace I/O off the storage hook and can tolerate

@@ -383,6 +383,15 @@ sync, after metadata bytes are written, and before metadata sync, clearing the
 fault and calling `Sync` again publishes the already-visible commit durably
 enough to survive close/reopen.
 
+Conflicts are aborts, not failed syncs. When a read-write transaction discovers
+that the live tree revision moved after its stable begin snapshot, it rolls
+back its staged batch before any mmap sync phase. The trace stream emits
+`mmap-tx-conflict` with `ErrTxConflict` as the reason, giving soak tests and
+benchmarks a direct abort counter. The test
+`TestMmapReadWriteTxCommitSyncDetailedConflictIsObservableAbort` proves that
+`CommitSyncDetailed` starts no sync, keeps `SyncedRevision` unchanged, discards
+staged puts/deletes, and reopens without those staged writes.
+
 `Stats.Revision` is the current logical root revision. `Stats.SyncedRevision`
 is the last revision for which `Sync` returned successfully. After an unsynced
 write, `Revision` can be ahead of `SyncedRevision`. After a successful `Sync`,
@@ -939,7 +948,7 @@ Serious pieces in this repository:
 - Optional structured mmap trace events for sync phases and failures, recovery
   fallback, growth and compact remap success/failure geometry, stale reader
   cleanup, freelist/reclaim metadata rollback, and obsolete metadata-page
-  reclaim decisions.
+  reclaim decisions, plus transaction conflicts.
 - Explicit write batches that publish one revision, support point mutations and
   half-open range deletes, and can report per-operation old values through
   `CommitDetailed`.
@@ -983,7 +992,8 @@ Still research or incomplete compared with a production engine:
   transaction `CommitSync` both have process-exit crash proofs; transaction
   commit followed by a separate mmap `Sync` is covered too. `CommitSync` and
   `CommitSyncDetailed` provide explicit
-  commit-then-sync helpers, but
+  commit-then-sync helpers, and conflicted transaction commit-sync aborts are
+  now traceable without entering the sync path, but
   concurrency stress and filesystem-specific fsync guarantees remain research
   work.
 - Sparse-file hole punching is experimental and Linux-backed; portability,

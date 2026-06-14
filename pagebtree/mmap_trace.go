@@ -28,6 +28,7 @@ const (
 	MmapTracePunchRange                   MmapTraceEventKind = "mmap-punch-range"
 	MmapTracePunchEnd                     MmapTraceEventKind = "mmap-punch-end"
 	MmapTracePunchFailed                  MmapTraceEventKind = "mmap-punch-failed"
+	MmapTraceTxConflict                   MmapTraceEventKind = "mmap-tx-conflict"
 )
 
 // MmapTraceHook receives synchronous trace events from mmap-backed trees.

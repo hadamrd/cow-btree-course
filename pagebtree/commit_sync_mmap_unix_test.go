@@ -301,6 +301,86 @@ func TestMmapReadWriteTxCommitSyncDetailedSyncsChangedCommit(t *testing.T) {
 	}
 }
 
+func TestMmapReadWriteTxCommitSyncDetailedConflictIsObservableAbort(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 128,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	syncedRevision := tree.Stats().SyncedRevision
+	events = nil
+
+	tx := tree.BeginReadWrite()
+	tx.Put("bravo", []byte("two"))
+	tx.Delete("alpha")
+	tree.Put("outside", []byte("visible"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("outside Sync before conflicted tx CommitSyncDetailed: %v", err)
+	}
+	syncedRevision = tree.Stats().SyncedRevision
+	events = nil
+
+	result, err := tx.CommitSyncDetailed()
+	if !errors.Is(err, ErrTxConflict) {
+		t.Fatalf("tx CommitSyncDetailed conflict error = %v, want ErrTxConflict", err)
+	}
+	if result.Changed || len(result.Operations) != 0 {
+		t.Fatalf("tx CommitSyncDetailed conflict result = %+v, want empty unchanged result", result)
+	}
+	conflict := findTraceEvent(events, MmapTraceTxConflict, tree.Revision())
+	if conflict == nil {
+		t.Fatalf("tx CommitSyncDetailed conflict trace events = %v, want %s", traceKinds(events), MmapTraceTxConflict)
+	}
+	if conflict.Reason != ErrTxConflict.Error() {
+		t.Fatalf("tx conflict trace reason = %q, want %q", conflict.Reason, ErrTxConflict.Error())
+	}
+	if conflict.DirtyPages != 0 {
+		t.Fatalf("tx conflict trace dirty pages = %d, want 0", conflict.DirtyPages)
+	}
+	if traceKindIndex(events, MmapTraceSyncBegin) >= 0 {
+		t.Fatalf("tx CommitSyncDetailed conflict trace events = %v, want no sync begin", traceKinds(events))
+	}
+	if got := tree.Stats().SyncedRevision; got != syncedRevision {
+		t.Fatalf("SyncedRevision after conflicted tx CommitSyncDetailed = %d, want %d", got, syncedRevision)
+	}
+	if _, ok := tree.Get("bravo"); ok {
+		t.Fatalf("Get(bravo) after conflicted tx CommitSyncDetailed = true; want staged write discarded")
+	}
+	if _, ok := tree.Get("alpha"); !ok {
+		t.Fatalf("Get(alpha) after conflicted tx CommitSyncDetailed = false; want staged delete discarded")
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close after conflicted tx CommitSyncDetailed: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen after conflicted tx CommitSyncDetailed: %v", err)
+	}
+	defer reopened.Close()
+	if _, ok := reopened.Get("bravo"); ok {
+		t.Fatalf("reopened Get(bravo) after conflicted tx CommitSyncDetailed = true; want staged write absent")
+	}
+	if got, ok := reopened.Get("alpha"); !ok || string(got) != "one" {
+		t.Fatalf("reopened Get(alpha) after conflicted tx CommitSyncDetailed = %q, %v; want one, true", got, ok)
+	}
+	if got, ok := reopened.Get("outside"); !ok || string(got) != "visible" {
+		t.Fatalf("reopened Get(outside) after conflicted tx CommitSyncDetailed = %q, %v; want visible, true", got, ok)
+	}
+}
+
 func TestMmapReadWriteTxCommitSyncDetailedFaultsRemainRetryable(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -165,6 +165,7 @@ func (tx *ReadWriteTx) CommitDetailed() (BatchCommitResult, error) {
 	defer tx.close()
 	if tx.tree != nil && tx.tree.Revision() != tx.baseRevision {
 		tx.batch.Rollback()
+		tx.tree.emitMmapTraceFailure(MmapTraceTxConflict, ErrTxConflict)
 		return BatchCommitResult{}, ErrTxConflict
 	}
 	return tx.batch.CommitDetailed()

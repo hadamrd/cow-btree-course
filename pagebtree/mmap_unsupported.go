@@ -80,6 +80,8 @@ func (t *Tree) syncMmap() error {
 	return nil
 }
 
+func (t *Tree) emitMmapTraceFailure(kind MmapTraceEventKind, err error) {}
+
 func (t *Tree) compactMmapTail() error {
 	return nil
 }
