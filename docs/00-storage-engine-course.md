@@ -792,8 +792,9 @@ go run ./cmd/mmaptracesummary mmap-trace.jsonl > mmap-trace-summary.md
 
 `cmd/mmaptracesummary` is the standalone trace-review path. It reads value-free
 trace JSONL from files or stdin, prints Markdown event-kind counts, dirty-range
-and sparse-punch aggregates, failure reasons, and a bounded ordered timeline.
-Use `--limit N` to keep long workloads readable while still counting all events.
+and sparse-punch aggregates, transaction-conflict counts and reasons, failure
+reasons, and a bounded ordered timeline. Use `--limit N` to keep long workloads
+readable while still counting all events.
 
 For an operator-style read-only validation snapshot, `cmd/mmapinspect` opens an
 mmap database through `OpenMmapReadOnly`, runs `Audit`, and writes indented JSON

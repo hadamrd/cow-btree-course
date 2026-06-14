@@ -38,6 +38,8 @@ type traceSummary struct {
 	maxPunchRangePages         int
 	failures                   int
 	failureReasons             []string
+	transactionConflicts       int
+	transactionConflictReasons []string
 }
 
 type traceTimelineRow struct {
@@ -207,6 +209,11 @@ func (s *traceSummary) addEvent(event pagebtree.MmapTraceEvent) {
 		}
 	}
 	switch event.Kind {
+	case pagebtree.MmapTraceTxConflict:
+		s.transactionConflicts++
+		if event.Reason != "" {
+			s.transactionConflictReasons = append(s.transactionConflictReasons, event.Reason)
+		}
 	case pagebtree.MmapTracePunchRange:
 		s.addPunchRange(event)
 	case pagebtree.MmapTracePunchEnd:
@@ -305,6 +312,10 @@ func writeMarkdown(summary traceSummary, writer io.Writer) {
 	fmt.Fprintf(writer, "| Punched pages | %d |\n", summary.punchedPages)
 	fmt.Fprintf(writer, "| Punched bytes | %d |\n", summary.punchedBytes)
 	fmt.Fprintf(writer, "| Max punch range pages | %d |\n", summary.maxPunchRangePages)
+	fmt.Fprintf(writer, "| Transaction conflicts | %d |\n", summary.transactionConflicts)
+	if len(summary.transactionConflictReasons) > 0 {
+		fmt.Fprintf(writer, "| Transaction conflict reasons | %s |\n", escapeCell(strings.Join(summary.transactionConflictReasons, "; ")))
+	}
 	fmt.Fprintf(writer, "| Failures | %d |\n", summary.failures)
 	if len(summary.failureReasons) > 0 {
 		fmt.Fprintf(writer, "| Failure reasons | %s |\n", escapeCell(strings.Join(summary.failureReasons, "; ")))

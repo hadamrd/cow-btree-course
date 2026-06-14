@@ -193,9 +193,10 @@ go run ./cmd/mmaptracesummary mmap-trace.jsonl > mmap-trace-summary.md
 
 `cmd/mmaptracesummary` reads one or more trace JSONL files, or stdin, and writes
 a stable Markdown review artifact with event-kind counts, dirty data range
-totals, sparse-punch totals, failure reasons, and a bounded timeline. It does
-not need the database file; use `mmapinspect --trace` when you also want to
-correlate the trace's last root/revision with a recovered database image.
+totals, sparse-punch totals, transaction-conflict counts and reasons, failure
+reasons, and a bounded timeline. It does not need the database file; use
+`mmapinspect --trace` when you also want to correlate the trace's last
+root/revision with a recovered database image.
 
 For a one-shot read-only integrity snapshot, `cmd/mmapinspect` opens the
 database with `OpenMmapReadOnly`, runs `Audit`, and prints indented JSON with

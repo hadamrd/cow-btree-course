@@ -43,6 +43,31 @@ func TestRunSummarizesTraceJSONLAsMarkdown(t *testing.T) {
 	}
 }
 
+func TestRunSummarizesTransactionConflicts(t *testing.T) {
+	input := strings.Join([]string{
+		`{"kind":"mmap-sync-begin","revision":7,"root":3,"next_page":12}`,
+		`{"kind":"mmap-tx-conflict","revision":8,"root":4,"next_page":13,"reason":"read-write transaction conflict"}`,
+		`{"kind":"mmap-tx-conflict","revision":9,"root":5,"next_page":14,"reason":"tenant|writer conflict"}`,
+	}, "\n")
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, strings.NewReader(input), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"| Transaction conflicts | 2 |",
+		"| Transaction conflict reasons | read-write transaction conflict; tenant\\|writer conflict |",
+		"| mmap-tx-conflict | 2 |",
+		"| 2 | mmap-tx-conflict | 8 | 4 | 13 | 0 | 0 | read-write transaction conflict |",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("summary missing %q in:\n%s", want, output)
+		}
+	}
+}
+
 func TestRunReadsTraceFilesAndHonorsTimelineLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trace.jsonl")
 	content := strings.Join([]string{
