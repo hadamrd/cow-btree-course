@@ -680,6 +680,10 @@ can start with `NewMmapTraceJSONLExporter`, which writes one lower-snake-field
 JSON object per line and keeps the first write error for later inspection
 through `Err()`. That is intentionally small: it makes the kernel visible during
 tests and demos without putting a logging framework in the storage core.
+The trace schema is intentionally value-free: it reports page IDs, revisions,
+counts, ranges, durations, slots, and failure reasons, but it does not include
+application keys or values. If an embedding application adds its own trace
+fields around this hook, redact at that application boundary before export.
 
 ```go
 exporter := pagebtree.NewMmapTraceJSONLExporter(os.Stdout)
@@ -692,7 +696,9 @@ if err := exporter.Err(); err != nil {
 }
 ```
 
-The runnable command version emits JSONL only on stdout:
+The runnable command version emits JSONL only on stdout. It performs a small
+write/delete/compact workload, so the output includes ordinary sync events plus
+growth and compaction geometry:
 
 ```bash
 go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
@@ -724,7 +730,7 @@ Code to read:
 - Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
 - JSONL exporter: [`pagebtree/mmap_trace_export.go#L9-L72`](../pagebtree/mmap_trace_export.go#L9-L72)
 - JSONL exporter example: [`pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)
-- JSONL trace demo command: [`cmd/mmaptrace-demo/main.go#L12-L42`](../cmd/mmaptrace-demo/main.go#L12-L42)
+- JSONL trace demo command: [`cmd/mmaptrace-demo/main.go`](../cmd/mmaptrace-demo/main.go)
 - Hook option on mmap open: [`pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
 - Sync trace emissions: [`pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)
 - Recovery trace emissions: [`pagebtree/mmap.go#L937-L1051`](../pagebtree/mmap.go#L937-L1051)
