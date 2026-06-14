@@ -19,6 +19,8 @@ What is credible today:
 - Overflow page chains with validation.
 - Kernel page-cache cooperation through mmap advice, file advice on Linux,
   exact warm-up, exact range prefetch, and cache-residency stats.
+- Offline mmap copy compaction that copies live records into a fresh smaller
+  file without overwriting existing destination artifacts.
 - A bounded derived branch-routing cache that does not duplicate raw page bytes.
 - Opt-in mmap trace events for sync phases, recovery candidate accept/reject
   decisions, growth remaps, compact shrinks, stale reader cleanup, and obsolete
@@ -50,7 +52,7 @@ research frontier.
 | --- | --- | --- | --- |
 | Byte-balanced pages | Variable-size records make key-count balancing weak. | Split/delete decisions are mostly degree/key-count based, with overflow fallback for byte pressure. | Track page byte fill and split/redistribute by byte occupancy. |
 | Prefix compression | Interior separators and leaf keys waste space without compression. | Keys are stored plainly in every cell. | Add an optional page-local prefix-compressed leaf format version. |
-| Online vacuum / page relocation | Tail compaction cannot reclaim interior holes to the filesystem. | `Compact` only trims a contiguous free suffix and never moves live pages. | Add an offline copy/compact tool before attempting online relocation. |
+| Online vacuum / page relocation | Tail compaction cannot reclaim interior holes to the filesystem. | Started: `Compact` trims only a contiguous free suffix and never moves live pages; `CopyCompactMmap` now provides an offline replacement-file path that copies live records from a read-only source snapshot into a fresh compact mmap tree and refuses to overwrite existing destination artifacts. | Add atomic replacement guidance and then attempt online page relocation or sparse-hole experiments. |
 | Sparse-file punching | Reusable interior pages remain allocated by the filesystem. | Interior free pages stay inside the file. | Experiment with hole punching for page-size-aligned free extents while preserving mmap semantics. |
 | Multi-process robustness | Reader tables need stronger owner identity than PID alone. | Slots use PID, revision, and token, with stale PID cleanup and fail-closed validation. | Include boot/session identity or start time to reduce PID reuse ambiguity. |
 | Observability | A serious engine should explain stalls, reclaim pressure, and recovery decisions. | Started: `MmapOptions.TraceHook` emits structured `MmapTraceEvent` records for sync phases, recovery candidate accept/reject decisions, growth remap geometry, compact shrink geometry, stale reader cleanup counts, and obsolete metadata-page reclaim decisions. Stats still expose counters, and `MmapCacheStats` exposes kernel residency. | Add slow sync range events, event examples/exporter guidance, and trace coverage for failure/rollback paths. |
@@ -90,6 +92,30 @@ Code to read:
 - Cursor implementation: [`../pagebtree/cursor.go`](../pagebtree/cursor.go)
 - Cursor behavior tests: [`../pagebtree/cursor_test.go`](../pagebtree/cursor_test.go)
 - mmap cursor reader-pinning test: [`../pagebtree/mmap_test.go`](../pagebtree/mmap_test.go)
+
+## Gap Advanced In This Pass: Offline Copy Compaction
+
+The new copy-compaction path is deliberately offline:
+
+- `CopyCompactMmap(src, dst, options)` opens `src` through `OpenMmapReadOnly`.
+- It validates the recovered source root with `Check`.
+- It refuses to run if the destination file, destination `.writer` sidecar, or
+  destination `.readers` sidecar already exists.
+- It copies live records through `RangeBytes` into a new mmap tree.
+- It validates and tail-compacts the destination before returning file-size and
+  mapped-page statistics.
+- `cmd/mmapcopycompact` exposes the same path for experiments.
+
+This closes the first useful step toward vacuuming: interior free pages can be
+removed from a replacement file. It does not yet solve online relocation,
+atomic file replacement, or sparse-hole punching inside the active database.
+
+Code to read:
+
+- API and result contract: [`../pagebtree/copy_compact.go#L15-L104`](../pagebtree/copy_compact.go#L15-L104)
+- Destination safety checks: [`../pagebtree/copy_compact.go#L106-L142`](../pagebtree/copy_compact.go#L106-L142)
+- CLI wrapper: [`../cmd/mmapcopycompact/main.go#L10-L25`](../cmd/mmapcopycompact/main.go#L10-L25)
+- Tests: [`../pagebtree/mmap_test.go#L1993-L2085`](../pagebtree/mmap_test.go#L1993-L2085)
 
 ## Recommended Next Grind
 

@@ -453,12 +453,37 @@ file. Many pages become reusable inside the file, but the file remains allocated
 until a tail compaction can trim a contiguous free suffix. Interior free pages
 are reusable by the engine but still part of the file's allocated range.
 
+There are two different compaction ideas in the repository:
+
+- In-place tail compaction: `Tree.Compact()` can shrink only free pages at the
+  physical end of the file. It preserves page IDs and therefore does not need to
+  rewrite branch child pointers.
+- Offline copy compaction: `CopyCompactMmap(src, dst, options)` opens the source
+  read-only, walks live records in sorted order, writes them into a new mmap
+  tree, validates the result, and trims the destination. This can reclaim
+  interior free pages because the replacement file receives a fresh page-ID
+  layout. It is not an online vacuum; the caller still has to control writer
+  quiescence and file replacement.
+
+```mermaid
+flowchart LR
+    A["old mmap file<br/>live + interior free pages"] --> R["OpenMmapReadOnly"]
+    R --> S["RangeBytes live keys"]
+    S --> W["OpenMmap new destination"]
+    W --> C["PutBytes into fresh tree"]
+    C --> K["Check + Compact destination"]
+    K --> N["smaller replacement file"]
+```
+
 Code to read:
 
 - Free list and retired-page fields: [`pagebtree/tree.go#L12-L17`](../pagebtree/tree.go#L12-L17)
 - Allocation reuses free pages first: [`pagebtree/tree.go#L201-L218`](../pagebtree/tree.go#L201-L218)
 - Compaction refuses active readers and trims only safe tail pages: [`pagebtree/tree.go#L257-L275`](../pagebtree/tree.go#L257-L275)
 - Tail compaction mechanics: [`pagebtree/mmap.go#L408-L482`](../pagebtree/mmap.go#L408-L482)
+- Offline copy-compaction API: [`pagebtree/copy_compact.go#L23-L104`](../pagebtree/copy_compact.go#L23-L104)
+- Copy-compaction command: [`cmd/mmapcopycompact/main.go#L10-L25`](../cmd/mmapcopycompact/main.go#L10-L25)
+- Copy-compaction behavior tests: [`pagebtree/mmap_test.go#L1993-L2085`](../pagebtree/mmap_test.go#L1993-L2085)
 - Persisted reclaim recovery: [`pagebtree/mmap.go#L1099-L1151`](../pagebtree/mmap.go#L1099-L1151)
 
 ## Module 13: Reader Tables and MVCC Watermarks
