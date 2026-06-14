@@ -12,6 +12,7 @@ import (
 
 type probeReport struct {
 	Path         string          `json:"path"`
+	Label        string          `json:"label,omitempty"`
 	KeysInserted int             `json:"keys_inserted"`
 	KeysDeleted  int             `json:"keys_deleted"`
 	ValueBytes   int             `json:"value_bytes"`
@@ -149,7 +150,10 @@ func decodeReport(reader io.Reader) (probeReport, error) {
 }
 
 func rowsForReport(report probeReport, inputName string) []probeRow {
-	reportName := filepath.Base(report.Path)
+	reportName := report.Label
+	if reportName == "" {
+		reportName = filepath.Base(report.Path)
+	}
 	if reportName == "." || reportName == string(filepath.Separator) || reportName == "" {
 		reportName = filepath.Base(inputName)
 	}

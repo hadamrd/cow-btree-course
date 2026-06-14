@@ -27,7 +27,7 @@ go run ./cmd/mmapplatform
 To collect local filesystem evidence for a disposable database path, run:
 
 ```bash
-go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 /path/to/probe.db > probe.json
+go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 --label local-fs /path/to/probe.db > probe.json
 go run ./cmd/fsprobesummary probe.json > probe-summary.md
 ```
 
@@ -38,12 +38,14 @@ punching, and prints value-free JSON with `Stats`, `MmapSpaceStats`,
 filesystem allocation evidence from the actual path you give it, including
 filesystem type, mount path, mount source, and mount options when the platform
 exposes them; it still does not simulate sudden power loss or prove crash
-ordering. `cmd/fsprobesummary` converts one or more saved probe JSON reports
-into a stable Markdown table with one row each for insert, delete, compact, and
-punch phases, including logical bytes, allocated bytes, sparse bytes, free page
-counts, punched pages, filesystem identity, and mount identity. Keep the raw
-JSON as the source of truth and use the Markdown summary for review notes or a
-manual filesystem matrix.
+ordering. Use `--label` to give the report a publishable name such as
+`linux-ext4-nvme` or `darwin-apfs-local` without relying on the raw local path
+as the comparison key. `cmd/fsprobesummary` converts one or more saved probe
+JSON reports into a stable Markdown table with one row each for insert, delete,
+compact, and punch phases, including logical bytes, allocated bytes, sparse
+bytes, free page counts, punched pages, filesystem identity, and mount identity.
+Keep the raw JSON as the source of truth and use the Markdown summary for
+review notes or a manual filesystem matrix.
 
 ## Current Matrix
 

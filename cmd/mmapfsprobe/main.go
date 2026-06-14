@@ -13,6 +13,7 @@ import (
 
 type fsProbeReport struct {
 	Path         string                           `json:"path"`
+	Label        string                           `json:"label,omitempty"`
 	KeysInserted int                              `json:"keys_inserted"`
 	KeysDeleted  int                              `json:"keys_deleted"`
 	ValueBytes   int                              `json:"value_bytes"`
@@ -32,6 +33,7 @@ type fsProbePhase struct {
 
 type fsProbeOptions struct {
 	path       string
+	label      string
 	keys       int
 	valueBytes int
 }
@@ -101,6 +103,14 @@ func parseArgs(args []string) (fsProbeOptions, error) {
 				return fsProbeOptions{}, fmt.Errorf("--value-bytes expects an integer")
 			}
 			options.valueBytes = value
+		case arg == "--label":
+			i++
+			if i >= len(args) {
+				return fsProbeOptions{}, fmt.Errorf("--label expects a value")
+			}
+			options.label = args[i]
+		case strings.HasPrefix(arg, "--label="):
+			options.label = strings.TrimPrefix(arg, "--label=")
 		case strings.HasPrefix(arg, "-"):
 			return fsProbeOptions{}, fmt.Errorf("unknown argument %q", arg)
 		default:
@@ -119,11 +129,23 @@ func parseArgs(args []string) (fsProbeOptions, error) {
 	if options.valueBytes < 1 {
 		return fsProbeOptions{}, fmt.Errorf("--value-bytes must be positive")
 	}
+	if strings.TrimSpace(options.label) != options.label || (options.label == "" && labelWasExplicit(args)) {
+		return fsProbeOptions{}, fmt.Errorf("--label must be non-empty and must not have leading or trailing whitespace")
+	}
 	return options, nil
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintf(stderr, "usage: mmapfsprobe [--keys N] [--value-bytes N] DB.db\n")
+	fmt.Fprintf(stderr, "usage: mmapfsprobe [--keys N] [--value-bytes N] [--label NAME] DB.db\n")
+}
+
+func labelWasExplicit(args []string) bool {
+	for _, arg := range args {
+		if arg == "--label" || strings.HasPrefix(arg, "--label=") {
+			return true
+		}
+	}
+	return false
 }
 
 func runProbe(options fsProbeOptions) (fsProbeReport, error) {
@@ -188,6 +210,7 @@ func runProbe(options fsProbeOptions) (fsProbeReport, error) {
 
 	report := fsProbeReport{
 		Path:         options.path,
+		Label:        options.label,
 		KeysInserted: options.keys,
 		KeysDeleted:  keysDeleted,
 		ValueBytes:   options.valueBytes,

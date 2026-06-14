@@ -779,7 +779,7 @@ and sparse-punch phases as value-free JSON. `cmd/fsprobesummary` turns one or
 more saved probe reports into a stable Markdown comparison table:
 
 ```bash
-go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 /path/to/probe.db > probe.json
+go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 --label local-fs /path/to/probe.db > probe.json
 go run ./cmd/fsprobesummary probe.json > probe-summary.md
 ```
 

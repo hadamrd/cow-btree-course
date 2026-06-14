@@ -18,7 +18,7 @@ func TestRunFilesystemProbePrintsSpaceEvidence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "probe.db")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"--keys", "96", "--value-bytes", "256", path}, &stdout, &stderr)
+	code := run([]string{"--keys", "96", "--value-bytes", "256", "--label", "darwin-apfs-local", path}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
 	}
@@ -32,6 +32,9 @@ func TestRunFilesystemProbePrintsSpaceEvidence(t *testing.T) {
 	}
 	if report.Path != path {
 		t.Fatalf("Path = %q, want %q", report.Path, path)
+	}
+	if report.Label != "darwin-apfs-local" {
+		t.Fatalf("Label = %q, want darwin-apfs-local", report.Label)
 	}
 	if report.KeysInserted != 96 || report.KeysDeleted == 0 {
 		t.Fatalf("key counts inserted/deleted = %d/%d, want inserted 96 and some deleted", report.KeysInserted, report.KeysDeleted)
@@ -65,6 +68,20 @@ func TestRunFilesystemProbePrintsSpaceEvidence(t *testing.T) {
 	}
 	if report.PunchStats.FreePages == 0 {
 		t.Fatalf("PunchStats.FreePages = 0, want free pages considered")
+	}
+}
+
+func TestRunFilesystemProbeRejectsEmptyLabel(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--label", "", "probe.db"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run exit = %d, want 2", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--label") {
+		t.Fatalf("stderr = %q, want --label validation", stderr.String())
 	}
 }
 

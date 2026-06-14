@@ -10,6 +10,7 @@ import (
 
 const sampleProbeReport = `{
   "path": "/tmp/probe-apfs.db",
+  "label": "darwin-apfs-local",
   "keys_inserted": 256,
   "keys_deleted": 128,
   "value_bytes": 512,
@@ -113,8 +114,8 @@ func TestRunSummarizesFilesystemProbeFileAsMarkdown(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"| Report | GOOS | FS | Mount | Mount options | Keys | Value bytes | Phase | Len | Free pages | Retired pages | Logical bytes | Allocated bytes | Sparse bytes | Punched pages | Punch error |",
-		"| probe-apfs.db | darwin | apfs (17) | /System/Volumes/Data [/dev/disk3s5] | local,journaled | 256/128 | 512 | after_insert | 256 | 0 | 0 | 1048576 | 917504 | 131072 |  |  |",
-		"| probe-apfs.db | darwin | apfs (17) | /System/Volumes/Data [/dev/disk3s5] | local,journaled | 256/128 | 512 | after_punch | 128 | 4 | 0 | 786432 | 704512 | 81920 | 3 | mmap sparse hole punching is unsupported |",
+		"| darwin-apfs-local | darwin | apfs (17) | /System/Volumes/Data [/dev/disk3s5] | local,journaled | 256/128 | 512 | after_insert | 256 | 0 | 0 | 1048576 | 917504 | 131072 |  |  |",
+		"| darwin-apfs-local | darwin | apfs (17) | /System/Volumes/Data [/dev/disk3s5] | local,journaled | 256/128 | 512 | after_punch | 128 | 4 | 0 | 786432 | 704512 | 81920 | 3 | mmap sparse hole punching is unsupported |",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
@@ -128,7 +129,7 @@ func TestRunReadsFilesystemProbeReportFromStdin(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "| probe-apfs.db |") {
+	if !strings.Contains(stdout.String(), "| darwin-apfs-local |") {
 		t.Fatalf("stdout missing parsed probe report: %q", stdout.String())
 	}
 }
@@ -141,6 +142,7 @@ func TestRunAcceptsMultipleFilesystemProbeFiles(t *testing.T) {
 		t.Fatalf("write first probe file: %v", err)
 	}
 	secondReport := strings.ReplaceAll(sampleProbeReport, "/tmp/probe-apfs.db", "/tmp/probe-ext4.db")
+	secondReport = strings.ReplaceAll(secondReport, `"label": "darwin-apfs-local"`, `"label": "linux-ext4-local"`)
 	secondReport = strings.ReplaceAll(secondReport, `"GOOS": "darwin"`, `"GOOS": "linux"`)
 	secondReport = strings.ReplaceAll(secondReport, `"FilesystemType": "apfs"`, `"FilesystemType": "ext4"`)
 	if err := os.WriteFile(second, []byte(secondReport), 0o644); err != nil {
@@ -156,7 +158,7 @@ func TestRunAcceptsMultipleFilesystemProbeFiles(t *testing.T) {
 	if strings.Count(output, "| after_insert |") != 2 {
 		t.Fatalf("after_insert row count = %d, want 2:\n%s", strings.Count(output, "| after_insert |"), output)
 	}
-	if !strings.Contains(output, "| probe-ext4.db | linux | ext4 (17) | /System/Volumes/Data [/dev/disk3s5] | local,journaled |") {
+	if !strings.Contains(output, "| linux-ext4-local | linux | ext4 (17) | /System/Volumes/Data [/dev/disk3s5] | local,journaled |") {
 		t.Fatalf("stdout missing second report:\n%s", output)
 	}
 }
