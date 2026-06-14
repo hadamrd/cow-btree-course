@@ -129,6 +129,28 @@ The package also exposes `MmapCacheStats`, backed by `mincore` on Unix. This is 
 
 That makes the distinction visible between the project's 4096-byte database pages and the kernel's VM pages. On some systems those sizes match; on others one OS page covers several database pages.
 
+## Observability Hooks
+
+Counters answer "how much"; trace events answer "why did this path happen?" The project now exposes `MmapOptions.TraceHook`, an optional synchronous callback that receives `MmapTraceEvent` structs. The hook is intentionally narrow and storage-engine-shaped, not a general logging framework. It reports:
+
+- `mmap-sync-begin`, `mmap-sync-data-synced`, `mmap-sync-meta-published`, and `mmap-sync-end` around the dirty-data-before-metadata publish path
+- `mmap-recovery-candidate-rejected` when a metadata candidate fails checksum, slot, bounds, reachable-page, freelist, reclaim, leaf-link, or length validation
+- `mmap-recovery-candidate-accepted` when recovery chooses the root that will serve reads
+- `mmap-reclaim-obsolete-metadata-pages` when old freelist/reclaim metadata pages become reusable after neither checked metadata slot references them
+
+Each event carries stable revision/page geometry: root page ID, `nextPage`, mapped capacity, logical length, dirty/free/retired counts, reclaimed-page count for reclaim events, metadata slot, and a rejection reason when one exists. A hook should return quickly and should not call back into the same tree; use it to append to a test buffer, increment a probe, or hand off to an external logger.
+
+This is useful when studying recovery fallback. If the newest metadata page points at a torn root page, a trace hook can show the newest candidate rejected with a checksum or invariant reason and the older candidate accepted. That is more precise than a counter saying "one open succeeded."
+
+Code to read:
+
+- Trace event API: [`../pagebtree/mmap_trace.go#L3-L36`](../pagebtree/mmap_trace.go#L3-L36)
+- Hook option: [`../pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
+- Sync phase emissions: [`../pagebtree/mmap.go#L1265-L1285`](../pagebtree/mmap.go#L1265-L1285)
+- Recovery candidate emissions: [`../pagebtree/mmap.go#L923-L1037`](../pagebtree/mmap.go#L923-L1037)
+- Obsolete metadata-page reclaim event: [`../pagebtree/mmap.go#L1391-L1421`](../pagebtree/mmap.go#L1391-L1421)
+- Trace hook behavior tests: [`../pagebtree/mmap_test.go#L2715-L2769`](../pagebtree/mmap_test.go#L2715-L2769) and [`../pagebtree/mmap_test.go#L3372-L3460`](../pagebtree/mmap_test.go#L3372-L3460)
+
 ## Live Integrity Checks
 
 `Tree.Check()` runs the reachable-page validator against the currently open tree. It verifies page checksums, slotted-page layout, branch child reachability, separator keys, subtree key bounds, non-root leaf and branch minimum fill, overflow references and chains, length-vs-key-count consistency, and reusable-page safety. When no in-process reader is active, it also validates persisted leaf sibling links.

@@ -20,6 +20,8 @@ What is credible today:
 - Kernel page-cache cooperation through mmap advice, file advice on Linux,
   exact warm-up, exact range prefetch, and cache-residency stats.
 - A bounded derived branch-routing cache that does not duplicate raw page bytes.
+- Opt-in mmap trace events for sync phases, recovery candidate accept/reject
+  decisions, and obsolete metadata-page reclaim decisions.
 - Snapshot-backed cursors for incremental ordered reads.
 - A persisted mmap key-order identifier for the current bytewise page ordering.
 - Reproducible Go microbenchmarks for page and mmap get, seek/next, range,
@@ -50,7 +52,7 @@ research frontier.
 | Online vacuum / page relocation | Tail compaction cannot reclaim interior holes to the filesystem. | `Compact` only trims a contiguous free suffix and never moves live pages. | Add an offline copy/compact tool before attempting online relocation. |
 | Sparse-file punching | Reusable interior pages remain allocated by the filesystem. | Interior free pages stay inside the file. | Experiment with hole punching for page-size-aligned free extents while preserving mmap semantics. |
 | Multi-process robustness | Reader tables need stronger owner identity than PID alone. | Slots use PID, revision, and token, with stale PID cleanup and fail-closed validation. | Include boot/session identity or start time to reduce PID reuse ambiguity. |
-| Observability | A serious engine should explain stalls, reclaim pressure, and recovery decisions. | Stats expose many counters, but no structured trace/event stream. | Add optional event hooks for sync phases, recovery candidate rejection, and reclaim decisions. |
+| Observability | A serious engine should explain stalls, reclaim pressure, and recovery decisions. | Started: `MmapOptions.TraceHook` emits structured `MmapTraceEvent` records for sync phases, recovery candidate accept/reject decisions, and obsolete metadata-page reclaim decisions. Stats still expose counters, and `MmapCacheStats` exposes kernel residency. | Add event coverage for growth, compaction, reader-table cleanup, slow sync ranges, and an example exporter. |
 | Benchmarks | Without benchmarks, optimization claims are weak. | Started: `pagebtree/bench_test.go` covers page and mmap point `Get`, cursor seek/next, bounded range scans, sequential insert/delete, mmap sync-after-put, mmap delete+sync, and mmap reopen validation. | Add benchstat comparison scripts, larger workload profiles, and CI/manual baseline guidance. |
 
 ## P2 Gaps

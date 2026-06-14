@@ -60,6 +60,7 @@ type MmapOptions struct {
 	AccessPattern           MmapAccessPattern
 	PageCacheCapacity       int
 	RangePrefetchLeafWindow int
+	TraceHook               MmapTraceHook
 }
 
 type mmapArena struct {
@@ -191,6 +192,7 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		arena:                   arena,
 		pageCache:               newPageCache(options.PageCacheCapacity),
 		rangePrefetchLeafWindow: normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
+		traceHook:               options.TraceHook,
 	}
 
 	if existingSize > 0 {
@@ -928,6 +930,7 @@ func (t *Tree) loadMeta() error {
 		metaPage := t.arena.data[index*PageSize : (index+1)*PageSize]
 		record, ok, err := readMetaPageChecked(metaPage)
 		if err != nil {
+			t.emitMmapTraceMetaError(MmapTraceRecoveryCandidateRejected, metaPage, index, err)
 			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaError(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, metaPage)
 			continue
 		}
@@ -935,14 +938,17 @@ func (t *Tree) loadMeta() error {
 			continue
 		}
 		if err := validateMetaSlot(record, index); err != nil {
+			t.emitMmapTraceRecord(MmapTraceRecoveryCandidateRejected, record, index, err.Error())
 			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaErrorForRevision(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, record.revision)
 			continue
 		}
 		if err := t.validateMetaKeyOrder(record); err != nil {
+			t.emitMmapTraceRecord(MmapTraceRecoveryCandidateRejected, record, index, err.Error())
 			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaErrorForRevision(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, record.revision)
 			continue
 		}
 		if err := t.validateMetaBounds(record); err != nil {
+			t.emitMmapTraceRecord(MmapTraceRecoveryCandidateRejected, record, index, err.Error())
 			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaErrorForRevision(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, record.revision)
 			continue
 		}
@@ -974,20 +980,22 @@ func (t *Tree) loadMeta() error {
 	}
 
 	var newestCandidateErr error
+	rejectCandidate := func(record metaRecord, err error) {
+		if newestCandidateErr == nil {
+			newestCandidateErr = err
+		}
+		t.emitMmapTraceRecord(MmapTraceRecoveryCandidateRejected, record, int(record.revision%metaPageCount), err.Error())
+	}
 	for _, record := range records {
 		t.applyMetaRecord(record)
 		freelistPages, err := t.resolveMetaFreelist(&record)
 		if err != nil {
-			if newestCandidateErr == nil {
-				newestCandidateErr = err
-			}
+			rejectCandidate(record, err)
 			continue
 		}
 		reachable, err := t.validateReachablePages()
 		if err != nil {
-			if newestCandidateErr == nil {
-				newestCandidateErr = err
-			}
+			rejectCandidate(record, err)
 			continue
 		}
 		owned := clonePageSet(reachable)
@@ -1000,34 +1008,24 @@ func (t *Tree) loadMeta() error {
 			owned[id] = true
 		}
 		if overlapErr != nil {
-			if newestCandidateErr == nil {
-				newestCandidateErr = overlapErr
-			}
+			rejectCandidate(record, overlapErr)
 			continue
 		}
 		reclaimable := clonePageSet(owned)
 		if err := t.validateFreelist(record.free, record.maxPages, reclaimable); err != nil {
-			if newestCandidateErr == nil {
-				newestCandidateErr = err
-			}
+			rejectCandidate(record, err)
 			continue
 		}
 		if err := t.validateRetiredPages(record.retired, record.revision, record.maxPages, reclaimable); err != nil {
-			if newestCandidateErr == nil {
-				newestCandidateErr = err
-			}
+			rejectCandidate(record, err)
 			continue
 		}
 		if err := t.validateLeafLinks(); err != nil {
-			if newestCandidateErr == nil {
-				newestCandidateErr = err
-			}
+			rejectCandidate(record, err)
 			continue
 		}
 		if err := t.validateMetaInvariants(record); err != nil {
-			if newestCandidateErr == nil {
-				newestCandidateErr = err
-			}
+			rejectCandidate(record, err)
 			continue
 		}
 		t.free = append([]PageID(nil), record.free...)
@@ -1035,6 +1033,7 @@ func (t *Tree) loadMeta() error {
 		t.metaFreelistRoot = record.freeRoot
 		t.metaFreelistPages = append([]PageID(nil), freelistPages...)
 		t.reclaimObsoleteMetaFreelistPages()
+		t.emitMmapTraceRecord(MmapTraceRecoveryCandidateAccepted, record, int(record.revision%metaPageCount), "")
 		return nil
 	}
 	if newestCandidateErr != nil {
@@ -1266,6 +1265,7 @@ func (t *Tree) syncMmap() error {
 	if t.arena == nil || t.arena.readOnly {
 		return nil
 	}
+	t.emitMmapTrace(MmapTraceSyncBegin)
 	restoreFreelistPages, err := t.prepareMetaFreelistPages()
 	if err != nil {
 		return err
@@ -1274,11 +1274,14 @@ func (t *Tree) syncMmap() error {
 		restoreFreelistPages()
 		return err
 	}
+	t.emitMmapTrace(MmapTraceSyncDataSynced)
 	if err := t.publishMeta(); err != nil {
 		restoreFreelistPages()
 		return err
 	}
+	t.emitMmapTrace(MmapTraceSyncMetaPublished)
 	t.reclaimObsoleteMetaFreelistPages()
+	t.emitMmapTrace(MmapTraceSyncEnd)
 	return nil
 }
 
@@ -1389,6 +1392,7 @@ func (t *Tree) reclaimObsoleteMetaFreelistPages() {
 	if t.arena == nil {
 		return
 	}
+	freeBefore := len(t.free)
 	referenced := map[PageID]bool{}
 	for index := 0; index < metaPageCount; index++ {
 		record, ok, err := readMetaPageChecked(t.arena.data[index*PageSize : (index+1)*PageSize])
@@ -1410,6 +1414,9 @@ func (t *Tree) reclaimObsoleteMetaFreelistPages() {
 		}
 		t.free = append(t.free, id)
 		freeSet[id] = true
+	}
+	if reclaimed := len(t.free) - freeBefore; reclaimed > 0 {
+		t.emitMmapTraceReclaimed(MmapTraceReclaimObsoleteMetadataPages, reclaimed)
 	}
 }
 

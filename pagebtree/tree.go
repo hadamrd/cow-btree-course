@@ -25,6 +25,7 @@ type Tree struct {
 	rangePrefetchPages      int
 	mmapWarmupHints         int
 	mmapWarmupPages         int
+	traceHook               MmapTraceHook
 }
 
 type Options struct {

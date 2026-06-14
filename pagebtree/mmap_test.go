@@ -2712,6 +2712,62 @@ func TestMmapSyncReclaimsObsoleteFreelistPagesAfterBothMetaPagesAdvance(t *testi
 	}
 }
 
+func TestMmapTraceHookReportsObsoleteMetadataPageReclaim(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 4096,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	clear(tree.arena.dirtyPages)
+
+	freeCount := maxMetaFreePages + 17
+	tree.free = make([]PageID, freeCount)
+	for i := range tree.free {
+		tree.free[i] = firstTreePageID + 1 + PageID(i)
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(freeCount)
+
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("first large-freelist Sync: %v", err)
+	}
+	firstGeneration := append([]PageID(nil), tree.metaFreelistPages...)
+	if len(firstGeneration) == 0 {
+		t.Fatalf("first large-freelist Sync did not create freelist pages")
+	}
+
+	events = nil
+	tree.Put("bravo", []byte("two"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("second large-freelist Sync: %v", err)
+	}
+	tree.Put("charlie", []byte("three"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("third large-freelist Sync: %v", err)
+	}
+
+	event := findTraceEvent(events, MmapTraceReclaimObsoleteMetadataPages, tree.Revision())
+	if event == nil {
+		t.Fatalf("missing obsolete metadata-page reclaim event in %+v", events)
+	}
+	if event.ReclaimedPages != len(firstGeneration) {
+		t.Fatalf("reclaimed metadata pages = %d, want %d", event.ReclaimedPages, len(firstGeneration))
+	}
+}
+
 func TestMmapObsoleteFreelistCrashImageMatrixClassifiesMetadataGenerationReclaim(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -3310,6 +3366,96 @@ func TestMmapTreeFallsBackWhenNewestRootPageIsCorrupt(t *testing.T) {
 	}
 	if reopened.Revision() != 1 {
 		t.Fatalf("fallback revision = %d, want 1", reopened.Revision())
+	}
+}
+
+func TestMmapTraceHookReportsSyncPhases(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 64,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	events = nil
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync traced tree: %v", err)
+	}
+
+	wantKinds := []MmapTraceEventKind{
+		MmapTraceSyncBegin,
+		MmapTraceSyncDataSynced,
+		MmapTraceSyncMetaPublished,
+		MmapTraceSyncEnd,
+	}
+	if got := traceKinds(events); !slices.Equal(got, wantKinds) {
+		t.Fatalf("sync trace kinds = %v, want %v", got, wantKinds)
+	}
+	for _, event := range events {
+		if event.Revision != tree.Revision() {
+			t.Fatalf("sync event %+v revision = %d, want %d", event, event.Revision, tree.Revision())
+		}
+		if event.Root != tree.Stats().Root {
+			t.Fatalf("sync event %+v root = %d, want %d", event, event.Root, tree.Stats().Root)
+		}
+		if event.NextPage != tree.nextPage {
+			t.Fatalf("sync event %+v nextPage = %d, want %d", event, event.NextPage, tree.nextPage)
+		}
+	}
+}
+
+func TestMmapTraceHookReportsRecoveryCandidateFallback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync older root: %v", err)
+	}
+	tree.Put("bravo", []byte("two"))
+	newestRoot := tree.Stats().Root
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	corruptPagePayload(t, path, newestRoot)
+
+	var events []MmapTraceEvent
+	reopened, err := OpenMmap(path, MmapOptions{
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen after corrupt newest root page: %v", err)
+	}
+	defer reopened.Close()
+
+	rejected := findTraceEvent(events, MmapTraceRecoveryCandidateRejected, 2)
+	if rejected == nil {
+		t.Fatalf("missing recovery rejection for newest revision in events %+v", events)
+	}
+	if rejected.Reason == "" {
+		t.Fatalf("rejected event has empty reason: %+v", rejected)
+	}
+	accepted := findTraceEvent(events, MmapTraceRecoveryCandidateAccepted, 1)
+	if accepted == nil {
+		t.Fatalf("missing recovery acceptance for fallback revision in events %+v", events)
+	}
+	if accepted.Root != reopened.Stats().Root {
+		t.Fatalf("accepted event root = %d, want reopened root %d", accepted.Root, reopened.Stats().Root)
 	}
 }
 
@@ -5910,4 +6056,21 @@ func mutatePage(t *testing.T, path string, id PageID, mutate func(*page)) {
 	if err := file.Sync(); err != nil {
 		t.Fatalf("Sync mutate page %d: %v", id, err)
 	}
+}
+
+func traceKinds(events []MmapTraceEvent) []MmapTraceEventKind {
+	kinds := make([]MmapTraceEventKind, 0, len(events))
+	for _, event := range events {
+		kinds = append(kinds, event.Kind)
+	}
+	return kinds
+}
+
+func findTraceEvent(events []MmapTraceEvent, kind MmapTraceEventKind, revision uint64) *MmapTraceEvent {
+	for i := range events {
+		if events[i].Kind == kind && events[i].Revision == revision {
+			return &events[i]
+		}
+	}
+	return nil
 }

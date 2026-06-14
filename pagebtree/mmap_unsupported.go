@@ -13,6 +13,7 @@ type MmapOptions struct {
 	AccessPattern           MmapAccessPattern
 	PageCacheCapacity       int
 	RangePrefetchLeafWindow int
+	TraceHook               MmapTraceHook
 }
 
 type MmapAccessPattern int

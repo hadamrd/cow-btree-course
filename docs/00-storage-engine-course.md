@@ -338,13 +338,20 @@ sequenceDiagram
 The dirty-page tracker is page-ID based. It sorts dirty page IDs and coalesces
 adjacent runs before syncing.
 
+`MmapOptions.TraceHook` can observe this path without parsing logs. A traced
+sync emits `mmap-sync-begin`, `mmap-sync-data-synced`,
+`mmap-sync-meta-published`, and `mmap-sync-end`, with the revision, root page,
+`nextPage`, dirty count, free count, retired count, and mapped capacity carried
+as structured fields.
+
 Code to read:
 
-- `Tree.Sync` chooses mmap sync: [`pagebtree/tree.go#L244-L255`](../pagebtree/tree.go#L244-L255)
-- mmap sync order: [`pagebtree/mmap.go#L1188-L1205`](../pagebtree/mmap.go#L1188-L1205)
-- Dirty data-page sync: [`pagebtree/mmap.go#L501-L539`](../pagebtree/mmap.go#L501-L539)
-- Per-range `msync`: [`pagebtree/mmap.go#L552-L564`](../pagebtree/mmap.go#L552-L564)
+- `Tree.Sync` chooses mmap sync: [`pagebtree/tree.go#L256-L267`](../pagebtree/tree.go#L256-L267)
+- mmap sync order and trace phases: [`pagebtree/mmap.go#L1265-L1285`](../pagebtree/mmap.go#L1265-L1285)
+- Dirty data-page sync: [`pagebtree/mmap.go#L525-L565`](../pagebtree/mmap.go#L525-L565)
+- Per-range `msync`: [`pagebtree/mmap.go#L579-L590`](../pagebtree/mmap.go#L579-L590)
 - Metadata page sync: [`pagebtree/mmap.go#L576-L590`](../pagebtree/mmap.go#L576-L590)
+- Trace event API: [`pagebtree/mmap_trace.go#L3-L36`](../pagebtree/mmap_trace.go#L3-L36)
 
 ## Module 10: Dual Checked Metadata Pages
 
@@ -373,13 +380,19 @@ flowchart TD
 This is the core crash-recovery idea in miniature: a torn newest root can be
 rejected, while an older valid root remains usable.
 
+The trace hook also makes this recovery choice visible. Candidate rejection
+events include the metadata slot, trusted revision when available, and a reason
+string from the validation layer. Acceptance events identify the root that will
+serve reads.
+
 Code to read:
 
-- Recovery scan and newest-first sort: [`pagebtree/mmap.go#L866-L903`](../pagebtree/mmap.go#L866-L903)
-- Candidate mapping and validation: [`pagebtree/mmap.go#L908-L978`](../pagebtree/mmap.go#L908-L978)
-- Metadata slot/revision check: [`pagebtree/mmap.go#L986-L990`](../pagebtree/mmap.go#L986-L990)
-- Metadata write format and checksum: [`pagebtree/mmap.go#L1505-L1547`](../pagebtree/mmap.go#L1505-L1547)
-- Metadata checksum computation: [`pagebtree/mmap.go#L1550-L1555`](../pagebtree/mmap.go#L1550-L1555)
+- Recovery scan and newest-first sort: [`pagebtree/mmap.go#L923-L969`](../pagebtree/mmap.go#L923-L969)
+- Candidate mapping and validation: [`pagebtree/mmap.go#L973-L1037`](../pagebtree/mmap.go#L973-L1037)
+- Metadata slot/revision check: [`pagebtree/mmap.go#L1045-L1049`](../pagebtree/mmap.go#L1045-L1049)
+- Metadata write format and checksum: [`pagebtree/mmap.go#L1607-L1654`](../pagebtree/mmap.go#L1607-L1654)
+- Metadata checksum computation: [`pagebtree/mmap.go#L1657-L1662`](../pagebtree/mmap.go#L1657-L1662)
+- Recovery trace tests: [`pagebtree/mmap_test.go#L3416-L3460`](../pagebtree/mmap_test.go#L3416-L3460)
 
 ## Module 11: Checksums, Layout Checks, and Invariants
 
@@ -414,9 +427,9 @@ Code to read:
 - Page checksum: [`pagebtree/page.go#L132-L149`](../pagebtree/page.go#L132-L149)
 - Page kind dispatch: [`pagebtree/page.go#L155-L173`](../pagebtree/page.go#L155-L173)
 - Slotted layout checks: [`pagebtree/page.go#L175-L225`](../pagebtree/page.go#L175-L225)
-- Freelist validation: [`pagebtree/mmap.go#L1557-L1577`](../pagebtree/mmap.go#L1557-L1577)
-- Retired-page validation: [`pagebtree/mmap.go#L1579-L1606`](../pagebtree/mmap.go#L1579-L1606)
-- Metadata invariant check: [`pagebtree/mmap.go#L1608-L1623`](../pagebtree/mmap.go#L1608-L1623)
+- Freelist validation: [`pagebtree/mmap.go#L1664-L1684`](../pagebtree/mmap.go#L1664-L1684)
+- Retired-page validation: [`pagebtree/mmap.go#L1686-L1713`](../pagebtree/mmap.go#L1686-L1713)
+- Metadata invariant check: [`pagebtree/mmap.go#L1715-L1730`](../pagebtree/mmap.go#L1715-L1730)
 
 ## Module 12: Freelists, Retired Pages, and Recycling
 
@@ -519,7 +532,52 @@ Code to read:
 - Cache lookup by page checksum: [`pagebtree/page_cache.go#L52-L80`](../pagebtree/page_cache.go#L52-L80)
 - Profile flags for kernel cache vs heap cache: [`pagebtree/kernel_profile.go#L90-L99`](../pagebtree/kernel_profile.go#L90-L99)
 
-## Module 15: OpenLDAP/LMDB Versus OpenDJ/Berkeley JE
+## Module 15: Observability Without Hiding the Engine
+
+Storage-engine observability has several layers:
+
+- Counters: `Stats`, `MmapReaderStats`, and `MmapCacheStats` tell you current
+  quantities.
+- Profiles: `MDBKernelProfile` tells you which design mechanics are active.
+- Trace events: `MmapOptions.TraceHook` tells you which path the engine took.
+
+```mermaid
+flowchart TD
+    S["Stats"] --> C["counts: pages, readers, cache hits"]
+    M["MmapCacheStats"] --> R["kernel residency via mincore"]
+    P["MDBKernelProfile"] --> K["design contract flags"]
+    T["TraceHook"] --> E["decisions: sync, recovery, reclaim"]
+
+    E --> A["sync phases"]
+    E --> B["metadata candidate rejected"]
+    E --> D["fallback candidate accepted"]
+    E --> F["obsolete metadata pages reusable"]
+```
+
+This matters because a serious engine should explain decisions, not only final
+state. If `OpenMmap` accepts an older metadata page after rejecting the newest
+candidate, a trace hook can show the rejected revision, metadata slot, and
+validation reason. If `Sync` stalls in a larger experiment, the phase events
+let you separate "dirty data pages flushed" from "metadata published." If old
+freelist/reclaim metadata pages become reusable only after both alternating
+metadata slots move past them, the reclaim trace event marks that decision.
+
+The hook is synchronous and should stay lightweight. In a real product you
+would adapt it to an event exporter or structured logger. In this research lab,
+it is intentionally just enough to make the kernel visible during tests and
+demos without putting a logging framework in the storage core.
+
+Code to read:
+
+- Trace event API: [`pagebtree/mmap_trace.go#L3-L36`](../pagebtree/mmap_trace.go#L3-L36)
+- Hook option on mmap open: [`pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
+- Sync trace emissions: [`pagebtree/mmap.go#L1265-L1285`](../pagebtree/mmap.go#L1265-L1285)
+- Recovery trace emissions: [`pagebtree/mmap.go#L923-L1037`](../pagebtree/mmap.go#L923-L1037)
+- Reclaim trace emission: [`pagebtree/mmap.go#L1391-L1421`](../pagebtree/mmap.go#L1391-L1421)
+- Reclaim trace test: [`pagebtree/mmap_test.go#L2715-L2769`](../pagebtree/mmap_test.go#L2715-L2769)
+- Sync and recovery trace tests: [`pagebtree/mmap_test.go#L3372-L3460`](../pagebtree/mmap_test.go#L3372-L3460)
+
+## Module 16: OpenLDAP/LMDB Versus OpenDJ/Berkeley JE
 
 OpenLDAP MDB/LMDB is the reference style for this repository:
 
@@ -563,12 +621,12 @@ raw page cache or append-only log cleaner.
 Code to read:
 
 - OpenLDAP-style profile fields: [`pagebtree/kernel_profile.go#L28-L45`](../pagebtree/kernel_profile.go#L28-L45)
-- mmap open and reader table: [`pagebtree/mmap.go#L92-L198`](../pagebtree/mmap.go#L92-L198)
+- mmap open and reader table: [`pagebtree/mmap.go#L107-L198`](../pagebtree/mmap.go#L107-L198)
 - Read-only mmap handle: [`pagebtree/mmap.go#L200-L275`](../pagebtree/mmap.go#L200-L275)
-- Metadata root recovery instead of log replay: [`pagebtree/mmap.go#L866-L984`](../pagebtree/mmap.go#L866-L984)
+- Metadata root recovery instead of log replay: [`pagebtree/mmap.go#L923-L1037`](../pagebtree/mmap.go#L923-L1037)
 - Bounded derived routing cache, not raw heap page cache: [`pagebtree/page_cache.go#L35-L80`](../pagebtree/page_cache.go#L35-L80)
 
-## Module 16: What Is Serious Here, and What Is Still Research
+## Module 17: What Is Serious Here, and What Is Still Research
 
 Serious pieces in this repository:
 
@@ -588,6 +646,8 @@ Serious pieces in this repository:
 - Layout and invariant validation.
 - Kernel page-cache hints and cache-residency stats.
 - Bounded derived branch-routing cache.
+- Optional structured mmap trace events for sync phases, recovery fallback, and
+  obsolete metadata-page reclaim decisions.
 - Explicit point write batches that publish one revision and can report
   per-operation old values through `CommitDetailed`.
 - A sorted-map model/fuzz target for put, delete, batch, range, cursor, and
@@ -621,13 +681,15 @@ Still research or incomplete compared with a production engine:
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.
 - No benchstat baseline history or CI performance gate yet.
+- No full operational tracing/export integration beyond the synchronous mmap
+  trace hook.
 - No multi-database catalog, duplicate keys, or comparator plugins.
 - No portability story beyond the Unix mmap path and non-Unix stubs.
 
 The value is that the core mechanisms are visible. You can read the code without
 first reading hundreds of thousands of lines of production database history.
 
-## Module 17: How to Study the Code
+## Module 18: How to Study the Code
 
 Run the behavior contract first:
 
