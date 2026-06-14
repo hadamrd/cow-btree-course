@@ -67,6 +67,43 @@ The useful grind is therefore not "add buzzwords." It is proving each mechanism
 at a boundary: page layout, search, COW mutation, reader pinning, recycling,
 metadata publication, crash recovery, and workload behavior.
 
+## Buyer-Style Audit
+
+A skeptical buyer would probably classify the repo like this:
+
+| Area | Buyer verdict | Evidence | Main rejection reason |
+| --- | --- | --- | --- |
+| Page layout | Credible research kernel | Fixed 4096-byte pages, checksum field, slot directory, cell area, and layout validation are concrete code, not only diagrams. | No versioned alternate page formats such as prefix-compressed pages. |
+| B+tree search | Credible for point/range mechanics | Search descends branch pages through separator keys and child page IDs, then binary-searches leaf slots before resolving inline or overflow values. | Not yet backed by years of randomized production workload history. |
+| COW and snapshots | Credible single-writer design | Page copies allocate new IDs, retire old page IDs, and publish a new root; snapshots pin older revisions. | Concurrency stress is limited compared with production MVCC engines. |
+| mmap durability | Respectable local harness, not a product guarantee | Dirty data pages are synced before metadata publication, dual metadata pages are checked, and process-exit crash probes classify old-root/new-root recovery. | Still lacks real power-fail rigs, filesystem-specific evidence, and torn-sector simulation. |
+| Recycling | Serious but narrow | In-process readers and mmap reader-table watermarks keep retired pages out of the free list until old readers are gone; reclaim metadata survives reopen. | PID reuse and long-running multi-process operational cases need harder owner identity and soak testing. |
+| Caching | Honest and intentionally small | The Go cache stores derived branch routing only; raw page bytes stay in mmap and the kernel page cache. | No adaptive buffer manager, no workload-tuned eviction policy beyond bounded LRU branch metadata. |
+| Key ordering | Partially respectable | Memory trees now accept a custom comparator across search/range/cursor/tx/check/cache paths, while mmap rejects non-persisted custom comparators. | mmap custom comparator identity is not durable yet, so custom on-disk collations are intentionally unsupported. |
+| Operations | Useful lab tools | `mmapinspect`, trace hooks, cache residency stats, compact-copy commands, and benchmarks exist. | No release process, no compatibility matrix, no corruption corpus management, and no production support envelope. |
+
+The honest product label is therefore: **research-grade mmap/COW B+tree kernel
+with unusually visible mechanics**, not a database one should embed in a
+business-critical service.
+
+## Code Evidence Map
+
+These are the files a serious reader should inspect before trusting any claim:
+
+| Claim | Code to read |
+| --- | --- |
+| Slotted pages really use a header, slot directory, and cells growing toward each other | [`pagebtree/page.go#L10-L13`](../pagebtree/page.go#L10-L13), [`pagebtree/page.go#L23-L40`](../pagebtree/page.go#L23-L40), [`pagebtree/page.go#L187-L236`](../pagebtree/page.go#L187-L236) |
+| Point lookup walks branch pages to a leaf instead of scanning all keys | [`pagebtree/search.go#L12-L34`](../pagebtree/search.go#L12-L34) |
+| Lower-bound and bounded range scans use comparator-aware slot search and branch pruning | [`pagebtree/search.go#L54-L95`](../pagebtree/search.go#L54-L95), [`pagebtree/search.go#L148-L181`](../pagebtree/search.go#L148-L181) |
+| Copy-on-write allocates a new page and retires the old page ID | [`pagebtree/tree.go#L243-L269`](../pagebtree/tree.go#L243-L269) |
+| Readers pin retired pages until their revision is no longer visible | [`pagebtree/freelist.go#L15-L35`](../pagebtree/freelist.go#L15-L35), [`pagebtree/freelist.go#L44-L80`](../pagebtree/freelist.go#L44-L80) |
+| mmap rejects non-durable custom comparators | [`pagebtree/key_order.go#L21-L27`](../pagebtree/key_order.go#L21-L27), [`pagebtree/mmap.go#L110-L117`](../pagebtree/mmap.go#L110-L117) |
+| mmap writer setup uses sidecar locks and a shared mapped arena | [`pagebtree/mmap.go#L118-L205`](../pagebtree/mmap.go#L118-L205) |
+| mmap sync publishes dirty data before checked metadata | [`pagebtree/mmap.go#L1317-L1344`](../pagebtree/mmap.go#L1317-L1344) |
+| mmap readers are tracked through a sidecar table | [`pagebtree/reader_table_unix.go#L42-L64`](../pagebtree/reader_table_unix.go#L42-L64), [`pagebtree/reader_table_unix.go#L74-L181`](../pagebtree/reader_table_unix.go#L74-L181) |
+| Branch-routing cache is derived metadata, not a raw page cache | [`pagebtree/page_cache.go#L7-L20`](../pagebtree/page_cache.go#L7-L20), [`pagebtree/page_cache.go#L52-L80`](../pagebtree/page_cache.go#L52-L80) |
+| Process-exit crash probes exist, but are still not power-fail proof | [`pagebtree/mmap_process_crash_test.go#L20-L92`](../pagebtree/mmap_process_crash_test.go#L20-L92) |
+
 ## P0 Gaps
 
 These are the gaps that most separate the project from a genuinely serious
@@ -136,6 +173,34 @@ Code to read:
 - Cursor implementation: [`../pagebtree/cursor.go`](../pagebtree/cursor.go)
 - Cursor behavior tests: [`../pagebtree/cursor_test.go`](../pagebtree/cursor_test.go)
 - mmap cursor reader-pinning test: [`../pagebtree/mmap_test.go`](../pagebtree/mmap_test.go)
+
+## Gap Advanced In This Pass: Comparator Boundary
+
+The comparator gap is not closed, but it moved from "missing abstraction" to an
+explicit durability boundary:
+
+- Memory-backed trees can install `Options.KeyComparator`.
+- The comparator is used by point lookup, lower-bound lookup, range scans,
+  linked-leaf range scans, cursors, transaction-visible ordering, validation,
+  and the derived branch-routing cache.
+- `MDBKernelProfile.KeyComparator` reports whether the active tree is bytewise
+  or custom.
+- mmap trees still persist only `KeyOrderBytewise`.
+- `OpenMmap` rejects custom comparators because a function pointer or closure
+  cannot be recovered safely from disk.
+
+This is the right failure mode for a research engine: custom in-memory order is
+available for experiments, while custom on-disk order is rejected until the file
+format can persist a stable comparator identity.
+
+Code to read:
+
+- Comparator API: [`../pagebtree/key_order.go#L21-L52`](../pagebtree/key_order.go#L21-L52)
+- Memory tree option wiring: [`../pagebtree/tree.go#L39-L54`](../pagebtree/tree.go#L39-L54)
+- Comparator-aware search: [`../pagebtree/search.go#L12-L34`](../pagebtree/search.go#L12-L34)
+- Comparator-aware page validation: [`../pagebtree/page.go#L159-L187`](../pagebtree/page.go#L159-L187)
+- mmap rejection: [`../pagebtree/mmap.go#L110-L117`](../pagebtree/mmap.go#L110-L117)
+- Behavior tests: [`../pagebtree/tree_test.go#L86-L132`](../pagebtree/tree_test.go#L86-L132), [`../pagebtree/mmap_test.go#L6026-L6037`](../pagebtree/mmap_test.go#L6026-L6037)
 
 ## Gap Advanced In This Pass: Offline Copy Compaction
 
