@@ -91,8 +91,14 @@ func TestRunPrintsPersistedKeyOrder(t *testing.T) {
 	if report.KeyOrder != pagebtree.KeyOrderReverse {
 		t.Fatalf("KeyOrder = %d, want reverse", report.KeyOrder)
 	}
+	if report.KeyOrderName != "reverse" {
+		t.Fatalf("KeyOrderName = %q, want reverse", report.KeyOrderName)
+	}
 	if report.KeyComparator != pagebtree.KeyComparatorReverse {
 		t.Fatalf("KeyComparator = %d, want reverse", report.KeyComparator)
+	}
+	if report.KeyComparatorName != "reverse" {
+		t.Fatalf("KeyComparatorName = %q, want reverse", report.KeyComparatorName)
 	}
 }
 

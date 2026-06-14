@@ -1,5 +1,7 @@
 package pagebtree
 
+import "fmt"
+
 // KeyOrder identifies the comparison contract used to sort keys inside leaf and
 // branch pages. Mmap files persist this value so reopen can reject unknown or
 // incompatible page-order semantics before walking branch separators.
@@ -19,6 +21,17 @@ func normalizeKeyOrder(order KeyOrder) KeyOrder {
 		return KeyOrderBytewise
 	}
 	return order
+}
+
+func (o KeyOrder) String() string {
+	switch o {
+	case KeyOrderBytewise:
+		return "bytewise"
+	case KeyOrderReverse:
+		return "reverse"
+	default:
+		return fmt.Sprintf("unknown(%d)", o)
+	}
 }
 
 // KeyComparator compares two logical keys in the order used by a tree.
@@ -45,6 +58,19 @@ const (
 	KeyComparatorCustom   KeyComparatorKind = 2
 	KeyComparatorReverse  KeyComparatorKind = 3
 )
+
+func (k KeyComparatorKind) String() string {
+	switch k {
+	case KeyComparatorBytewise:
+		return "bytewise"
+	case KeyComparatorCustom:
+		return "custom"
+	case KeyComparatorReverse:
+		return "reverse"
+	default:
+		return fmt.Sprintf("unknown(%d)", k)
+	}
+}
 
 var bytewiseKeyComparator KeyComparator = KeyComparatorFunc(compareStrings)
 var reverseKeyComparator KeyComparator = KeyComparatorFunc(func(left, right string) int {

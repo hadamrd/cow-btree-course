@@ -10,18 +10,20 @@ import (
 )
 
 type inspectReport struct {
-	Valid            bool                        `json:"valid"`
-	Error            string                      `json:"error,omitempty"`
-	Stats            pagebtree.Stats             `json:"stats"`
-	KeyOrder         pagebtree.KeyOrder          `json:"key_order"`
-	KeyComparator    pagebtree.KeyComparatorKind `json:"key_comparator"`
-	ReachablePageIDs []pagebtree.PageID          `json:"reachable_page_ids"`
-	FreePageIDs      []pagebtree.PageID          `json:"free_page_ids"`
-	RetiredPageIDs   []pagebtree.PageID          `json:"retired_page_ids"`
-	LeafLinksChecked bool                        `json:"leaf_links_checked"`
-	LeafLinksSkipped bool                        `json:"leaf_links_skipped"`
-	ReaderStats      *pagebtree.MmapReaderStats  `json:"reader_stats,omitempty"`
-	CacheStats       *pagebtree.MmapCacheStats   `json:"cache_stats,omitempty"`
+	Valid             bool                        `json:"valid"`
+	Error             string                      `json:"error,omitempty"`
+	Stats             pagebtree.Stats             `json:"stats"`
+	KeyOrder          pagebtree.KeyOrder          `json:"key_order"`
+	KeyOrderName      string                      `json:"key_order_name"`
+	KeyComparator     pagebtree.KeyComparatorKind `json:"key_comparator"`
+	KeyComparatorName string                      `json:"key_comparator_name"`
+	ReachablePageIDs  []pagebtree.PageID          `json:"reachable_page_ids"`
+	FreePageIDs       []pagebtree.PageID          `json:"free_page_ids"`
+	RetiredPageIDs    []pagebtree.PageID          `json:"retired_page_ids"`
+	LeafLinksChecked  bool                        `json:"leaf_links_checked"`
+	LeafLinksSkipped  bool                        `json:"leaf_links_skipped"`
+	ReaderStats       *pagebtree.MmapReaderStats  `json:"reader_stats,omitempty"`
+	CacheStats        *pagebtree.MmapCacheStats   `json:"cache_stats,omitempty"`
 }
 
 type inspectOptions struct {
@@ -108,15 +110,17 @@ func printUsage(stderr io.Writer) {
 
 func inspectFromAudit(audit pagebtree.AuditReport, profile pagebtree.MDBKernelProfile) inspectReport {
 	report := inspectReport{
-		Valid:            audit.Valid(),
-		Stats:            audit.Stats,
-		KeyOrder:         profile.KeyOrder,
-		KeyComparator:    profile.KeyComparator,
-		ReachablePageIDs: audit.ReachablePageIDs,
-		FreePageIDs:      audit.FreePageIDs,
-		RetiredPageIDs:   audit.RetiredPageIDs,
-		LeafLinksChecked: audit.LeafLinksChecked,
-		LeafLinksSkipped: audit.LeafLinksSkipped,
+		Valid:             audit.Valid(),
+		Stats:             audit.Stats,
+		KeyOrder:          profile.KeyOrder,
+		KeyOrderName:      profile.KeyOrder.String(),
+		KeyComparator:     profile.KeyComparator,
+		KeyComparatorName: profile.KeyComparator.String(),
+		ReachablePageIDs:  audit.ReachablePageIDs,
+		FreePageIDs:       audit.FreePageIDs,
+		RetiredPageIDs:    audit.RetiredPageIDs,
+		LeafLinksChecked:  audit.LeafLinksChecked,
+		LeafLinksSkipped:  audit.LeafLinksSkipped,
 	}
 	if audit.Error != nil {
 		report.Error = audit.Error.Error()
