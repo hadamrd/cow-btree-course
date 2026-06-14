@@ -603,13 +603,15 @@ you separate "dirty data pages flushed" from "metadata published"; if it fails,
 `mmap-sync-failed` carries the returned error reason and `mmap-sync-end` is
 absent. If old freelist/reclaim metadata pages become reusable only after both
 alternating metadata slots move past them, the reclaim trace event marks that
-decision. Growth and compaction events carry old/new mapped capacity, old/new
-`nextPage`, and resulting file size; their failure events also carry the
-returned error reason, so a failed remap is visible without parsing logs. Dirty
-sync range events carry `StartPage`, `EndPage`, and `DurationNanos`, so slow
-write stalls can be tied back to concrete page-id intervals. Reader cleanup
-events report how many dead-PID slots were cleared from the sidecar reader
-table.
+decision. If freshly prepared freelist or reclaim metadata pages are rolled
+back after a later sync or metadata-publish error, rollback trace events report
+the metadata-page count, page-id span, and returned error. Growth and compaction
+events carry old/new mapped capacity, old/new `nextPage`, and resulting file
+size; their failure events also carry the returned error reason, so a failed
+remap is visible without parsing logs. Dirty sync range events carry
+`StartPage`, `EndPage`, and `DurationNanos`, so slow write stalls can be tied
+back to concrete page-id intervals. Reader cleanup events report how many
+dead-PID slots were cleared from the sidecar reader table.
 
 The hook is synchronous and should stay lightweight. In a real product you
 can start with `NewMmapTraceJSONLExporter`, which writes one lower-snake-field
@@ -645,12 +647,13 @@ Code to read:
 - Hook option on mmap open: [`pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
 - Sync trace emissions: [`pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)
 - Recovery trace emissions: [`pagebtree/mmap.go#L937-L1051`](../pagebtree/mmap.go#L937-L1051)
-- Reclaim trace emission: [`pagebtree/mmap.go#L1408-L1438`](../pagebtree/mmap.go#L1408-L1438)
+- Freelist/reclaim rollback trace emission: [`pagebtree/mmap_trace_unix.go#L22-L44`](../pagebtree/mmap_trace_unix.go#L22-L44)
+- Obsolete metadata-page reclaim trace emission: [`pagebtree/mmap.go#L1460-L1488`](../pagebtree/mmap.go#L1460-L1488)
 - Growth trace emissions: [`pagebtree/mmap.go#L346-L411`](../pagebtree/mmap.go#L346-L411)
 - Compact trace emissions: [`pagebtree/mmap.go#L426-L505`](../pagebtree/mmap.go#L426-L505)
 - Reader cleanup trace emission: [`pagebtree/reader_table_unix.go#L262-L272`](../pagebtree/reader_table_unix.go#L262-L272)
-- Reclaim trace test: [`pagebtree/mmap_test.go#L2962-L3016`](../pagebtree/mmap_test.go#L2962-L3016)
-- Growth and compact trace tests: [`pagebtree/mmap_test.go#L3018-L3235`](../pagebtree/mmap_test.go#L3018-L3235)
+- Reclaim and rollback trace tests: [`pagebtree/mmap_test.go#L2962-L3163`](../pagebtree/mmap_test.go#L2962-L3163)
+- Growth and compact trace tests: [`pagebtree/mmap_test.go#L3165-L3382`](../pagebtree/mmap_test.go#L3165-L3382)
 - Sync and recovery trace tests: [`pagebtree/mmap_test.go#L3712-L3911`](../pagebtree/mmap_test.go#L3712-L3911)
 - Reader cleanup trace test: [`pagebtree/mmap_test.go#L5132-L5183`](../pagebtree/mmap_test.go#L5132-L5183)
 
@@ -725,7 +728,8 @@ Serious pieces in this repository:
 - Bounded derived branch-routing cache.
 - Optional structured mmap trace events for sync phases and failures, recovery
   fallback, growth and compact remap success/failure geometry, stale reader
-  cleanup, and obsolete metadata-page reclaim decisions.
+  cleanup, freelist/reclaim metadata rollback, and obsolete metadata-page
+  reclaim decisions.
 - Explicit point write batches that publish one revision and can report
   per-operation old values through `CommitDetailed`.
 - A sorted-map model/fuzz target for put, delete, batch, range, cursor, and

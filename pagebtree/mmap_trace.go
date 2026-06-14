@@ -15,6 +15,8 @@ const (
 	MmapTraceRecoveryCandidateRejected    MmapTraceEventKind = "mmap-recovery-candidate-rejected"
 	MmapTraceRecoveryCandidateAccepted    MmapTraceEventKind = "mmap-recovery-candidate-accepted"
 	MmapTraceReclaimObsoleteMetadataPages MmapTraceEventKind = "mmap-reclaim-obsolete-metadata-pages"
+	MmapTraceFreelistMetadataRollback     MmapTraceEventKind = "mmap-freelist-metadata-rollback"
+	MmapTraceReclaimMetadataRollback      MmapTraceEventKind = "mmap-reclaim-metadata-rollback"
 	MmapTraceGrowthBegin                  MmapTraceEventKind = "mmap-growth-begin"
 	MmapTraceGrowthEnd                    MmapTraceEventKind = "mmap-growth-end"
 	MmapTraceGrowthFailed                 MmapTraceEventKind = "mmap-growth-failed"
@@ -50,6 +52,7 @@ type MmapTraceEvent struct {
 	FreePages          int                `json:"free_pages,omitempty"`
 	RetiredPages       int                `json:"retired_pages,omitempty"`
 	ReclaimedPages     int                `json:"reclaimed_pages,omitempty"`
+	MetadataPages      int                `json:"metadata_pages,omitempty"`
 	ClearedReaderSlots int                `json:"cleared_reader_slots,omitempty"`
 	MetadataSlot       int                `json:"metadata_slot,omitempty"`
 	Reason             string             `json:"reason,omitempty"`
@@ -74,6 +77,7 @@ type mmapTraceEventJSON struct {
 	FreePages          int                `json:"free_pages,omitempty"`
 	RetiredPages       int                `json:"retired_pages,omitempty"`
 	ReclaimedPages     int                `json:"reclaimed_pages,omitempty"`
+	MetadataPages      int                `json:"metadata_pages,omitempty"`
 	ClearedReaderSlots int                `json:"cleared_reader_slots,omitempty"`
 	MetadataSlot       *int               `json:"metadata_slot,omitempty"`
 	Reason             string             `json:"reason,omitempty"`
@@ -101,6 +105,7 @@ func (event MmapTraceEvent) MarshalJSON() ([]byte, error) {
 		FreePages:          event.FreePages,
 		RetiredPages:       event.RetiredPages,
 		ReclaimedPages:     event.ReclaimedPages,
+		MetadataPages:      event.MetadataPages,
 		ClearedReaderSlots: event.ClearedReaderSlots,
 		Reason:             event.Reason,
 	}

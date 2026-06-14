@@ -19,6 +19,29 @@ func (t *Tree) emitMmapTraceReclaimed(kind MmapTraceEventKind, reclaimedPages in
 	t.traceHook(event)
 }
 
+func (t *Tree) emitMmapTraceMetadataRollback(err error) {
+	if t == nil || t.traceHook == nil || err == nil || len(t.metaFreelistPages) == 0 {
+		return
+	}
+	kind := MmapTraceFreelistMetadataRollback
+	if p := t.pages[t.metaFreelistPages[0]]; p != nil && p.flags() == flagReclaim {
+		kind = MmapTraceReclaimMetadataRollback
+	}
+	event := t.mmapTraceEvent(kind, nil, -1, err.Error())
+	event.MetadataPages = len(t.metaFreelistPages)
+	event.StartPage = t.metaFreelistPages[0]
+	event.EndPage = t.metaFreelistPages[0] + 1
+	for _, id := range t.metaFreelistPages[1:] {
+		if id < event.StartPage {
+			event.StartPage = id
+		}
+		if id >= event.EndPage {
+			event.EndPage = id + 1
+		}
+	}
+	t.traceHook(event)
+}
+
 func (t *Tree) emitMmapTraceDataRange(startPage, endPage PageID, durationNanos int64) {
 	if t == nil || t.traceHook == nil {
 		return

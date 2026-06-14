@@ -3015,6 +3015,146 @@ func TestMmapTraceHookReportsObsoleteMetadataPageReclaim(t *testing.T) {
 	}
 }
 
+func TestMmapTraceHookReportsFreelistMetadataRollback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 2048,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer func() {
+		tree.arena.faultInjector = nil
+		_ = tree.Close()
+	}()
+
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	clear(tree.arena.dirtyPages)
+
+	freeCount := maxMetaFreePages + 17
+	tree.free = make([]PageID, freeCount)
+	for i := range tree.free {
+		tree.free[i] = firstTreePageID + 1 + PageID(i)
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(freeCount)
+	oldNextPage := tree.nextPage
+	wantMetadataPages := divideRoundUp(freeCount, freelistPageCapacity)
+	forced := fmt.Errorf("forced %s fault", mmapFaultBeforeDataSync)
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == mmapFaultBeforeDataSync {
+			return forced
+		}
+		return nil
+	}
+
+	events = nil
+	err = tree.Sync()
+	if !errors.Is(err, forced) {
+		t.Fatalf("Sync error = %v, want forced fault", err)
+	}
+
+	rolledBack := findTraceEvent(events, MmapTraceFreelistMetadataRollback, tree.Revision())
+	if rolledBack == nil {
+		t.Fatalf("missing freelist metadata rollback event in %+v", events)
+	}
+	if rolledBack.Reason != forced.Error() {
+		t.Fatalf("freelist rollback reason = %q, want %q", rolledBack.Reason, forced.Error())
+	}
+	if rolledBack.MetadataPages != wantMetadataPages {
+		t.Fatalf("freelist rollback metadata pages = %d, want %d", rolledBack.MetadataPages, wantMetadataPages)
+	}
+	if rolledBack.StartPage != oldNextPage || rolledBack.EndPage != oldNextPage+PageID(wantMetadataPages) {
+		t.Fatalf("freelist rollback page span = [%d,%d), want [%d,%d)", rolledBack.StartPage, rolledBack.EndPage, oldNextPage, oldNextPage+PageID(wantMetadataPages))
+	}
+	if tree.nextPage != oldNextPage {
+		t.Fatalf("nextPage after freelist rollback = %d, want %d", tree.nextPage, oldNextPage)
+	}
+	if traceKindIndex(events, MmapTraceSyncEnd) >= 0 {
+		t.Fatalf("unexpected sync end event in %+v", events)
+	}
+}
+
+func TestMmapTraceHookReportsReclaimMetadataRollback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 2048,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer func() {
+		tree.arena.faultInjector = nil
+		_ = tree.Close()
+	}()
+
+	tree.Put("alpha", []byte("one"))
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	clear(tree.arena.dirtyPages)
+
+	tree.revision++
+	retiredCount := reclaimPageCapacity + 17
+	tree.retired = make([]retiredPage, retiredCount)
+	for i := range tree.retired {
+		tree.retired[i] = retiredPage{
+			id:       firstTreePageID + 1 + PageID(i),
+			revision: tree.revision,
+		}
+	}
+	tree.nextPage = firstTreePageID + 1 + PageID(retiredCount)
+	oldNextPage := tree.nextPage
+	wantMetadataPages := divideRoundUp(retiredCount, reclaimPageCapacity)
+	forced := fmt.Errorf("forced %s fault", mmapFaultBeforeDataSync)
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == mmapFaultBeforeDataSync {
+			return forced
+		}
+		return nil
+	}
+
+	events = nil
+	err = tree.Sync()
+	if !errors.Is(err, forced) {
+		t.Fatalf("Sync error = %v, want forced fault", err)
+	}
+
+	rolledBack := findTraceEvent(events, MmapTraceReclaimMetadataRollback, tree.Revision())
+	if rolledBack == nil {
+		t.Fatalf("missing reclaim metadata rollback event in %+v", events)
+	}
+	if rolledBack.Reason != forced.Error() {
+		t.Fatalf("reclaim rollback reason = %q, want %q", rolledBack.Reason, forced.Error())
+	}
+	if rolledBack.MetadataPages != wantMetadataPages {
+		t.Fatalf("reclaim rollback metadata pages = %d, want %d", rolledBack.MetadataPages, wantMetadataPages)
+	}
+	if rolledBack.StartPage != oldNextPage || rolledBack.EndPage != oldNextPage+PageID(wantMetadataPages) {
+		t.Fatalf("reclaim rollback page span = [%d,%d), want [%d,%d)", rolledBack.StartPage, rolledBack.EndPage, oldNextPage, oldNextPage+PageID(wantMetadataPages))
+	}
+	if tree.nextPage != oldNextPage {
+		t.Fatalf("nextPage after reclaim rollback = %d, want %d", tree.nextPage, oldNextPage)
+	}
+	if traceKindIndex(events, MmapTraceSyncEnd) >= 0 {
+		t.Fatalf("unexpected sync end event in %+v", events)
+	}
+}
+
 func TestMmapTraceHookReportsGrowthRemap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 	var events []MmapTraceEvent

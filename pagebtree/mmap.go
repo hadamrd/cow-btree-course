@@ -477,12 +477,14 @@ func (t *Tree) compactMmapTail() error {
 		return err
 	}
 	if err := t.arena.syncDataPages(t.nextPage, nil); err != nil {
+		t.emitMmapTraceMetadataRollback(err)
 		restoreFreelistPages()
 		restoreState()
 		t.emitMmapTraceResizeFailure(MmapTraceCompactFailed, oldMaxPages, newMaxPages, oldNextPage, trimmedNextPage, newSize, err)
 		return err
 	}
 	if err := t.publishMeta(); err != nil {
+		t.emitMmapTraceMetadataRollback(err)
 		restoreFreelistPages()
 		restoreState()
 		t.emitMmapTraceResizeFailure(MmapTraceCompactFailed, oldMaxPages, newMaxPages, oldNextPage, trimmedNextPage, newSize, err)
@@ -1313,12 +1315,14 @@ func (t *Tree) syncMmap() error {
 		return err
 	}
 	if err := t.arena.syncDataPages(t.nextPage, t.emitMmapTraceDataRange); err != nil {
+		t.emitMmapTraceMetadataRollback(err)
 		restoreFreelistPages()
 		t.emitMmapTraceFailure(MmapTraceSyncFailed, err)
 		return err
 	}
 	t.emitMmapTrace(MmapTraceSyncDataSynced)
 	if err := t.publishMeta(); err != nil {
+		t.emitMmapTraceMetadataRollback(err)
 		restoreFreelistPages()
 		t.emitMmapTraceFailure(MmapTraceSyncFailed, err)
 		return err

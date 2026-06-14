@@ -48,8 +48,8 @@
 // before returning the error. MmapOptions.TraceHook can observe sync phases,
 // timed dirty data-page sync ranges, sync failures, recovery candidate
 // rejection/acceptance, growth and compact remap success/failure geometry,
-// stale reader cleanup, and obsolete metadata-page reclaim decisions as
-// structured events.
+// freelist/reclaim metadata rollback, stale reader cleanup, and obsolete
+// metadata-page reclaim decisions as structured events.
 // MmapTraceJSONLExporter adapts those events to newline-delimited JSON for
 // experiments. Mmap trees can grow the mapped file when allocation reaches the
 // current capacity.
