@@ -106,6 +106,5 @@ func countProfilePages(t *Tree) int {
 	if t.root == 0 {
 		return 0
 	}
-	pages, _, _ := countPagesAndKeys(t.pages, t.root, map[PageID]bool{})
-	return pages
+	return collectReachableStats(t.pages, t.root, map[PageID]bool{}).pages()
 }

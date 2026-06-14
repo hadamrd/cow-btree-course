@@ -73,6 +73,12 @@ If you add new write operations, keep that discipline. Any helper that mutates a
 
 `btree/stats.go` is not needed for the data structure itself. It exists so readers can observe height and node count while experimenting.
 
+`pagebtree/stats.go` goes further because page engines care about bytes, not
+only keys. `Stats` reports reachable leaf, branch, and overflow page counts,
+total reachable page capacity/free bytes, and used-byte buckets for leaves,
+branches, and overflow pages. That makes byte pressure visible before the code
+attempts byte-balanced split or redistribution policy.
+
 ## Page-backed Tree
 
 `pagebtree/` is the second implementation. It keeps the search shape easy to audit, but replaces direct child pointers with page ids and stores page contents in a slotted byte layout.

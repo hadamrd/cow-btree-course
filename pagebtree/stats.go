@@ -7,8 +7,17 @@ type Stats struct {
 	Degree                  int
 	Height                  int
 	Pages                   int
+	LeafPages               int
+	BranchPages             int
+	OverflowPages           int
 	Keys                    int
 	Separators              int
+	PageBytesUsed           int
+	PageBytesFree           int
+	PageBytesCapacity       int
+	LeafBytesUsed           int
+	BranchBytesUsed         int
+	OverflowBytesUsed       int
 	AllocatedPages          int
 	RetiredPages            int
 	FreePages               int
@@ -55,17 +64,26 @@ func statsFor(t *Tree) Stats {
 }
 
 func statsForSnapshot(pages map[PageID]*page, root PageID, length int, revision uint64, degree int) Stats {
-	pagesCount, keys, separators := countPagesAndKeys(pages, root, map[PageID]bool{})
+	reachable := collectReachableStats(pages, root, map[PageID]bool{})
 	return Stats{
-		Root:           root,
-		Len:            length,
-		Revision:       revision,
-		Degree:         degree,
-		Height:         height(pages, root),
-		Pages:          pagesCount,
-		Keys:           keys,
-		Separators:     separators,
-		AllocatedPages: len(pages),
+		Root:              root,
+		Len:               length,
+		Revision:          revision,
+		Degree:            degree,
+		Height:            height(pages, root),
+		Pages:             reachable.pages(),
+		LeafPages:         reachable.leafPages,
+		BranchPages:       reachable.branchPages,
+		OverflowPages:     reachable.overflowPages,
+		Keys:              reachable.keys,
+		Separators:        reachable.separators,
+		PageBytesUsed:     reachable.bytesUsed(),
+		PageBytesFree:     reachable.bytesCapacity() - reachable.bytesUsed(),
+		PageBytesCapacity: reachable.bytesCapacity(),
+		LeafBytesUsed:     reachable.leafBytesUsed,
+		BranchBytesUsed:   reachable.branchBytesUsed,
+		OverflowBytesUsed: reachable.overflowBytesUsed,
+		AllocatedPages:    len(pages),
 	}
 }
 
@@ -80,44 +98,78 @@ func height(pages map[PageID]*page, root PageID) int {
 	return 1 + height(pages, p.leftmostChild())
 }
 
-func countPagesAndKeys(pages map[PageID]*page, root PageID, seen map[PageID]bool) (int, int, int) {
+type reachableStats struct {
+	leafPages         int
+	branchPages       int
+	overflowPages     int
+	keys              int
+	separators        int
+	leafBytesUsed     int
+	branchBytesUsed   int
+	overflowBytesUsed int
+}
+
+func (s reachableStats) pages() int {
+	return s.leafPages + s.branchPages + s.overflowPages
+}
+
+func (s reachableStats) bytesUsed() int {
+	return s.leafBytesUsed + s.branchBytesUsed + s.overflowBytesUsed
+}
+
+func (s reachableStats) bytesCapacity() int {
+	return s.pages() * PageSize
+}
+
+func (s *reachableStats) add(other reachableStats) {
+	s.leafPages += other.leafPages
+	s.branchPages += other.branchPages
+	s.overflowPages += other.overflowPages
+	s.keys += other.keys
+	s.separators += other.separators
+	s.leafBytesUsed += other.leafBytesUsed
+	s.branchBytesUsed += other.branchBytesUsed
+	s.overflowBytesUsed += other.overflowBytesUsed
+}
+
+func collectReachableStats(pages map[PageID]*page, root PageID, seen map[PageID]bool) reachableStats {
 	if root == 0 || seen[root] {
-		return 0, 0, 0
+		return reachableStats{}
 	}
 	seen[root] = true
 
 	p := pages[root]
-	pageCount := 1
-	keyCount := 0
-	separatorCount := 0
+	var stats reachableStats
 	if p.isLeaf() {
-		keyCount = int(p.slotCount())
+		stats.leafPages = 1
+		stats.keys = int(p.slotCount())
+		stats.leafBytesUsed = p.slottedBytesUsed()
 		for _, entry := range p.leafEntries() {
-			overflowPages := countOverflowPages(pages, entry.value, entry.slotFlags, seen)
-			pageCount += overflowPages
+			stats.add(collectOverflowStats(pages, entry.value, entry.slotFlags, seen))
 		}
 	} else {
-		separatorCount = int(p.slotCount())
+		stats.branchPages = 1
+		stats.separators = int(p.slotCount())
+		stats.branchBytesUsed = p.slottedBytesUsed()
 	}
 	for _, child := range p.childIDs() {
-		childPages, childKeys, childSeparators := countPagesAndKeys(pages, child, seen)
-		pageCount += childPages
-		keyCount += childKeys
-		separatorCount += childSeparators
+		stats.add(collectReachableStats(pages, child, seen))
 	}
-	return pageCount, keyCount, separatorCount
+	return stats
 }
 
-func countOverflowPages(pages map[PageID]*page, raw []byte, flags uint16, seen map[PageID]bool) int {
+func collectOverflowStats(pages map[PageID]*page, raw []byte, flags uint16, seen map[PageID]bool) reachableStats {
 	ref, ok := decodeOverflowRef(raw, flags)
 	if !ok {
-		return 0
+		return reachableStats{}
 	}
-	count := 0
+	var stats reachableStats
 	for id := ref.first; id != 0 && !seen[id]; {
 		seen[id] = true
-		count++
-		id = pages[id].overflowNext()
+		p := pages[id]
+		stats.overflowPages++
+		stats.overflowBytesUsed += p.overflowBytesUsed()
+		id = p.overflowNext()
 	}
-	return count
+	return stats
 }

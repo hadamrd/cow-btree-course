@@ -121,5 +121,7 @@
 // or MmapOptions; Stats exposes its capacity, entries, hits, misses,
 // invalidations, evictions, range-prefetch window, range-prefetch hint-call
 // count, and exact pages covered by those hints, plus mmap warm-up hint-call
-// and page counts.
+// and page counts. Stats also reports reachable leaf, branch, and overflow page
+// counts plus used/free/capacity byte counts so byte pressure is observable
+// before experimenting with byte-balanced page policy.
 package pagebtree

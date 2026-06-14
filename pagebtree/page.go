@@ -112,6 +112,10 @@ func (p *page) setFreeUpper(offset int) {
 	binary.LittleEndian.PutUint16(p.data[headerFreeUpperOffset:], uint16(offset))
 }
 
+func (p *page) slottedBytesUsed() int {
+	return pageHeaderSize + int(p.slotCount())*slotSize + PageSize - int(p.freeUpper())
+}
+
 func (p *page) leftmostChild() PageID {
 	return decodePageID(p.data[headerLeftmostOffset : headerLeftmostOffset+8])
 }

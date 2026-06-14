@@ -570,13 +570,15 @@ Code to read:
 Storage-engine observability has several layers:
 
 - Counters: `Stats`, `MmapReaderStats`, and `MmapCacheStats` tell you current
-  quantities.
+  quantities. `Stats` includes reachable leaf/branch/overflow page counts,
+  total reachable page capacity/free bytes, and leaf/branch/overflow used-byte
+  buckets.
 - Profiles: `MDBKernelProfile` tells you which design mechanics are active.
 - Trace events: `MmapOptions.TraceHook` tells you which path the engine took.
 
 ```mermaid
 flowchart TD
-    S["Stats"] --> C["counts: pages, readers, cache hits"]
+    S["Stats"] --> C["counts: pages, readers, cache hits, byte fill"]
     M["MmapCacheStats"] --> R["kernel residency via mincore"]
     P["MDBKernelProfile"] --> K["design contract flags"]
     T["TraceHook"] --> E["decisions: sync, recovery, growth, compact, reclaim"]
@@ -607,6 +609,8 @@ demos without putting a logging framework in the storage core.
 
 Code to read:
 
+- Stats byte-fill fields and reachable-page walk: [`pagebtree/stats.go#L3-L170`](../pagebtree/stats.go#L3-L170)
+- Stats byte-fill tests: [`pagebtree/tree_test.go#L78-L117`](../pagebtree/tree_test.go#L78-L117), [`pagebtree/mmap_test.go#L53-L93`](../pagebtree/mmap_test.go#L53-L93)
 - Trace event API: [`pagebtree/mmap_trace.go#L3-L47`](../pagebtree/mmap_trace.go#L3-L47)
 - Hook option on mmap open: [`pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
 - Sync trace emissions: [`pagebtree/mmap.go#L1278-L1299`](../pagebtree/mmap.go#L1278-L1299)

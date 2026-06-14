@@ -106,6 +106,10 @@ func (p *page) setOverflowPayloadLen(length int) {
 	p.setSlotCount(uint16(length))
 }
 
+func (p *page) overflowBytesUsed() int {
+	return pageHeaderSize + p.overflowPayloadLen()
+}
+
 func (p *page) overflowPayload() []byte {
 	return p.data[overflowPayloadOffset : overflowPayloadOffset+p.overflowPayloadLen()]
 }

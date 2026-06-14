@@ -50,6 +50,48 @@ func TestMmapTreePersistsKeysAcrossCloseAndReopen(t *testing.T) {
 	}
 }
 
+func TestMmapStatsReportsReachablePageByteFillAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := range 18 {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	tree.Put("large", bytes.Repeat([]byte("x"), PageSize*2+77))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	stats := reopened.Stats()
+	if stats.Storage != "mmap" {
+		t.Fatalf("Storage = %q, want mmap", stats.Storage)
+	}
+	if stats.LeafPages == 0 || stats.BranchPages == 0 || stats.OverflowPages == 0 {
+		t.Fatalf("page buckets leaf=%d branch=%d overflow=%d, want all nonzero", stats.LeafPages, stats.BranchPages, stats.OverflowPages)
+	}
+	if stats.PageBytesCapacity != stats.Pages*PageSize {
+		t.Fatalf("PageBytesCapacity = %d, want Pages*PageSize %d", stats.PageBytesCapacity, stats.Pages*PageSize)
+	}
+	if stats.PageBytesUsed <= 0 || stats.PageBytesUsed > stats.PageBytesCapacity {
+		t.Fatalf("PageBytesUsed = %d outside (0,%d]", stats.PageBytesUsed, stats.PageBytesCapacity)
+	}
+	if stats.PageBytesFree != stats.PageBytesCapacity-stats.PageBytesUsed {
+		t.Fatalf("PageBytesFree = %d, want capacity-used %d", stats.PageBytesFree, stats.PageBytesCapacity-stats.PageBytesUsed)
+	}
+	if stats.LeafBytesUsed == 0 || stats.BranchBytesUsed == 0 || stats.OverflowBytesUsed == 0 {
+		t.Fatalf("byte buckets leaf=%d branch=%d overflow=%d, want all nonzero", stats.LeafBytesUsed, stats.BranchBytesUsed, stats.OverflowBytesUsed)
+	}
+}
+
 func TestMmapCursorPinsRetiredPages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

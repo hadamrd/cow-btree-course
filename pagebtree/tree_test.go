@@ -75,6 +75,47 @@ func TestMDBKernelProfileDescribesMemoryCoreWithoutMmapMechanics(t *testing.T) {
 	}
 }
 
+func TestStatsReportsReachablePageByteFill(t *testing.T) {
+	tree := New(2)
+	for i := range 18 {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	snapshot := tree.Snapshot()
+	defer snapshot.Close()
+
+	tree.Put("large", bytes.Repeat([]byte("x"), PageSize*2+77))
+	stats := tree.Stats()
+	if stats.LeafPages == 0 {
+		t.Fatalf("LeafPages = 0, want reachable leaves")
+	}
+	if stats.BranchPages == 0 {
+		t.Fatalf("BranchPages = 0, want reachable branches")
+	}
+	if stats.OverflowPages == 0 {
+		t.Fatalf("OverflowPages = 0, want large value overflow pages")
+	}
+	if stats.PageBytesCapacity != stats.Pages*PageSize {
+		t.Fatalf("PageBytesCapacity = %d, want Pages*PageSize %d", stats.PageBytesCapacity, stats.Pages*PageSize)
+	}
+	if stats.PageBytesUsed <= 0 || stats.PageBytesUsed > stats.PageBytesCapacity {
+		t.Fatalf("PageBytesUsed = %d outside (0,%d]", stats.PageBytesUsed, stats.PageBytesCapacity)
+	}
+	if stats.PageBytesFree != stats.PageBytesCapacity-stats.PageBytesUsed {
+		t.Fatalf("PageBytesFree = %d, want capacity-used %d", stats.PageBytesFree, stats.PageBytesCapacity-stats.PageBytesUsed)
+	}
+	if stats.LeafBytesUsed == 0 || stats.BranchBytesUsed == 0 || stats.OverflowBytesUsed == 0 {
+		t.Fatalf("byte buckets leaf=%d branch=%d overflow=%d, want all nonzero", stats.LeafBytesUsed, stats.BranchBytesUsed, stats.OverflowBytesUsed)
+	}
+
+	snapshotStats := snapshot.Stats()
+	if snapshotStats.OverflowPages != 0 {
+		t.Fatalf("snapshot OverflowPages = %d, want old root without large value overflow", snapshotStats.OverflowPages)
+	}
+	if snapshotStats.PageBytesCapacity != snapshotStats.Pages*PageSize {
+		t.Fatalf("snapshot PageBytesCapacity = %d, want Pages*PageSize %d", snapshotStats.PageBytesCapacity, snapshotStats.Pages*PageSize)
+	}
+}
+
 func TestPutReplacesExistingKey(t *testing.T) {
 	tree := New(2)
 	tree.Put("alpha", []byte("one"))
