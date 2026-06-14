@@ -116,6 +116,39 @@ func TestStatsReportsReachablePageByteFill(t *testing.T) {
 	}
 }
 
+func TestLeafSplitBalancesEncodedBytes(t *testing.T) {
+	tree := New(3)
+	large := bytes.Repeat([]byte("l"), 1500)
+	small := []byte("s")
+	for i := 0; i < 6; i++ {
+		value := small
+		if i < 2 {
+			value = large
+		}
+		tree.Put(fmt.Sprintf("key-%02d", i), value)
+	}
+
+	root := tree.pages[tree.root]
+	if !root.isBranch() {
+		t.Fatalf("root is leaf after overflow insert; want branch")
+	}
+	_, children := root.branchParts()
+	if len(children) != 2 {
+		t.Fatalf("root children = %d, want 2", len(children))
+	}
+	left := tree.pages[children[0]]
+	right := tree.pages[children[1]]
+	if got, want := int(left.slotCount()), 2; got != want {
+		t.Fatalf("left leaf slot count = %d, want %d for byte-balanced split", got, want)
+	}
+	if got, want := int(right.slotCount()), 4; got != want {
+		t.Fatalf("right leaf slot count = %d, want %d for byte-balanced split", got, want)
+	}
+	if left.slottedBytesUsed() < right.slottedBytesUsed() {
+		t.Fatalf("left leaf bytes = %d, right leaf bytes = %d; want large records kept on heavier left side", left.slottedBytesUsed(), right.slottedBytesUsed())
+	}
+}
+
 func TestPutReplacesExistingKey(t *testing.T) {
 	tree := New(2)
 	tree.Put("alpha", []byte("one"))

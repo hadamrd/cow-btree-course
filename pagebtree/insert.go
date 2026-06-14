@@ -44,7 +44,7 @@ func (t *Tree) insertLeaf(pageID PageID, key string, value []byte) ([]byte, bool
 	}
 
 	next := p.nextLeaf()
-	mid := len(entries) / 2
+	mid := leafSplitIndex(entries, t.degree)
 	rightID := t.allocPage()
 	right := t.newPage(rightID, flagLeaf)
 	t.pages[rightID] = right
@@ -53,6 +53,58 @@ func (t *Tree) insertLeaf(pageID PageID, key string, value []byte) ([]byte, bool
 	p.setNextLeaf(rightID)
 	right.setNextLeaf(next)
 	return nil, false, &splitResult{separator: entries[mid].key, right: rightID}
+}
+
+func leafSplitIndex(entries []leafEntry, degree int) int {
+	if len(entries) < 2 {
+		return len(entries)
+	}
+	minLeft := max(1, degree-1)
+	if minLeft > len(entries)-1 {
+		minLeft = len(entries) / 2
+	}
+	maxLeft := len(entries) - minLeft
+	if maxLeft > maxKeys(degree) {
+		maxLeft = maxKeys(degree)
+	}
+	if minNeeded := len(entries) - maxKeys(degree); minLeft < minNeeded {
+		minLeft = minNeeded
+	}
+	if minLeft > maxLeft {
+		return len(entries) / 2
+	}
+
+	total := 0
+	for _, entry := range entries {
+		total += leafEntryCellBytes(entry)
+	}
+	best := minLeft
+	bestDistance := total
+	prefix := 0
+	for i, entry := range entries {
+		prefix += leafEntryCellBytes(entry)
+		split := i + 1
+		if split < minLeft || split > maxLeft {
+			continue
+		}
+		distance := absInt(total - 2*prefix)
+		if distance < bestDistance {
+			best = split
+			bestDistance = distance
+		}
+	}
+	return best
+}
+
+func leafEntryCellBytes(entry leafEntry) int {
+	return slotSize + len(entry.key) + len(entry.value)
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func (t *Tree) insertBranch(pageID PageID, key string, value []byte) ([]byte, bool, *splitResult) {
