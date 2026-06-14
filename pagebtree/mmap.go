@@ -349,7 +349,7 @@ func (t *Tree) remapMmap(newMaxPages int) error {
 	}
 	oldMaxPages := t.arena.maxPages
 	oldNextPage := t.nextPage
-	if err := t.arena.syncDataPages(t.nextPage); err != nil {
+	if err := t.arena.syncDataPages(t.nextPage, nil); err != nil {
 		return err
 	}
 
@@ -460,7 +460,7 @@ func (t *Tree) compactMmapTail() error {
 		restoreState()
 		return err
 	}
-	if err := t.arena.syncDataPages(t.nextPage); err != nil {
+	if err := t.arena.syncDataPages(t.nextPage, nil); err != nil {
 		restoreFreelistPages()
 		restoreState()
 		return err
@@ -536,7 +536,7 @@ func (t *Tree) shrinkMmap(newMaxPages int) error {
 	return t.rebindMmapPages()
 }
 
-func (a *mmapArena) syncDataPages(nextPage PageID) error {
+func (a *mmapArena) syncDataPages(nextPage PageID, onRangeSynced func(startPage, endPage PageID)) error {
 	if a == nil || a.readOnly || nextPage <= firstTreePageID || len(a.dirtyPages) == 0 {
 		return nil
 	}
@@ -569,6 +569,9 @@ func (a *mmapArena) syncDataPages(nextPage PageID) error {
 		}
 		if err := a.syncDataPageRange(start, end); err != nil {
 			return err
+		}
+		if onRangeSynced != nil {
+			onRangeSynced(start, end)
 		}
 		startIndex = nextIndex
 	}
@@ -1284,7 +1287,7 @@ func (t *Tree) syncMmap() error {
 	if err != nil {
 		return err
 	}
-	if err := t.arena.syncDataPages(t.nextPage); err != nil {
+	if err := t.arena.syncDataPages(t.nextPage, t.emitMmapTraceDataRange); err != nil {
 		restoreFreelistPages()
 		return err
 	}

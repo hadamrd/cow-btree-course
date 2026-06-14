@@ -3733,6 +3733,7 @@ func TestMmapTraceHookReportsSyncPhases(t *testing.T) {
 
 	wantKinds := []MmapTraceEventKind{
 		MmapTraceSyncBegin,
+		MmapTraceSyncDataRange,
 		MmapTraceSyncDataSynced,
 		MmapTraceSyncMetaPublished,
 		MmapTraceSyncEnd,
@@ -3750,6 +3751,64 @@ func TestMmapTraceHookReportsSyncPhases(t *testing.T) {
 		if event.NextPage != tree.nextPage {
 			t.Fatalf("sync event %+v nextPage = %d, want %d", event, event.NextPage, tree.nextPage)
 		}
+	}
+}
+
+func TestMmapTraceHookReportsDirtyDataSyncRanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 128,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	var observed [][2]PageID
+	tree.arena.dataSyncObserver = func(start, end PageID) {
+		observed = append(observed, [2]PageID{start, end})
+	}
+	events = nil
+	for i := 0; i < 32; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync traced tree: %v", err)
+	}
+
+	var traced [][2]PageID
+	for _, event := range events {
+		if event.Kind == MmapTraceSyncDataRange {
+			traced = append(traced, [2]PageID{event.StartPage, event.EndPage})
+			if event.StartPage < firstTreePageID || event.EndPage <= event.StartPage {
+				t.Fatalf("invalid data sync trace range: %+v", event)
+			}
+			if event.Revision != tree.Revision() {
+				t.Fatalf("data sync range revision = %d, want %d", event.Revision, tree.Revision())
+			}
+		}
+	}
+	if len(observed) == 0 {
+		t.Fatalf("data sync observer saw no dirty ranges")
+	}
+	if !slices.Equal(traced, observed) {
+		t.Fatalf("traced data sync ranges = %v, want observed msync ranges %v", traced, observed)
+	}
+
+	beginIndex := traceKindIndex(events, MmapTraceSyncBegin)
+	rangeIndex := traceKindIndex(events, MmapTraceSyncDataRange)
+	dataSyncedIndex := traceKindIndex(events, MmapTraceSyncDataSynced)
+	if beginIndex < 0 || rangeIndex < 0 || dataSyncedIndex < 0 {
+		t.Fatalf("missing sync begin/range/data-synced events: %v", traceKinds(events))
+	}
+	if !(beginIndex < rangeIndex && rangeIndex < dataSyncedIndex) {
+		t.Fatalf("sync range event order = %v, want begin before range before data-synced", traceKinds(events))
 	}
 }
 
@@ -6467,4 +6526,13 @@ func findTraceEvent(events []MmapTraceEvent, kind MmapTraceEventKind, revision u
 		}
 	}
 	return nil
+}
+
+func traceKindIndex(events []MmapTraceEvent, kind MmapTraceEventKind) int {
+	for i, event := range events {
+		if event.Kind == kind {
+			return i
+		}
+	}
+	return -1
 }

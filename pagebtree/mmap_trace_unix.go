@@ -19,6 +19,16 @@ func (t *Tree) emitMmapTraceReclaimed(kind MmapTraceEventKind, reclaimedPages in
 	t.traceHook(event)
 }
 
+func (t *Tree) emitMmapTraceDataRange(startPage, endPage PageID) {
+	if t == nil || t.traceHook == nil {
+		return
+	}
+	event := t.mmapTraceEvent(MmapTraceSyncDataRange, nil, -1, "")
+	event.StartPage = startPage
+	event.EndPage = endPage
+	t.traceHook(event)
+}
+
 func (t *Tree) emitMmapTraceResize(kind MmapTraceEventKind, oldMaxPages, newMaxPages int, oldNextPage, newNextPage PageID, fileSizeBytes int64) {
 	if t == nil || t.traceHook == nil {
 		return

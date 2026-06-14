@@ -5,6 +5,7 @@ type MmapTraceEventKind string
 
 const (
 	MmapTraceSyncBegin                    MmapTraceEventKind = "mmap-sync-begin"
+	MmapTraceSyncDataRange                MmapTraceEventKind = "mmap-sync-data-range"
 	MmapTraceSyncDataSynced               MmapTraceEventKind = "mmap-sync-data-synced"
 	MmapTraceSyncMetaPublished            MmapTraceEventKind = "mmap-sync-meta-published"
 	MmapTraceSyncEnd                      MmapTraceEventKind = "mmap-sync-end"
@@ -30,6 +31,8 @@ type MmapTraceEvent struct {
 	Revision           uint64
 	Root               PageID
 	NextPage           PageID
+	StartPage          PageID
+	EndPage            PageID
 	MaxPages           int
 	OldNextPage        PageID
 	NewNextPage        PageID

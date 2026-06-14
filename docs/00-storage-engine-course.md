@@ -339,19 +339,21 @@ The dirty-page tracker is page-ID based. It sorts dirty page IDs and coalesces
 adjacent runs before syncing.
 
 `MmapOptions.TraceHook` can observe this path without parsing logs. A traced
-sync emits `mmap-sync-begin`, `mmap-sync-data-synced`,
-`mmap-sync-meta-published`, and `mmap-sync-end`, with the revision, root page,
-`nextPage`, dirty count, free count, retired count, and mapped capacity carried
-as structured fields.
+sync emits `mmap-sync-begin`, one `mmap-sync-data-range` event per coalesced
+dirty data-page run, `mmap-sync-data-synced`, `mmap-sync-meta-published`, and
+`mmap-sync-end`. Phase events carry the revision, root page, `nextPage`, dirty
+count, free count, retired count, and mapped capacity as structured fields.
+Range events also carry the half-open `StartPage`/`EndPage` page-id interval
+that was successfully passed through `msync`.
 
 Code to read:
 
 - `Tree.Sync` chooses mmap sync: [`pagebtree/tree.go#L256-L267`](../pagebtree/tree.go#L256-L267)
-- mmap sync order and trace phases: [`pagebtree/mmap.go#L1278-L1299`](../pagebtree/mmap.go#L1278-L1299)
-- Dirty data-page sync: [`pagebtree/mmap.go#L525-L565`](../pagebtree/mmap.go#L525-L565)
-- Per-range `msync`: [`pagebtree/mmap.go#L579-L590`](../pagebtree/mmap.go#L579-L590)
+- mmap sync order and trace phases: [`pagebtree/mmap.go#L1284-L1301`](../pagebtree/mmap.go#L1284-L1301)
+- Dirty data-page sync: [`pagebtree/mmap.go#L539-L580`](../pagebtree/mmap.go#L539-L580)
+- Per-range `msync`: [`pagebtree/mmap.go#L596-L608`](../pagebtree/mmap.go#L596-L608)
 - Metadata page sync: [`pagebtree/mmap.go#L617-L635`](../pagebtree/mmap.go#L617-L635)
-- Trace event API: [`pagebtree/mmap_trace.go#L3-L47`](../pagebtree/mmap_trace.go#L3-L47)
+- Trace event API: [`pagebtree/mmap_trace.go#L3-L50`](../pagebtree/mmap_trace.go#L3-L50)
 
 ## Module 10: Dual Checked Metadata Pages
 
@@ -581,7 +583,7 @@ flowchart TD
     S["Stats"] --> C["counts: pages, readers, cache hits, byte fill"]
     M["MmapCacheStats"] --> R["kernel residency via mincore"]
     P["MDBKernelProfile"] --> K["design contract flags"]
-    T["TraceHook"] --> E["decisions: sync, recovery, growth, compact, reclaim"]
+    T["TraceHook"] --> E["decisions: sync ranges, recovery, growth, compact, reclaim"]
 
     E --> A["sync phases"]
     E --> B["metadata candidate rejected"]
