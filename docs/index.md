@@ -79,6 +79,7 @@ cmd/mmapinspect/     Read-only mmap audit JSON inspection tool
 cmd/mmappunch/       Sparse-hole maintenance JSON with before/after space stats and optional trace export
 cmd/mmapfsprobe/     Local filesystem probe for mmap logical/allocated space behavior
 cmd/fsprobesummary/  Markdown summary for mmap filesystem probe JSON reports
+cmd/mmaptxworkload/  Bounded mmap transaction commit/conflict workload with optional trace export
 cmd/mmapplatform/    JSON platform capability report for mmap mechanics
 cmd/benchsummary/    Markdown summary for Go benchmark output
 docs/probes/    Redacted recorded filesystem probe artifacts and generated summary
@@ -97,10 +98,11 @@ docs/           Research chapters
 8. Run `go run ./cmd/mmapbtree-demo` to see keys survive close/reopen through mmap.
 9. Read `docs/08-mmap-backed-pages.md` for mmap growth/compaction, reader-table recycling, kernel page-cache behavior, Linux file-advice coordination, derived branch-routing cache behavior, exact reachable-page warm-up, tunable exact-page prefetch advice, residency and file-space stats, sparse-hole capability reporting, and trace events.
 10. Run `go run ./cmd/mmaptrace-demo > mmap-trace.jsonl` to inspect value-free JSONL trace events from a small mmap write/delete/compact workload.
-11. Run `go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db` to print read-only audit JSON plus reader-table, cache-residency, file-space, sparse-hole capability, page-summary, bounded key-sample, and trace-correlation sections.
-12. Run `go run ./cmd/mmappunch --trace punch-trace.jsonl /path/to/source.db` to execute sparse-hole maintenance, print before/after file-space evidence, and write value-free maintenance trace events.
-13. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
-14. Read [`10-respectability-gap-audit.md`](10-respectability-gap-audit.md) for the blunt gap list and next research slices.
-15. Read [`11-benchmarking-and-baselines.md`](11-benchmarking-and-baselines.md), run a benchmark pass, and summarize it with `go run ./cmd/benchsummary bench.out`.
-16. Read [`12-platform-matrix.md`](12-platform-matrix.md), run `go run ./cmd/mmapplatform` to inspect the current build's mmap support envelope, then run `go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 --label local-fs --redact-path /path/to/probe.db > probe.json` and `go run ./cmd/fsprobesummary probe.json` on a disposable path to collect local filesystem space evidence. Compare that workflow with the checked-in examples under [`probes/`](probes/).
-17. Change the degree in the demos and observe how `Stats` changes.
+11. Run `go run ./cmd/mmaptxworkload --transactions 12 --trace tx-trace.jsonl /path/to/txworkload.db` and summarize it with `go run ./cmd/mmaptracesummary tx-trace.jsonl` to inspect commit-sync and transaction-conflict events.
+12. Run `go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db` to print read-only audit JSON plus reader-table, cache-residency, file-space, sparse-hole capability, page-summary, bounded key-sample, and trace-correlation sections.
+13. Run `go run ./cmd/mmappunch --trace punch-trace.jsonl /path/to/source.db` to execute sparse-hole maintenance, print before/after file-space evidence, and write value-free maintenance trace events.
+14. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
+15. Read [`10-respectability-gap-audit.md`](10-respectability-gap-audit.md) for the blunt gap list and next research slices.
+16. Read [`11-benchmarking-and-baselines.md`](11-benchmarking-and-baselines.md), run a benchmark pass, and summarize it with `go run ./cmd/benchsummary bench.out`.
+17. Read [`12-platform-matrix.md`](12-platform-matrix.md), run `go run ./cmd/mmapplatform` to inspect the current build's mmap support envelope, then run `go run ./cmd/mmapfsprobe --keys 256 --value-bytes 512 --label local-fs --redact-path /path/to/probe.db > probe.json` and `go run ./cmd/fsprobesummary probe.json` on a disposable path to collect local filesystem space evidence. Compare that workflow with the checked-in examples under [`probes/`](probes/).
+18. Change the degree in the demos and observe how `Stats` changes.

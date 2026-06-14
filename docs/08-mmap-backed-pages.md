@@ -198,6 +198,16 @@ reasons, and a bounded timeline. It does not need the database file; use
 `mmapinspect --trace` when you also want to correlate the trace's last
 root/revision with a recovered database image.
 
+For a transaction-focused trace, `cmd/mmaptxworkload` creates a fresh mmap
+database, alternates successful transaction commit-sync calls with forced
+optimistic conflicts, reopens the database to verify which staged writes became
+durable, and optionally writes value-free trace JSONL:
+
+```bash
+go run ./cmd/mmaptxworkload --transactions 12 --trace tx-trace.jsonl txworkload.db
+go run ./cmd/mmaptracesummary tx-trace.jsonl
+```
+
 For a one-shot read-only integrity snapshot, `cmd/mmapinspect` opens the
 database with `OpenMmapReadOnly`, runs `Audit`, and prints indented JSON with
 the validity bit, validation error if any, stats including reclaim pressure,
@@ -280,6 +290,7 @@ Code to read:
 - JSONL exporter example: [`../pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)
 - JSONL trace demo command: [`../cmd/mmaptrace-demo/main.go`](../cmd/mmaptrace-demo/main.go)
 - JSONL trace summary command: [`../cmd/mmaptracesummary/main.go`](../cmd/mmaptracesummary/main.go)
+- Transaction workload command: [`../cmd/mmaptxworkload/main.go`](../cmd/mmaptxworkload/main.go)
 - Hook option: [`../pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
 - Dirty range coalescing and range callbacks: [`../pagebtree/mmap.go#L540-L588`](../pagebtree/mmap.go#L540-L588)
 - Sync phase and range emissions: [`../pagebtree/mmap.go#L1287-L1309`](../pagebtree/mmap.go#L1287-L1309)

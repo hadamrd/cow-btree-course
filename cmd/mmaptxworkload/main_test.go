@@ -1,0 +1,97 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestRunPrintsTransactionWorkloadJSONAndTrace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "txworkload.db")
+	tracePath := filepath.Join(dir, "txworkload.jsonl")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--transactions", "6", "--trace", tracePath, path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	var report txWorkloadReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.Path != path || report.TracePath != tracePath {
+		t.Fatalf("report paths = %q/%q, want %q/%q", report.Path, report.TracePath, path, tracePath)
+	}
+	if report.Transactions != 6 {
+		t.Fatalf("Transactions = %d, want 6", report.Transactions)
+	}
+	if report.Committed != 3 || report.Conflicted != 3 {
+		t.Fatalf("Committed/Conflicted = %d/%d, want 3/3", report.Committed, report.Conflicted)
+	}
+	if report.ReopenedCommittedKeys != 3 {
+		t.Fatalf("ReopenedCommittedKeys = %d, want 3", report.ReopenedCommittedKeys)
+	}
+	if report.ReopenedConflictedKeys != 0 {
+		t.Fatalf("ReopenedConflictedKeys = %d, want 0", report.ReopenedConflictedKeys)
+	}
+	if report.FinalStats.SyncedRevision != report.FinalStats.Revision {
+		t.Fatalf("final SyncedRevision/Revision = %d/%d, want equal", report.FinalStats.SyncedRevision, report.FinalStats.Revision)
+	}
+
+	trace, err := os.ReadFile(tracePath)
+	if err != nil {
+		t.Fatalf("read trace: %v", err)
+	}
+	for _, want := range []string{
+		`"kind":"mmap-tx-conflict"`,
+		`"kind":"mmap-sync-end"`,
+	} {
+		if !bytes.Contains(trace, []byte(want)) {
+			t.Fatalf("trace missing %s in:\n%s", want, string(trace))
+		}
+	}
+	if bytes.Contains(trace, []byte("tx-key-")) || bytes.Contains(trace, []byte("outside-")) {
+		t.Fatalf("trace leaked workload keys: %s", string(trace))
+	}
+}
+
+func TestRunRejectsExistingDatabaseArtifacts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "txworkload.db")
+	if err := os.WriteFile(path, []byte("already here"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{path}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run exit = %d, want 1", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "refusing existing") {
+		t.Fatalf("stderr = %q, want existing-artifact refusal", stderr.String())
+	}
+}
+
+func TestRunRejectsInvalidArguments(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--transactions", "0", "db"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run exit = %d, want 2", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--transactions") {
+		t.Fatalf("stderr = %q, want transactions validation", stderr.String())
+	}
+}
