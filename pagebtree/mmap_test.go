@@ -6882,6 +6882,85 @@ func TestMmapSyncUpgradesLegacyMetadataInAlternateSlot(t *testing.T) {
 	}
 }
 
+func TestMmapLegacyMetadataUpgradeSyncFaultsRemainRetryable(t *testing.T) {
+	tests := []struct {
+		name  string
+		fault mmapFaultPoint
+	}{
+		{name: "before data sync", fault: mmapFaultBeforeDataSync},
+		{name: "after metadata write", fault: mmapFaultAfterMetaWrite},
+		{name: "before metadata sync", fault: mmapFaultBeforeMetaSync},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := copyMmapFixture(t, "testdata/mmap-v1-inline-freelist.db")
+			legacyIndex, legacy := newestMetaPage(t, path)
+			if legacy.version != 1 {
+				t.Fatalf("legacy fixture metadata version = %d, want 1", legacy.version)
+			}
+			upgradeIndex := int((legacy.revision + 1) % metaPageCount)
+			if upgradeIndex == legacyIndex {
+				t.Fatalf("test fixture revision %d does not alternate from slot %d", legacy.revision, legacyIndex)
+			}
+
+			tree, err := OpenMmap(path, MmapOptions{})
+			if err != nil {
+				t.Fatalf("OpenMmap legacy fixture: %v", err)
+			}
+			defer tree.Close()
+			freePages := tree.Stats().FreePages
+			tree.arena.markDirtyPage(tree.root)
+
+			forced := fmt.Errorf("forced %s fault", tt.fault)
+			tree.arena.faultInjector = func(point mmapFaultPoint) error {
+				if point == tt.fault {
+					return forced
+				}
+				return nil
+			}
+			err = tree.Sync()
+			if !errors.Is(err, forced) {
+				t.Fatalf("Sync upgrade fault error = %v, want forced %s", err, tt.fault)
+			}
+			if got := tree.Revision(); got != legacy.revision {
+				t.Fatalf("Revision after failed upgrade sync = %d, want restored legacy revision %d", got, legacy.revision)
+			}
+			if got := tree.Stats().SyncedRevision; got != legacy.revision {
+				t.Fatalf("SyncedRevision after failed upgrade sync = %d, want %d", got, legacy.revision)
+			}
+			if !tree.metadataUpgradePending {
+				t.Fatalf("metadataUpgradePending cleared after failed upgrade sync")
+			}
+			oldSlot, ok := metaPageRecordAt(t, path, legacyIndex)
+			if !ok || oldSlot.version != 1 || oldSlot.revision != legacy.revision {
+				t.Fatalf("legacy slot after failed upgrade = %+v ok=%v, want version 1 revision %d", oldSlot, ok, legacy.revision)
+			}
+			if maybeUpgrade, ok := metaPageRecordAt(t, path, upgradeIndex); ok && maybeUpgrade.revision == legacy.revision+1 {
+				t.Fatalf("failed upgrade left checksum-valid upgraded metadata in slot %d: %+v", upgradeIndex, maybeUpgrade)
+			}
+
+			tree.arena.faultInjector = nil
+			if err := tree.Sync(); err != nil {
+				t.Fatalf("retry Sync after failed upgrade: %v", err)
+			}
+			if tree.metadataUpgradePending {
+				t.Fatalf("metadataUpgradePending still set after retry")
+			}
+			upgradedIndex, upgraded := newestMetaPage(t, path)
+			if upgradedIndex != upgradeIndex {
+				t.Fatalf("upgraded metadata slot = %d, want %d", upgradedIndex, upgradeIndex)
+			}
+			if upgraded.version != 2 || upgraded.revision != legacy.revision+1 {
+				t.Fatalf("upgraded metadata after retry = version %d revision %d, want version 2 revision %d", upgraded.version, upgraded.revision, legacy.revision+1)
+			}
+			if upgraded.freeCount != freePages {
+				t.Fatalf("upgraded metadata free count after retry = %d, want %d", upgraded.freeCount, freePages)
+			}
+		})
+	}
+}
+
 func TestOpenMmapRejectsUnsupportedKeyOrderOption(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
