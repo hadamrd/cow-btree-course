@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -16,27 +18,38 @@ import (
 
 const (
 	readerTableMagic      = "CBTRDR1\x00"
-	readerTableVersion    = uint64(1)
+	readerTableVersion    = uint64(2)
+	readerTableV1Version  = uint64(1)
 	readerTableSlotCount  = 64
 	readerTableHeaderSize = 32
-	readerSlotSize        = 32
+	readerSlotV1Size      = 32
+	readerSlotSize        = 40
+	readerTableV1Size     = readerTableHeaderSize + readerTableSlotCount*readerSlotV1Size
 	readerTableSize       = readerTableHeaderSize + readerTableSlotCount*readerSlotSize
 )
 
-var readerTokenCounter uint64
+var (
+	readerTokenCounter uint64
+	pidAlive           = pidAliveUnix
+	processStartToken  = processStartTokenUnix
+)
 
 type readerTable struct {
-	file     *os.File
-	slot     int
-	token    uint64
-	revision uint64
+	file      *os.File
+	slot      int
+	token     uint64
+	revision  uint64
+	version   uint64
+	slotSize  int
+	tableSize int
 }
 
 type readerSlot struct {
-	active   bool
-	pid      int
-	revision uint64
-	token    uint64
+	active       bool
+	pid          int
+	processStart uint64
+	revision     uint64
+	token        uint64
 }
 
 func openReaderTable(dbPath string) (*readerTable, error) {
@@ -82,7 +95,7 @@ func (r *readerTable) claim(revision uint64) error {
 			if err != nil {
 				return err
 			}
-			if current.active && pidAlive(current.pid) {
+			if current.active && readerSlotAlive(current) {
 				continue
 			}
 			if current.active {
@@ -91,10 +104,11 @@ func (r *readerTable) claim(revision uint64) error {
 				}
 			}
 			if err := r.writeSlotLocked(slot, readerSlot{
-				active:   true,
-				pid:      os.Getpid(),
-				revision: revision,
-				token:    token,
+				active:       true,
+				pid:          os.Getpid(),
+				processStart: processStartToken(os.Getpid()),
+				revision:     revision,
+				token:        token,
 			}); err != nil {
 				return err
 			}
@@ -120,7 +134,7 @@ func (r *readerTable) release() error {
 		if err != nil {
 			return err
 		}
-		if current.active && current.token == token && current.pid == os.Getpid() {
+		if current.active && current.token == token && r.ownsSlot(current) {
 			return r.writeSlotActiveLocked(slot, false)
 		}
 		return nil
@@ -138,7 +152,7 @@ func (r *readerTable) updateRevision(revision uint64) error {
 		if err != nil {
 			return err
 		}
-		if current.active && current.token == token && current.pid == os.Getpid() {
+		if current.active && current.token == token && r.ownsSlot(current) {
 			current.revision = revision
 			return r.writeSlotLocked(slot, current)
 		}
@@ -161,7 +175,7 @@ func (r *readerTable) oldest(maxRevision uint64) (uint64, bool, error) {
 			if !current.active {
 				continue
 			}
-			if !pidAlive(current.pid) {
+			if !readerSlotAlive(current) {
 				if err := r.writeSlotActiveLocked(slot, false); err != nil {
 					return err
 				}
@@ -217,7 +231,10 @@ func (r *readerTable) scan(maxRevision uint64, cleanStale bool) (MmapReaderStats
 			if !current.active {
 				continue
 			}
-			if !pidAlive(current.pid) {
+			if current.processStart != 0 {
+				stats.ProcessStartSlots++
+			}
+			if !readerSlotAlive(current) {
 				stats.StaleSlots++
 				if cleanStale {
 					if err := r.writeSlotActiveLocked(slot, false); err != nil {
@@ -280,32 +297,56 @@ func (r *readerTable) ensureFileLocked() error {
 	if info.Size() == 0 {
 		return r.initializeFileLocked()
 	}
-	if info.Size() != readerTableSize {
-		return fmt.Errorf("%w: reader table size %d, want %d", ErrReaderTable, info.Size(), readerTableSize)
+	if info.Size() < readerTableHeaderSize {
+		return fmt.Errorf("%w: reader table size %d, want at least %d", ErrReaderTable, info.Size(), readerTableHeaderSize)
 	}
 
 	header := make([]byte, readerTableHeaderSize)
 	if _, err := r.file.ReadAt(header, 0); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
-	if string(header[:8]) == readerTableMagic &&
-		binary.LittleEndian.Uint64(header[8:16]) == readerTableVersion &&
-		binary.LittleEndian.Uint64(header[16:24]) == readerTableSlotCount {
-		return nil
+	if string(header[:8]) != readerTableMagic || binary.LittleEndian.Uint64(header[16:24]) != readerTableSlotCount {
+		return fmt.Errorf("%w: reader table header mismatch", ErrReaderTable)
 	}
-	return fmt.Errorf("%w: reader table header mismatch", ErrReaderTable)
+	version := binary.LittleEndian.Uint64(header[8:16])
+	if err := r.setFormat(version); err != nil {
+		return err
+	}
+	if info.Size() != int64(r.tableSize) {
+		return fmt.Errorf("%w: reader table size %d, want %d", ErrReaderTable, info.Size(), r.tableSize)
+	}
+	return nil
 }
 
 func (r *readerTable) initializeFileLocked() error {
-	if err := r.file.Truncate(readerTableSize); err != nil {
+	if err := r.setFormat(readerTableVersion); err != nil {
 		return err
 	}
-	zero := make([]byte, readerTableSize)
+	if err := r.file.Truncate(int64(r.tableSize)); err != nil {
+		return err
+	}
+	zero := make([]byte, r.tableSize)
 	copy(zero[:8], readerTableMagic)
 	binary.LittleEndian.PutUint64(zero[8:16], readerTableVersion)
 	binary.LittleEndian.PutUint64(zero[16:24], readerTableSlotCount)
 	_, err := r.file.WriteAt(zero, 0)
 	return err
+}
+
+func (r *readerTable) setFormat(version uint64) error {
+	switch version {
+	case readerTableV1Version:
+		r.version = version
+		r.slotSize = readerSlotV1Size
+		r.tableSize = readerTableV1Size
+	case readerTableVersion:
+		r.version = version
+		r.slotSize = readerSlotSize
+		r.tableSize = readerTableSize
+	default:
+		return fmt.Errorf("%w: reader table version %d", ErrReaderTable, version)
+	}
+	return nil
 }
 
 func (r *readerTable) withLock(fn func() error) error {
@@ -318,28 +359,35 @@ func (r *readerTable) withLock(fn func() error) error {
 }
 
 func (r *readerTable) readSlotLocked(slot int) (readerSlot, error) {
-	buf := make([]byte, readerSlotSize)
-	_, err := r.file.ReadAt(buf, int64(readerTableHeaderSize+slot*readerSlotSize))
+	buf := make([]byte, r.slotSize)
+	_, err := r.file.ReadAt(buf, int64(readerTableHeaderSize+slot*r.slotSize))
 	if err != nil && !errors.Is(err, io.EOF) {
 		return readerSlot{}, err
 	}
-	return readerSlot{
+	current := readerSlot{
 		active:   binary.LittleEndian.Uint64(buf[0:8]) != 0,
 		pid:      int(binary.LittleEndian.Uint64(buf[8:16])),
 		revision: binary.LittleEndian.Uint64(buf[16:24]),
 		token:    binary.LittleEndian.Uint64(buf[24:32]),
-	}, nil
+	}
+	if r.slotSize >= readerSlotSize {
+		current.processStart = binary.LittleEndian.Uint64(buf[32:40])
+	}
+	return current, nil
 }
 
 func (r *readerTable) writeSlotLocked(slot int, value readerSlot) error {
-	buf := make([]byte, readerSlotSize)
+	buf := make([]byte, r.slotSize)
 	if value.active {
 		binary.LittleEndian.PutUint64(buf[0:8], 1)
 	}
 	binary.LittleEndian.PutUint64(buf[8:16], uint64(value.pid))
 	binary.LittleEndian.PutUint64(buf[16:24], value.revision)
 	binary.LittleEndian.PutUint64(buf[24:32], value.token)
-	_, err := r.file.WriteAt(buf, int64(readerTableHeaderSize+slot*readerSlotSize))
+	if r.slotSize >= readerSlotSize {
+		binary.LittleEndian.PutUint64(buf[32:40], value.processStart)
+	}
+	_, err := r.file.WriteAt(buf, int64(readerTableHeaderSize+slot*r.slotSize))
 	return err
 }
 
@@ -348,7 +396,7 @@ func (r *readerTable) writeSlotActiveLocked(slot int, active bool) error {
 	if active {
 		binary.LittleEndian.PutUint64(buf[:], 1)
 	}
-	_, err := r.file.WriteAt(buf[:], int64(readerTableHeaderSize+slot*readerSlotSize))
+	_, err := r.file.WriteAt(buf[:], int64(readerTableHeaderSize+slot*r.slotSize))
 	return err
 }
 
@@ -362,10 +410,56 @@ func nextReaderToken() uint64 {
 	return token
 }
 
-func pidAlive(pid int) bool {
+func (r *readerTable) ownsSlot(current readerSlot) bool {
+	if current.pid != os.Getpid() {
+		return false
+	}
+	if current.processStart == 0 {
+		return true
+	}
+	start := processStartToken(current.pid)
+	return start == 0 || start == current.processStart
+}
+
+func readerSlotAlive(current readerSlot) bool {
+	if !pidAlive(current.pid) {
+		return false
+	}
+	if current.processStart == 0 {
+		return true
+	}
+	start := processStartToken(current.pid)
+	return start == 0 || start == current.processStart
+}
+
+func pidAliveUnix(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
 	err := unix.Kill(pid, 0)
 	return err == nil || errors.Is(err, unix.EPERM)
+}
+
+func processStartTokenUnix(pid int) uint64 {
+	if pid <= 0 {
+		return 0
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0
+	}
+	text := string(data)
+	endCommand := strings.LastIndex(text, ") ")
+	if endCommand < 0 {
+		return 0
+	}
+	fields := strings.Fields(text[endCommand+2:])
+	if len(fields) <= 19 {
+		return 0
+	}
+	start, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return start
 }

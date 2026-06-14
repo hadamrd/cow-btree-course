@@ -574,6 +574,12 @@ provisional zero revision is a conservative pin: while the reader is between
 that old pages are reusable. After recovery, the reader updates the slot to the
 actual recovered revision.
 
+Version-2 reader slots record PID, revision, claim token, and a process-start
+token when the platform exposes one. That extra token reduces the classic PID
+reuse problem: a cleanup scan can treat a live PID as stale when the stored
+start token no longer matches the process now using that PID. Version-1
+sidecars remain readable as untagged slots.
+
 ```mermaid
 sequenceDiagram
     participant R as Read-only process
@@ -595,7 +601,7 @@ Code to read:
 - Reader table file shape: [`pagebtree/reader_table_unix.go#L17-L40`](../pagebtree/reader_table_unix.go#L17-L40)
 - Claim a reader slot: [`pagebtree/reader_table_unix.go#L74-L109`](../pagebtree/reader_table_unix.go#L74-L109)
 - Read-only pre-load claim and post-load update: [`pagebtree/mmap.go#L245-L273`](../pagebtree/mmap.go#L245-L273)
-- Oldest reader scan and stale PID cleanup: [`pagebtree/reader_table_unix.go#L149-L180`](../pagebtree/reader_table_unix.go#L149-L180)
+- Oldest reader scan and stale owner cleanup: [`pagebtree/reader_table_unix.go#L149-L180`](../pagebtree/reader_table_unix.go#L149-L180)
 - Stats and maintenance scan: [`pagebtree/reader_table_unix.go#L205-L242`](../pagebtree/reader_table_unix.go#L205-L242)
 - Fail-closed slot validation: [`pagebtree/reader_table_unix.go#L244-L252`](../pagebtree/reader_table_unix.go#L244-L252)
 
@@ -690,8 +696,8 @@ remap is visible without parsing logs. Dirty sync range events carry
 back to concrete page-id intervals. Sparse-hole punch events report skipped
 fallback-recoverable pages, every punched half-open page range, aggregate
 punched pages and bytes, and the attempted range plus error reason on failure.
-Reader cleanup events report how many dead-PID slots were cleared from the
-sidecar reader table.
+Reader cleanup events report how many dead or detectably reused owner slots were
+cleared from the sidecar reader table.
 
 The hook is synchronous and should stay lightweight. In a real product you
 can start with `NewMmapTraceJSONLExporter`, which writes one lower-snake-field
