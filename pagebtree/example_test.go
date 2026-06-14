@@ -86,6 +86,33 @@ func ExampleWriteBatch_DeleteRange() {
 	// delta delta-value
 }
 
+func ExampleTree_BeginReadWrite() {
+	tree := pagebtree.New(2)
+	tree.Put("alpha", []byte("one"))
+	tree.Put("bravo", []byte("two"))
+
+	tx := tree.BeginReadWrite()
+	tx.Put("alpha", []byte("updated"))
+	tx.Delete("bravo")
+	tx.Put("charlie", []byte("three"))
+
+	value, ok := tx.Get("alpha")
+	fmt.Println(ok, string(value))
+	_, visibleBeforeCommit := tree.Get("charlie")
+	fmt.Println(visibleBeforeCommit)
+
+	tx.Commit()
+	tree.RangeBetween("alpha", "delta", func(key string, value []byte) bool {
+		fmt.Println(key, string(value))
+		return true
+	})
+	// Output:
+	// true updated
+	// false
+	// alpha updated
+	// charlie three
+}
+
 func ExampleWriteBatch_CommitDetailed() {
 	tree := pagebtree.New(2)
 	tree.Put("alpha", []byte("one"))

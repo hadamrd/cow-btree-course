@@ -41,7 +41,7 @@ func runPageTreeModel(t *testing.T, data []byte) {
 	model := modelMap{}
 	reader := modelReader{data: data}
 	for step := 0; step < 96 && reader.hasMore(); step++ {
-		op := reader.next() % 10
+		op := reader.next() % 11
 		switch op {
 		case 0:
 			key := reader.key()
@@ -130,6 +130,45 @@ func runPageTreeModel(t *testing.T, data []byte) {
 				}
 			}
 			batch.Commit()
+		case 10:
+			count := int(reader.next()%4) + 1
+			tx := tree.BeginReadWrite()
+			txModel := model.clone()
+			for i := 0; i < count; i++ {
+				switch reader.next() % 4 {
+				case 0:
+					key := reader.key()
+					tx.Delete(key)
+					txModel.delete(key)
+				case 1:
+					start := reader.key()
+					end := reader.key()
+					if compareStrings(end, start) < 0 {
+						start, end = end, start
+					}
+					tx.DeleteRange(start, end)
+					txModel.deleteRange(start, end)
+				default:
+					key := reader.key()
+					value := reader.value()
+					tx.Put(key, value)
+					txModel.put(key, value)
+				}
+				key := reader.key()
+				got, ok := tx.Get(key)
+				want, exists := txModel.get(key)
+				if ok != exists || !bytes.Equal(got, want) {
+					t.Fatalf("tx Get(%q) = %q, %v; want %q, %v", key, got, ok, want, exists)
+				}
+			}
+			start := reader.key()
+			end := reader.key()
+			if compareStrings(end, start) < 0 {
+				start, end = end, start
+			}
+			assertTxRangeBetweenMatchesModel(t, tx, txModel, start, end)
+			tx.Commit()
+			model = txModel
 		}
 		if err := tree.Check(); err != nil {
 			t.Fatalf("Check after step %d: %v", step, err)
@@ -194,6 +233,22 @@ func (m modelMap) get(key string) ([]byte, bool) {
 	return cloneBytes(value), true
 }
 
+func (m modelMap) clone() modelMap {
+	out := modelMap{}
+	for key, value := range m {
+		out[key] = cloneBytes(value)
+	}
+	return out
+}
+
+func (m modelMap) deleteRange(start, end string) {
+	for _, key := range m.keys() {
+		if compareStrings(key, start) >= 0 && compareStrings(key, end) < 0 {
+			delete(m, key)
+		}
+	}
+}
+
 func (m modelMap) keys() []string {
 	keys := make([]string, 0, len(m))
 	for key := range m {
@@ -201,6 +256,28 @@ func (m modelMap) keys() []string {
 	}
 	slices.Sort(keys)
 	return keys
+}
+
+func assertTxRangeBetweenMatchesModel(t *testing.T, tx *ReadWriteTx, model modelMap, start, end string) {
+	t.Helper()
+
+	var got []string
+	tx.RangeBetween(start, end, func(key string, value []byte) bool {
+		got = append(got, key)
+		if want := model[key]; !bytes.Equal(value, want) {
+			t.Fatalf("tx RangeBetween(%q,%q) value for %q = %q, want %q", start, end, key, value, want)
+		}
+		return true
+	})
+	var want []string
+	for _, key := range model.keys() {
+		if compareStrings(key, start) >= 0 && compareStrings(key, end) < 0 {
+			want = append(want, key)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("tx RangeBetween(%q,%q) keys = %v, want %v", start, end, got, want)
+	}
 }
 
 func assertTreeMatchesModel(t *testing.T, tree *Tree, model modelMap) {

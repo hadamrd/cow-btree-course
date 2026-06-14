@@ -48,7 +48,7 @@ func runMmapTreeModel(t *testing.T, data []byte) {
 	model := modelMap{}
 	reader := modelReader{data: data}
 	for step := 0; step < 64 && reader.hasMore(); step++ {
-		op := reader.next() % 8
+		op := reader.next() % 9
 		switch op {
 		case 0:
 			key := reader.key()
@@ -111,6 +111,45 @@ func runMmapTreeModel(t *testing.T, data []byte) {
 				}
 			}
 			batch.Commit()
+		case 8:
+			count := int(reader.next()%3) + 1
+			tx := tree.BeginReadWrite()
+			txModel := model.clone()
+			for i := 0; i < count; i++ {
+				switch reader.next() % 4 {
+				case 0:
+					key := reader.key()
+					tx.Delete(key)
+					txModel.delete(key)
+				case 1:
+					start := reader.key()
+					end := reader.key()
+					if compareStrings(end, start) < 0 {
+						start, end = end, start
+					}
+					tx.DeleteRange(start, end)
+					txModel.deleteRange(start, end)
+				default:
+					key := reader.key()
+					value := reader.mmapValue()
+					tx.Put(key, value)
+					txModel.put(key, value)
+				}
+				key := reader.key()
+				got, ok := tx.Get(key)
+				want, exists := txModel.get(key)
+				if ok != exists || !bytes.Equal(got, want) {
+					t.Fatalf("mmap tx Get(%q) = %q, %v; want %q, %v", key, got, ok, want, exists)
+				}
+			}
+			start := reader.key()
+			end := reader.key()
+			if compareStrings(end, start) < 0 {
+				start, end = end, start
+			}
+			assertTxRangeBetweenMatchesModel(t, tx, txModel, start, end)
+			tx.Commit()
+			model = txModel
 		}
 		if err := tree.Check(); err != nil {
 			t.Fatalf("Check after mmap step %d: %v", step, err)

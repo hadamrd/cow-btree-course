@@ -74,6 +74,30 @@ func (b *WriteBatch) DeleteBytesRange(start []byte, end []byte) {
 	b.DeleteRange(keyFromBytes(start), keyFromBytes(end))
 }
 
+// PutBytes stages an insert or replacement for an opaque byte key in a
+// read-write transaction.
+func (tx *ReadWriteTx) PutBytes(key []byte, value []byte) {
+	tx.Put(keyFromBytes(key), value)
+}
+
+// GetBytes returns a copy of the transaction-visible value for an opaque byte
+// key.
+func (tx *ReadWriteTx) GetBytes(key []byte) ([]byte, bool) {
+	return tx.Get(keyFromBytes(key))
+}
+
+// DeleteBytes stages removal of an opaque byte key in a read-write
+// transaction.
+func (tx *ReadWriteTx) DeleteBytes(key []byte) {
+	tx.Delete(keyFromBytes(key))
+}
+
+// DeleteBytesRange stages removal of opaque byte keys greater than or equal to
+// start and less than end in the transaction-visible view.
+func (tx *ReadWriteTx) DeleteBytesRange(start []byte, end []byte) {
+	tx.DeleteRange(keyFromBytes(start), keyFromBytes(end))
+}
+
 // GetBytes returns a copy of the snapshot value for an opaque byte key.
 func (s *Snapshot) GetBytes(key []byte) ([]byte, bool) {
 	return s.Get(keyFromBytes(key))

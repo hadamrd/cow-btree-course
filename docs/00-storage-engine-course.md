@@ -748,11 +748,14 @@ Serious pieces in this repository:
 - Explicit write batches that publish one revision, support point mutations and
   half-open range deletes, and can report per-operation old values through
   `CommitDetailed`.
+- A small read-write transaction facade with read-your-writes point reads,
+  `RangeBetween` over the staged view, transaction-visible range delete
+  expansion, rollback, and one-revision commit through the batch machinery.
 - A sorted-map model/fuzz target for put, delete, cursor delete, batch, batch
-  range delete, range, cursor, bounded cursor, reverse bounded cursor, and
-  integrity-check operation streams.
+  range delete, read-write transaction, range, cursor, bounded cursor, reverse
+  bounded cursor, and integrity-check operation streams.
 - An mmap sorted-map model/fuzz target that injects sync/close/reopen cycles,
-  batch range deletes, and overflow-heavy values.
+  batch range deletes, read-write transactions, and overflow-heavy values.
 - A malformed mmap-image fuzz target that mutates metadata, page headers,
   checksums, truncation, and tree/overflow-bearing pages, then requires any
   accepted image to pass `Tree.Check`.
@@ -768,9 +771,10 @@ Still research or incomplete compared with a production engine:
 
 - No concurrency-heavy lock manager.
 - No full ACID transaction API; write batches exist with detailed commit
-  reporting, panic rollback, and half-open range delete, and tree-owned cursors
-  can delete their current live key, but richer cursor-write transaction
-  semantics remain research work.
+  reporting, panic rollback, and half-open range delete, and read-write
+  transactions add read-your-writes `Get`, `RangeBetween`, range delete,
+  rollback, and one-revision commit, but cursor writes inside explicit
+  transactions and full isolation/durability contracts remain research work.
 - No sparse-file hole punching.
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with true power-fail fault injection;
