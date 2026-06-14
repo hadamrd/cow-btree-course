@@ -176,10 +176,11 @@ go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
 
 For a one-shot read-only integrity snapshot, `cmd/mmapinspect` opens the
 database with `OpenMmapReadOnly`, runs `Audit`, and prints indented JSON with
-the validity bit, validation error if any, stats, reachable page IDs, free page
-IDs, retired page IDs, and leaf-link validation state. `--readers` adds
-reader-table slot statistics, including active/stale slots and oldest pinned
-revision. `--cache` adds `mincore`-backed mapped/resident page counts:
+the validity bit, validation error if any, stats, persisted `key_order`,
+`key_comparator`, reachable page IDs, free page IDs, retired page IDs, and
+leaf-link validation state. `--readers` adds reader-table slot statistics,
+including active/stale slots and oldest pinned revision. `--cache` adds
+`mincore`-backed mapped/resident page counts:
 
 ```bash
 go run ./cmd/mmapinspect --readers --cache source.db

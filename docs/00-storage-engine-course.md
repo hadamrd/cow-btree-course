@@ -699,9 +699,10 @@ go run ./cmd/mmaptrace-demo > mmap-trace.jsonl
 
 For an operator-style read-only validation snapshot, `cmd/mmapinspect` opens an
 mmap database through `OpenMmapReadOnly`, runs `Audit`, and writes indented JSON
-with validity, stats, reachable page IDs, free page IDs, retired page IDs, and
-linked-leaf validation state. `--readers` adds the mmap reader-table slot
-summary, and `--cache` adds kernel page-cache residency counts:
+with validity, stats, persisted key-order identity, comparator kind, reachable
+page IDs, free page IDs, retired page IDs, and linked-leaf validation state.
+`--readers` adds the mmap reader-table slot summary, and `--cache` adds kernel
+page-cache residency counts:
 
 ```bash
 go run ./cmd/mmapinspect --readers --cache /path/to/source.db

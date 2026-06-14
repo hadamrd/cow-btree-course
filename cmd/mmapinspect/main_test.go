@@ -61,6 +61,41 @@ func TestRunPrintsAuditJSONForMmapDatabase(t *testing.T) {
 	}
 }
 
+func TestRunPrintsPersistedKeyOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inspect.db")
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{
+		Degree:   2,
+		MaxPages: 128,
+		KeyOrder: pagebtree.KeyOrderReverse,
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap reverse: %v", err)
+	}
+	for _, key := range []string{"alpha", "bravo", "charlie"} {
+		tree.Put(key, []byte("value-"+key))
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close reverse: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.KeyOrder != pagebtree.KeyOrderReverse {
+		t.Fatalf("KeyOrder = %d, want reverse", report.KeyOrder)
+	}
+	if report.KeyComparator != pagebtree.KeyComparatorReverse {
+		t.Fatalf("KeyComparator = %d, want reverse", report.KeyComparator)
+	}
+}
+
 func TestRunPrintsOptionalReaderAndCacheSections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspect.db")
 	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})
