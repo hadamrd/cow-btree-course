@@ -347,11 +347,11 @@ as structured fields.
 Code to read:
 
 - `Tree.Sync` chooses mmap sync: [`pagebtree/tree.go#L256-L267`](../pagebtree/tree.go#L256-L267)
-- mmap sync order and trace phases: [`pagebtree/mmap.go#L1265-L1285`](../pagebtree/mmap.go#L1265-L1285)
+- mmap sync order and trace phases: [`pagebtree/mmap.go#L1278-L1299`](../pagebtree/mmap.go#L1278-L1299)
 - Dirty data-page sync: [`pagebtree/mmap.go#L525-L565`](../pagebtree/mmap.go#L525-L565)
 - Per-range `msync`: [`pagebtree/mmap.go#L579-L590`](../pagebtree/mmap.go#L579-L590)
-- Metadata page sync: [`pagebtree/mmap.go#L576-L590`](../pagebtree/mmap.go#L576-L590)
-- Trace event API: [`pagebtree/mmap_trace.go#L3-L36`](../pagebtree/mmap_trace.go#L3-L36)
+- Metadata page sync: [`pagebtree/mmap.go#L617-L635`](../pagebtree/mmap.go#L617-L635)
+- Trace event API: [`pagebtree/mmap_trace.go#L3-L47`](../pagebtree/mmap_trace.go#L3-L47)
 
 ## Module 10: Dual Checked Metadata Pages
 
@@ -387,9 +387,9 @@ serve reads.
 
 Code to read:
 
-- Recovery scan and newest-first sort: [`pagebtree/mmap.go#L923-L969`](../pagebtree/mmap.go#L923-L969)
-- Candidate mapping and validation: [`pagebtree/mmap.go#L973-L1037`](../pagebtree/mmap.go#L973-L1037)
-- Metadata slot/revision check: [`pagebtree/mmap.go#L1045-L1049`](../pagebtree/mmap.go#L1045-L1049)
+- Recovery scan and newest-first sort: [`pagebtree/mmap.go#L937-L983`](../pagebtree/mmap.go#L937-L983)
+- Candidate mapping and validation: [`pagebtree/mmap.go#L987-L1051`](../pagebtree/mmap.go#L987-L1051)
+- Metadata slot/revision check: [`pagebtree/mmap.go#L1059-L1063`](../pagebtree/mmap.go#L1059-L1063)
 - Metadata write format and checksum: [`pagebtree/mmap.go#L1607-L1654`](../pagebtree/mmap.go#L1607-L1654)
 - Metadata checksum computation: [`pagebtree/mmap.go#L1657-L1662`](../pagebtree/mmap.go#L1657-L1662)
 - Recovery trace tests: [`pagebtree/mmap_test.go#L3416-L3460`](../pagebtree/mmap_test.go#L3416-L3460)
@@ -458,7 +458,7 @@ Code to read:
 - Free list and retired-page fields: [`pagebtree/tree.go#L12-L17`](../pagebtree/tree.go#L12-L17)
 - Allocation reuses free pages first: [`pagebtree/tree.go#L201-L218`](../pagebtree/tree.go#L201-L218)
 - Compaction refuses active readers and trims only safe tail pages: [`pagebtree/tree.go#L257-L275`](../pagebtree/tree.go#L257-L275)
-- Tail compaction mechanics: [`pagebtree/mmap.go#L375-L443`](../pagebtree/mmap.go#L375-L443)
+- Tail compaction mechanics: [`pagebtree/mmap.go#L408-L482`](../pagebtree/mmap.go#L408-L482)
 - Persisted reclaim recovery: [`pagebtree/mmap.go#L1099-L1151`](../pagebtree/mmap.go#L1099-L1151)
 
 ## Module 13: Reader Tables and MVCC Watermarks
@@ -546,12 +546,14 @@ flowchart TD
     S["Stats"] --> C["counts: pages, readers, cache hits"]
     M["MmapCacheStats"] --> R["kernel residency via mincore"]
     P["MDBKernelProfile"] --> K["design contract flags"]
-    T["TraceHook"] --> E["decisions: sync, recovery, reclaim"]
+    T["TraceHook"] --> E["decisions: sync, recovery, growth, compact, reclaim"]
 
     E --> A["sync phases"]
     E --> B["metadata candidate rejected"]
     E --> D["fallback candidate accepted"]
     E --> F["obsolete metadata pages reusable"]
+    E --> G["growth/compact geometry changed"]
+    E --> H["stale reader slots cleared"]
 ```
 
 This matters because a serious engine should explain decisions, not only final
@@ -561,6 +563,9 @@ validation reason. If `Sync` stalls in a larger experiment, the phase events
 let you separate "dirty data pages flushed" from "metadata published." If old
 freelist/reclaim metadata pages become reusable only after both alternating
 metadata slots move past them, the reclaim trace event marks that decision.
+Growth and compaction events carry old/new mapped capacity, old/new `nextPage`,
+and resulting file size. Reader cleanup events report how many dead-PID slots
+were cleared from the sidecar reader table.
 
 The hook is synchronous and should stay lightweight. In a real product you
 would adapt it to an event exporter or structured logger. In this research lab,
@@ -569,13 +574,18 @@ demos without putting a logging framework in the storage core.
 
 Code to read:
 
-- Trace event API: [`pagebtree/mmap_trace.go#L3-L36`](../pagebtree/mmap_trace.go#L3-L36)
+- Trace event API: [`pagebtree/mmap_trace.go#L3-L47`](../pagebtree/mmap_trace.go#L3-L47)
 - Hook option on mmap open: [`pagebtree/mmap.go#L56-L64`](../pagebtree/mmap.go#L56-L64)
-- Sync trace emissions: [`pagebtree/mmap.go#L1265-L1285`](../pagebtree/mmap.go#L1265-L1285)
-- Recovery trace emissions: [`pagebtree/mmap.go#L923-L1037`](../pagebtree/mmap.go#L923-L1037)
-- Reclaim trace emission: [`pagebtree/mmap.go#L1391-L1421`](../pagebtree/mmap.go#L1391-L1421)
+- Sync trace emissions: [`pagebtree/mmap.go#L1278-L1299`](../pagebtree/mmap.go#L1278-L1299)
+- Recovery trace emissions: [`pagebtree/mmap.go#L937-L1051`](../pagebtree/mmap.go#L937-L1051)
+- Reclaim trace emission: [`pagebtree/mmap.go#L1405-L1435`](../pagebtree/mmap.go#L1405-L1435)
+- Growth trace emissions: [`pagebtree/mmap.go#L346-L394`](../pagebtree/mmap.go#L346-L394)
+- Compact trace emissions: [`pagebtree/mmap.go#L408-L482`](../pagebtree/mmap.go#L408-L482)
+- Reader cleanup trace emission: [`pagebtree/reader_table_unix.go#L262-L272`](../pagebtree/reader_table_unix.go#L262-L272)
 - Reclaim trace test: [`pagebtree/mmap_test.go#L2715-L2769`](../pagebtree/mmap_test.go#L2715-L2769)
-- Sync and recovery trace tests: [`pagebtree/mmap_test.go#L3372-L3460`](../pagebtree/mmap_test.go#L3372-L3460)
+- Growth and compact trace tests: [`pagebtree/mmap_test.go#L2771-L2862`](../pagebtree/mmap_test.go#L2771-L2862)
+- Sync and recovery trace tests: [`pagebtree/mmap_test.go#L3465-L3553`](../pagebtree/mmap_test.go#L3465-L3553)
+- Reader cleanup trace test: [`pagebtree/mmap_test.go#L4773-L4824`](../pagebtree/mmap_test.go#L4773-L4824)
 
 ## Module 16: OpenLDAP/LMDB Versus OpenDJ/Berkeley JE
 
@@ -623,7 +633,7 @@ Code to read:
 - OpenLDAP-style profile fields: [`pagebtree/kernel_profile.go#L28-L45`](../pagebtree/kernel_profile.go#L28-L45)
 - mmap open and reader table: [`pagebtree/mmap.go#L107-L198`](../pagebtree/mmap.go#L107-L198)
 - Read-only mmap handle: [`pagebtree/mmap.go#L200-L275`](../pagebtree/mmap.go#L200-L275)
-- Metadata root recovery instead of log replay: [`pagebtree/mmap.go#L923-L1037`](../pagebtree/mmap.go#L923-L1037)
+- Metadata root recovery instead of log replay: [`pagebtree/mmap.go#L937-L1051`](../pagebtree/mmap.go#L937-L1051)
 - Bounded derived routing cache, not raw heap page cache: [`pagebtree/page_cache.go#L35-L80`](../pagebtree/page_cache.go#L35-L80)
 
 ## Module 17: What Is Serious Here, and What Is Still Research
@@ -646,8 +656,9 @@ Serious pieces in this repository:
 - Layout and invariant validation.
 - Kernel page-cache hints and cache-residency stats.
 - Bounded derived branch-routing cache.
-- Optional structured mmap trace events for sync phases, recovery fallback, and
-  obsolete metadata-page reclaim decisions.
+- Optional structured mmap trace events for sync phases, recovery fallback,
+  growth remap, compact shrink, stale reader cleanup, and obsolete
+  metadata-page reclaim decisions.
 - Explicit point write batches that publish one revision and can report
   per-operation old values through `CommitDetailed`.
 - A sorted-map model/fuzz target for put, delete, batch, range, cursor, and

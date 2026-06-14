@@ -11,6 +11,11 @@ const (
 	MmapTraceRecoveryCandidateRejected    MmapTraceEventKind = "mmap-recovery-candidate-rejected"
 	MmapTraceRecoveryCandidateAccepted    MmapTraceEventKind = "mmap-recovery-candidate-accepted"
 	MmapTraceReclaimObsoleteMetadataPages MmapTraceEventKind = "mmap-reclaim-obsolete-metadata-pages"
+	MmapTraceGrowthBegin                  MmapTraceEventKind = "mmap-growth-begin"
+	MmapTraceGrowthEnd                    MmapTraceEventKind = "mmap-growth-end"
+	MmapTraceCompactBegin                 MmapTraceEventKind = "mmap-compact-begin"
+	MmapTraceCompactEnd                   MmapTraceEventKind = "mmap-compact-end"
+	MmapTraceReaderTableCleanup           MmapTraceEventKind = "mmap-reader-table-cleanup"
 )
 
 // MmapTraceHook receives synchronous trace events from mmap-backed trees.
@@ -21,16 +26,22 @@ type MmapTraceHook func(MmapTraceEvent)
 // MmapTraceEvent describes a storage-engine phase using stable page/revision
 // identifiers instead of formatted log text.
 type MmapTraceEvent struct {
-	Kind           MmapTraceEventKind
-	Revision       uint64
-	Root           PageID
-	NextPage       PageID
-	MaxPages       int
-	Length         int
-	DirtyPages     int
-	FreePages      int
-	RetiredPages   int
-	ReclaimedPages int
-	MetadataSlot   int
-	Reason         string
+	Kind               MmapTraceEventKind
+	Revision           uint64
+	Root               PageID
+	NextPage           PageID
+	MaxPages           int
+	OldNextPage        PageID
+	NewNextPage        PageID
+	OldMaxPages        int
+	NewMaxPages        int
+	FileSizeBytes      int64
+	Length             int
+	DirtyPages         int
+	FreePages          int
+	RetiredPages       int
+	ReclaimedPages     int
+	ClearedReaderSlots int
+	MetadataSlot       int
+	Reason             string
 }

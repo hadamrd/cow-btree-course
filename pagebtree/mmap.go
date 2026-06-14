@@ -347,12 +347,15 @@ func (t *Tree) remapMmap(newMaxPages int) error {
 	if newMaxPages <= t.arena.maxPages {
 		return nil
 	}
+	oldMaxPages := t.arena.maxPages
+	oldNextPage := t.nextPage
 	if err := t.arena.syncDataPages(t.nextPage); err != nil {
 		return err
 	}
 
 	newSize := int64((newMaxPages + metaPageCount) * PageSize)
 	oldSize := int64(len(t.arena.data))
+	t.emitMmapTraceResize(MmapTraceGrowthBegin, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, newSize)
 	if err := t.arena.file.Truncate(newSize); err != nil {
 		return err
 	}
@@ -384,7 +387,11 @@ func (t *Tree) remapMmap(newMaxPages int) error {
 	if err := t.arena.advise(t.arena.accessPattern); err != nil {
 		return err
 	}
-	return t.rebindMmapPages()
+	if err := t.rebindMmapPages(); err != nil {
+		return err
+	}
+	t.emitMmapTraceResize(MmapTraceGrowthEnd, oldMaxPages, newMaxPages, oldNextPage, t.nextPage, int64(len(t.arena.data)))
+	return nil
 }
 
 func (t *Tree) rebindMmapPages() error {
@@ -418,6 +425,8 @@ func (t *Tree) compactMmapTail() error {
 	oldMetaFreelistPages := append([]PageID(nil), t.metaFreelistPages...)
 	oldDirtyPages := cloneDirtyPages(t.arena.dirtyPages)
 	removedPages := map[PageID]*page{}
+	newSize := int64((newMaxPages + metaPageCount) * PageSize)
+	t.emitMmapTraceResize(MmapTraceCompactBegin, oldMaxPages, newMaxPages, oldNextPage, trimmedNextPage, newSize)
 	restoreState := func() {
 		t.nextPage = oldNextPage
 		t.free = oldFree
@@ -463,9 +472,14 @@ func (t *Tree) compactMmapTail() error {
 	}
 	t.reclaimObsoleteMetaFreelistPages()
 	if newMaxPages >= oldMaxPages {
+		t.emitMmapTraceResize(MmapTraceCompactEnd, oldMaxPages, t.arena.maxPages, oldNextPage, t.nextPage, int64(len(t.arena.data)))
 		return nil
 	}
-	return t.shrinkMmap(newMaxPages)
+	if err := t.shrinkMmap(newMaxPages); err != nil {
+		return err
+	}
+	t.emitMmapTraceResize(MmapTraceCompactEnd, oldMaxPages, t.arena.maxPages, oldNextPage, t.nextPage, int64(len(t.arena.data)))
+	return nil
 }
 
 func (t *Tree) trailingFreeNextPage() PageID {

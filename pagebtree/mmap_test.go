@@ -2768,6 +2768,99 @@ func TestMmapTraceHookReportsObsoleteMetadataPageReclaim(t *testing.T) {
 	}
 }
 
+func TestMmapTraceHookReportsGrowthRemap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 4,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	events = nil
+	oldMaxPages := tree.arena.maxPages
+	oldNextPage := tree.nextPage
+	newMaxPages := oldMaxPages * 2
+	if err := tree.remapMmap(newMaxPages); err != nil {
+		t.Fatalf("remapMmap traced growth: %v", err)
+	}
+
+	wantKinds := []MmapTraceEventKind{
+		MmapTraceGrowthBegin,
+		MmapTraceGrowthEnd,
+	}
+	if got := traceKinds(events); !slices.Equal(got, wantKinds) {
+		t.Fatalf("growth trace kinds = %v, want %v", got, wantKinds)
+	}
+	end := findTraceEvent(events, MmapTraceGrowthEnd, tree.Revision())
+	if end == nil {
+		t.Fatalf("missing growth end event in %+v", events)
+	}
+	if end.OldMaxPages != oldMaxPages || end.NewMaxPages != newMaxPages {
+		t.Fatalf("growth max pages = old:%d new:%d, want old:%d new:%d", end.OldMaxPages, end.NewMaxPages, oldMaxPages, newMaxPages)
+	}
+	if end.OldNextPage != oldNextPage || end.NewNextPage != tree.nextPage {
+		t.Fatalf("growth next page = old:%d new:%d, want old:%d new:%d", end.OldNextPage, end.NewNextPage, oldNextPage, tree.nextPage)
+	}
+	if end.FileSizeBytes != int64((newMaxPages+metaPageCount)*PageSize) {
+		t.Fatalf("growth file size = %d, want %d", end.FileSizeBytes, int64((newMaxPages+metaPageCount)*PageSize))
+	}
+}
+
+func TestMmapTraceHookReportsCompactShrink(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 32,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	for i := 0; i < 8; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	appendFreeTailPage(t, tree)
+	appendFreeTailPage(t, tree)
+	oldMaxPages := tree.arena.maxPages
+	oldNextPage := tree.nextPage
+
+	events = nil
+	if err := tree.Compact(); err != nil {
+		t.Fatalf("Compact traced tree: %v", err)
+	}
+
+	end := findTraceEvent(events, MmapTraceCompactEnd, tree.Revision())
+	if end == nil {
+		t.Fatalf("missing compact end event in %+v", events)
+	}
+	if end.OldMaxPages != oldMaxPages || end.NewMaxPages != tree.arena.maxPages {
+		t.Fatalf("compact max pages = old:%d new:%d, want old:%d new:%d", end.OldMaxPages, end.NewMaxPages, oldMaxPages, tree.arena.maxPages)
+	}
+	if end.OldNextPage != oldNextPage || end.NewNextPage != tree.nextPage {
+		t.Fatalf("compact next page = old:%d new:%d, want old:%d new:%d", end.OldNextPage, end.NewNextPage, oldNextPage, tree.nextPage)
+	}
+	if end.NewMaxPages >= end.OldMaxPages {
+		t.Fatalf("compact did not report shrink: %+v", end)
+	}
+	if end.FileSizeBytes != int64((tree.arena.maxPages+metaPageCount)*PageSize) {
+		t.Fatalf("compact file size = %d, want %d", end.FileSizeBytes, int64((tree.arena.maxPages+metaPageCount)*PageSize))
+	}
+}
+
 func TestMmapObsoleteFreelistCrashImageMatrixClassifiesMetadataGenerationReclaim(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
@@ -4674,6 +4767,60 @@ func TestCleanStaleMmapReadersClearsDeadSlots(t *testing.T) {
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("Close writer: %v", err)
+	}
+}
+
+func TestMmapTraceHookReportsStaleReaderCleanup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	writer, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 64,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	defer writer.Close()
+	writer.Put("alpha", []byte("one"))
+
+	table, err := openReaderTable(path)
+	if err != nil {
+		t.Fatalf("openReaderTable: %v", err)
+	}
+	if err := table.withLock(func() error {
+		return table.writeSlotLocked(0, readerSlot{
+			active:   true,
+			pid:      -1,
+			revision: writer.Revision(),
+			token:    99,
+		})
+	}); err != nil {
+		table.close()
+		t.Fatalf("write stale reader slot: %v", err)
+	}
+	if err := table.close(); err != nil {
+		t.Fatalf("close injected reader table: %v", err)
+	}
+
+	events = nil
+	cleared, err := writer.CleanStaleMmapReaders()
+	if err != nil {
+		t.Fatalf("CleanStaleMmapReaders: %v", err)
+	}
+	if cleared != 1 {
+		t.Fatalf("CleanStaleMmapReaders cleared %d slots, want 1", cleared)
+	}
+
+	event := findTraceEvent(events, MmapTraceReaderTableCleanup, writer.Revision())
+	if event == nil {
+		t.Fatalf("missing reader cleanup event in %+v", events)
+	}
+	if event.ClearedReaderSlots != 1 {
+		t.Fatalf("cleared reader slots = %d, want 1", event.ClearedReaderSlots)
 	}
 }
 

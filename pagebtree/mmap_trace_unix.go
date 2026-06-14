@@ -19,6 +19,28 @@ func (t *Tree) emitMmapTraceReclaimed(kind MmapTraceEventKind, reclaimedPages in
 	t.traceHook(event)
 }
 
+func (t *Tree) emitMmapTraceResize(kind MmapTraceEventKind, oldMaxPages, newMaxPages int, oldNextPage, newNextPage PageID, fileSizeBytes int64) {
+	if t == nil || t.traceHook == nil {
+		return
+	}
+	event := t.mmapTraceEvent(kind, nil, -1, "")
+	event.OldMaxPages = oldMaxPages
+	event.NewMaxPages = newMaxPages
+	event.OldNextPage = oldNextPage
+	event.NewNextPage = newNextPage
+	event.FileSizeBytes = fileSizeBytes
+	t.traceHook(event)
+}
+
+func (t *Tree) emitMmapTraceReaderCleanup(clearedSlots int) {
+	if t == nil || t.traceHook == nil || clearedSlots == 0 {
+		return
+	}
+	event := t.mmapTraceEvent(MmapTraceReaderTableCleanup, nil, -1, "")
+	event.ClearedReaderSlots = clearedSlots
+	t.traceHook(event)
+}
+
 func (t *Tree) emitMmapTraceMetaError(kind MmapTraceEventKind, metaPage []byte, slot int, err error) {
 	if t == nil || t.traceHook == nil {
 		return

@@ -264,7 +264,12 @@ func (t *Tree) CleanStaleMmapReaders() (int, error) {
 	if t == nil || t.closed || t.arena == nil || t.arena.readerTable == nil {
 		return 0, nil
 	}
-	return t.arena.readerTable.cleanStale(t.revision)
+	cleared, err := t.arena.readerTable.cleanStale(t.revision)
+	if err != nil {
+		return cleared, err
+	}
+	t.emitMmapTraceReaderCleanup(cleared)
+	return cleared, nil
 }
 
 func (r *readerTable) ensureFileLocked() error {
