@@ -350,11 +350,14 @@ sequenceDiagram
 The dirty-page tracker is page-ID based. It sorts dirty page IDs and coalesces
 adjacent runs before syncing.
 
-Read-write transaction `Commit` uses the same copy-on-write batch publication
-path as direct writes, but it is still a logical publish. The mmap durability
-boundary remains `Sync`. `TestMmapTxSyncProcessCrashMatrixClassifiesRecoveryRoot`
-commits a transaction, kills a child writer during the following `Sync`, and
-then reopens the same file from the parent process. A crash before dirty data
+Write batch and read-write transaction `Commit` use the same copy-on-write
+batch publication path as direct writes, but they are still logical publishes.
+The mmap durability boundary remains `Sync`.
+`TestMmapWriteBatchCommitSyncProcessCrashMatrixClassifiesRecoveryRoot` stages a
+multi-operation batch through `CommitSyncDetailed`, kills the child writer
+inside the sync boundary, and reopens the same file from the parent process.
+`TestMmapTxSyncProcessCrashMatrixClassifiesRecoveryRoot` does the same after a
+transaction commit followed by `Sync`. In both cases, a crash before dirty data
 sync recovers the old root. A crash after metadata bytes are written recovers
 the new root.
 
@@ -956,10 +959,10 @@ Serious pieces in this repository:
   checksums, truncation, and tree/overflow-bearing pages, then requires any
   accepted image to pass `Tree.Check`.
 - Process-exit crash probes that kill a child writer at sync-publication,
-  transaction-sync-publication, mmap-growth, compact-shrink, large-freelist
-  spill, large-reclaim spill, legacy metadata-upgrade, and obsolete freelist
-  metadata-generation boundaries, then reopen the same database from a fresh
-  process.
+  write-batch commit-sync, transaction-sync-publication, mmap-growth,
+  compact-shrink, large-freelist spill, large-reclaim spill, legacy
+  metadata-upgrade, and obsolete freelist metadata-generation boundaries, then
+  reopen the same database from a fresh process.
 - Reproducible microbenchmarks for page and mmap get, seek/next, forward and
   reverse bounded cursor, bounded range, insert, delete, reopen, and sync paths.
   Run a short local pass with
@@ -974,9 +977,10 @@ Still research or incomplete compared with a production engine:
   reporting, panic rollback, and half-open range delete, and read-write
   transactions add read-your-writes `Get`, `RangeBetween`, range delete,
   transaction cursor delete, stable begin-revision reads, rollback, optimistic
-  revision-conflict detection, one-revision commit, and a process-exit crash
-  proof for commit followed by mmap `Sync`. `CommitSync` and
-  `CommitSyncDetailed` provide explicit commit-then-sync helpers, but
+  revision-conflict detection, and one-revision commit. Batch `CommitSync` and
+  transaction commit followed by mmap `Sync` both have process-exit crash
+  proofs. `CommitSync` and `CommitSyncDetailed` provide explicit
+  commit-then-sync helpers, but
   concurrency stress and filesystem-specific fsync guarantees remain research
   work.
 - Sparse-file hole punching is experimental and Linux-backed; portability,
