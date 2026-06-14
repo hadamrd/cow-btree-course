@@ -47,7 +47,11 @@ reports into a stable Markdown table with one row each for insert, delete,
 compact, and punch phases, including logical bytes, allocated bytes, sparse
 bytes, free page counts, punched pages, filesystem identity, and mount identity.
 Keep the raw JSON as the source of truth and use the Markdown summary for
-review notes or a manual filesystem matrix.
+review notes or a manual filesystem matrix. The repository includes one checked
+example under [`probes/`](probes/), with a generated
+[`probes/summary.md`](probes/summary.md). `./scripts/verify-probe-artifacts.sh`
+checks that committed probe JSON is path-redacted and that the Markdown summary
+matches the JSON inputs.
 
 ## Current Matrix
 
@@ -101,7 +105,7 @@ systems.
 A serious support matrix would need:
 
 - Runtime tests on each supported operating system, not only cross-compilation.
-- More recorded filesystem-specific probe runs for ext4, XFS, APFS, ZFS, tmpfs, and network filesystems, ideally saved as raw `mmapfsprobe` JSON plus `fsprobesummary` Markdown.
+- More recorded filesystem-specific probe runs for ext4, XFS, APFS, ZFS, tmpfs, and network filesystems, saved as redacted `mmapfsprobe` JSON plus generated `fsprobesummary` Markdown.
 - Power-fail or VM-kill experiments per filesystem and mount option.
 - Sparse-punch allocation evidence before and after maintenance on each filesystem.
 - Long-running multi-process reader/writer soak runs outside `go test`.
