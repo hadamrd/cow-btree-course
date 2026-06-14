@@ -30,6 +30,8 @@ flowchart TD
     G --> H["08. Mmap-backed pages"]
     H --> I["09. OpenLDAP/OpenDJ research"]
     I --> J["10. Respectability gap audit"]
+    J --> K["11. Benchmarking and baselines"]
+    K --> L["12. Platform matrix"]
 ```
 
 ## Repository Layout
@@ -61,6 +63,7 @@ pagebtree/
   mmap_trace.go Public mmap trace event API
   mmap_trace_export.go JSONL trace exporter
   mmap_warm.go  Exact reachable-page mmap warm-up advice
+  platform_profile.go Build-time mmap platform capability profile
   cursor.go     Snapshot-backed seek/next/prev, half-open bounds, and point delete
   kernel_profile.go OpenLDAP-style mmap kernel research profile
   reader_table_unix.go LMDB-style mmap reader table and writer mutex sidecars
@@ -73,6 +76,7 @@ cmd/mdbkernel-demo/  OpenLDAP-style mmap kernel profile demonstration
 cmd/mmaptrace-demo/  JSONL mmap trace export demonstration
 cmd/mmapinspect/     Read-only mmap audit JSON inspection tool
 cmd/mmappunch/       Sparse-hole maintenance JSON with before/after space stats and optional trace export
+cmd/mmapplatform/    JSON platform capability report for mmap mechanics
 cmd/benchsummary/    Markdown summary for Go benchmark output
 docs/           Research chapters
 ```
@@ -94,4 +98,5 @@ docs/           Research chapters
 13. Read `docs/09-openldap-opendj-research.md` for the OpenLDAP LMDB/MDB versus OpenDJ Berkeley JE comparison and future research directions.
 14. Read [`10-respectability-gap-audit.md`](10-respectability-gap-audit.md) for the blunt gap list and next research slices.
 15. Read [`11-benchmarking-and-baselines.md`](11-benchmarking-and-baselines.md), run a benchmark pass, and summarize it with `go run ./cmd/benchsummary bench.out`.
-16. Change the degree in the demos and observe how `Stats` changes.
+16. Read [`12-platform-matrix.md`](12-platform-matrix.md) and run `go run ./cmd/mmapplatform` to inspect the current build's mmap support envelope.
+17. Change the degree in the demos and observe how `Stats` changes.

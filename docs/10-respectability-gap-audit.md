@@ -109,6 +109,7 @@ These are the files a serious reader should inspect before trusting any claim:
 | Branch-routing cache is derived metadata, not a raw page cache | [`pagebtree/page_cache.go#L7-L20`](../pagebtree/page_cache.go#L7-L20), [`pagebtree/page_cache.go#L52-L80`](../pagebtree/page_cache.go#L52-L80) |
 | Sparse-hole punching avoids live and fallback-recoverable pages and emits value-free maintenance traces | [`pagebtree/mmap_punch_unix.go`](../pagebtree/mmap_punch_unix.go), [`pagebtree/mmap_trace_unix.go`](../pagebtree/mmap_trace_unix.go), [`pagebtree/mmap_punch_linux.go#L10-L27`](../pagebtree/mmap_punch_linux.go#L10-L27) |
 | Process-exit crash probes exist, but are still not power-fail proof | [`pagebtree/mmap_process_crash_test.go#L20-L92`](../pagebtree/mmap_process_crash_test.go#L20-L92) |
+| Platform support is explicit instead of implied by prose | [`pagebtree/platform_profile.go`](../pagebtree/platform_profile.go), [`cmd/mmapplatform/main.go`](../cmd/mmapplatform/main.go), [`docs/12-platform-matrix.md`](12-platform-matrix.md) |
 
 ## P0 Gaps
 
@@ -147,7 +148,31 @@ These make the project more complete, but they should follow the P0/P1 work.
 | Multi-database catalog | LMDB-style environments commonly hold named databases. | One tree per file. | Add a catalog page after the single-tree kernel is more proven. |
 | Duplicate keys and cursors | Many B+tree APIs need duplicate-key support. | Keys are unique. | Model duplicates as sorted duplicate records or subpages. |
 | Durable metadata evolution | Format upgrades need explicit compatibility tests. | Started: metadata versions are decoded behind checksum validation; `pagebtree/testdata/mmap-v2-legacy-zero-key-order.db` covers pre-key-order metadata, `pagebtree/testdata/mmap-v1-inline-freelist.db` plus `TestMmapTreeOpensLegacyV1InlineFreelistFixture` cover a version-1 inline freelist image, and `pagebtree/testdata/mmap-v2-chained-freelist.db` plus `TestMmapTreeOpensLegacyV2ChainedFreelistFixture` cover a multi-page version-2 freelist chain. Both freelist fixtures prove subsequent page reuse after reopen. `TestMmapSyncUpgradesLegacyMetadataInAlternateSlot` proves an accepted version-1 image is rewritten as version-2 metadata in the alternate dual-meta slot, with a newer revision and the old slot left intact as fallback. `TestMmapLegacyMetadataUpgradeSyncFaultsRemainRetryable` covers before-data-sync, after-metadata-write, and before-metadata-sync upgrade failures, then retries the same upgrade successfully. | Add broader upgrade/rewrite matrices and more old-format fixtures if new page or metadata variants appear. |
-| Platform matrix | mmap behavior differs across Unix variants and non-Unix platforms. | Unix path is primary; non-Unix has stubs. | Add CI matrix notes and compile-only checks for key platforms. |
+| Platform matrix | mmap behavior differs across Unix variants and non-Unix platforms. | Started: `MmapPlatformProfile` reports the build-time support envelope for mmap, locks, reader tables, owner tokens, file advice, cache residency, file-space stats, directory sync, and sparse-hole punching; `cmd/mmapplatform` prints that profile as JSON; `docs/12-platform-matrix.md` records Linux, Darwin, other Unix, and non-Unix behavior; CI now runs native Linux test/vet plus compile-only checks for Linux, Darwin, FreeBSD, and Windows. | Add runtime CI or lab runs on each target OS and filesystem-specific sync/sparse-allocation evidence. |
+
+## Gap Advanced In This Pass: Platform Matrix
+
+The platform matrix is now code-backed instead of only described in prose:
+
+- `MmapPlatformProfile()` exposes the compiled support envelope.
+- Unix builds report mmap, `flock`, reader-table, `madvise`, `mincore`,
+  `stat(2)`, and directory-sync mechanics.
+- Linux builds also report `posix_fadvise` and sparse punching through
+  `fallocate(FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE)`.
+- Darwin builds report process-start and boot/session owner tokens, while
+  sparse punching remains unsupported in this lab.
+- Other Unix builds keep PID-only reader-owner fallbacks.
+- Non-Unix builds keep the public API buildable through stubs and report an
+  unsupported reason.
+- `cmd/mmapplatform` prints the current build profile as JSON.
+- `.github/workflows/ci.yml` now includes a compile-only target matrix for
+  Linux, Darwin, FreeBSD, and Windows, with `scripts/ci-local.sh` as the local
+  equivalent.
+
+This does not close the platform gap. It moves the project from "Unix path is
+primary" to a falsifiable support contract. Runtime OS labs, filesystem
+matrices, and power-fail evidence are still required before this could be
+called a support guarantee.
 
 ## Gap Closed In This Pass: Cursor API
 
