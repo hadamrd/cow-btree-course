@@ -128,12 +128,15 @@ func TestCursorBytesBetweenCanScanBackward(t *testing.T) {
 func TestSnapshotAndBatchByteKeys(t *testing.T) {
 	tree := New(2)
 	tree.PutBytes([]byte{0x01}, []byte("one"))
+	tree.PutBytes([]byte{0x03}, []byte("three"))
+	tree.PutBytes([]byte{0x04}, []byte("four"))
 	snapshot := tree.Snapshot()
 	defer snapshot.Close()
 
 	batch := tree.Batch()
 	batch.PutBytes([]byte{0x02}, []byte("two"))
 	batch.DeleteBytes([]byte{0x01})
+	batch.DeleteBytesRange([]byte{0x03}, []byte{0x05})
 	result, err := batch.CommitDetailed()
 	if err != nil || !result.Changed {
 		t.Fatalf("CommitDetailed byte batch = changed:%v err:%v; want changed nil", result.Changed, err)
@@ -144,8 +147,17 @@ func TestSnapshotAndBatchByteKeys(t *testing.T) {
 	if got, ok := tree.GetBytes([]byte{0x02}); !ok || string(got) != "two" {
 		t.Fatalf("GetBytes(02) after byte batch put = %q, %v; want two, true", got, ok)
 	}
+	if _, ok := tree.GetBytes([]byte{0x03}); ok {
+		t.Fatalf("GetBytes(03) after byte range delete = true, want false")
+	}
+	if _, ok := tree.GetBytes([]byte{0x04}); ok {
+		t.Fatalf("GetBytes(04) after byte range delete = true, want false")
+	}
 	if got, ok := snapshot.GetBytes([]byte{0x01}); !ok || string(got) != "one" {
 		t.Fatalf("snapshot GetBytes(01) = %q, %v; want one, true", got, ok)
+	}
+	if got, ok := snapshot.GetBytes([]byte{0x03}); !ok || string(got) != "three" {
+		t.Fatalf("snapshot GetBytes(03) = %q, %v; want three, true", got, ok)
 	}
 	if _, ok := snapshot.GetBytes([]byte{0x02}); ok {
 		t.Fatalf("snapshot GetBytes(02) = true; want old root")

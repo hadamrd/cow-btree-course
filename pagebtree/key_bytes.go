@@ -68,6 +68,12 @@ func (b *WriteBatch) DeleteBytes(key []byte) {
 	b.Delete(keyFromBytes(key))
 }
 
+// DeleteBytesRange stages removal of opaque byte keys greater than or equal to
+// start and less than end.
+func (b *WriteBatch) DeleteBytesRange(start []byte, end []byte) {
+	b.DeleteRange(keyFromBytes(start), keyFromBytes(end))
+}
+
 // GetBytes returns a copy of the snapshot value for an opaque byte key.
 func (s *Snapshot) GetBytes(key []byte) ([]byte, bool) {
 	return s.Get(keyFromBytes(key))

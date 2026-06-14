@@ -745,13 +745,14 @@ Serious pieces in this repository:
   fallback, growth and compact remap success/failure geometry, stale reader
   cleanup, freelist/reclaim metadata rollback, and obsolete metadata-page
   reclaim decisions.
-- Explicit point write batches that publish one revision and can report
-  per-operation old values through `CommitDetailed`.
-- A sorted-map model/fuzz target for put, delete, cursor delete, batch, range,
-  cursor, bounded cursor, reverse bounded cursor, and integrity-check operation
-  streams.
-- An mmap sorted-map model/fuzz target that injects sync/close/reopen cycles
-  and overflow-heavy values.
+- Explicit write batches that publish one revision, support point mutations and
+  half-open range deletes, and can report per-operation old values through
+  `CommitDetailed`.
+- A sorted-map model/fuzz target for put, delete, cursor delete, batch, batch
+  range delete, range, cursor, bounded cursor, reverse bounded cursor, and
+  integrity-check operation streams.
+- An mmap sorted-map model/fuzz target that injects sync/close/reopen cycles,
+  batch range deletes, and overflow-heavy values.
 - A malformed mmap-image fuzz target that mutates metadata, page headers,
   checksums, truncation, and tree/overflow-bearing pages, then requires any
   accepted image to pass `Tree.Check`.
@@ -766,10 +767,10 @@ Serious pieces in this repository:
 Still research or incomplete compared with a production engine:
 
 - No concurrency-heavy lock manager.
-- No full ACID transaction API; point write batches exist with detailed commit
-  reporting and panic rollback, and tree-owned cursors can delete their current
-  live key, but richer cursor/range-aware write transactions remain research
-  work.
+- No full ACID transaction API; write batches exist with detailed commit
+  reporting, panic rollback, and half-open range delete, and tree-owned cursors
+  can delete their current live key, but richer cursor-write transaction
+  semantics remain research work.
 - No sparse-file hole punching.
 - No full vacuum that moves live pages.
 - No production-grade crash test harness with true power-fail fault injection;

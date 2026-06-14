@@ -19,9 +19,9 @@
 // Put and Delete publish new roots through copy-on-write. PutBytes, GetBytes,
 // DeleteBytes, RangeBytes, CursorBytesBetween, and SeekBytes expose the same
 // page format for opaque byte keys ordered lexicographically by byte value.
-// WriteBatch stages multiple point Put/Delete operations, keeps the current
-// root hidden until Commit, then publishes one new revision if any staged
-// operation changed the tree.
+// WriteBatch stages multiple point Put/Delete operations and half-open
+// DeleteRange operations, keeps the current root hidden until Commit, then
+// publishes one new revision if any staged operation changed the tree.
 // CommitDetailed reports per-operation old values and explicit invalid commit
 // errors, and restores the pre-commit tree state if a staged mutation panics
 // before publication. Snapshots and cursors keep reading their older roots. A

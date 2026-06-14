@@ -48,7 +48,7 @@ func runMmapTreeModel(t *testing.T, data []byte) {
 	model := modelMap{}
 	reader := modelReader{data: data}
 	for step := 0; step < 64 && reader.hasMore(); step++ {
-		op := reader.next() % 7
+		op := reader.next() % 8
 		switch op {
 		case 0:
 			key := reader.key()
@@ -97,6 +97,20 @@ func runMmapTreeModel(t *testing.T, data []byte) {
 			if err := tree.Sync(); err != nil {
 				t.Fatalf("Sync at step %d: %v", step, err)
 			}
+		case 7:
+			start := reader.key()
+			end := reader.key()
+			if compareStrings(end, start) < 0 {
+				start, end = end, start
+			}
+			batch := tree.Batch()
+			batch.DeleteRange(start, end)
+			for _, key := range model.keys() {
+				if compareStrings(key, start) >= 0 && compareStrings(key, end) < 0 {
+					model.delete(key)
+				}
+			}
+			batch.Commit()
 		}
 		if err := tree.Check(); err != nil {
 			t.Fatalf("Check after mmap step %d: %v", step, err)

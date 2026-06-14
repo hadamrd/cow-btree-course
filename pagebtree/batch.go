@@ -94,6 +94,23 @@ func (b *WriteBatch) Delete(key string) {
 	})
 }
 
+// DeleteRange stages removal of keys greater than or equal to start and less
+// than end. The range is expanded against the tree visible when this method is
+// called; later writes are not added to this batch automatically.
+func (b *WriteBatch) DeleteRange(start, end string) {
+	if b == nil || b.closed || b.tree == nil || start >= end {
+		return
+	}
+	var keys []string
+	b.tree.RangeBetween(start, end, func(key string, value []byte) bool {
+		keys = append(keys, key)
+		return true
+	})
+	for _, key := range keys {
+		b.Delete(key)
+	}
+}
+
 // Rollback discards all staged operations.
 func (b *WriteBatch) Rollback() {
 	if b == nil {

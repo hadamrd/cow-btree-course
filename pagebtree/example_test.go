@@ -67,6 +67,25 @@ func ExampleTree_Batch() {
 	// 1
 }
 
+func ExampleWriteBatch_DeleteRange() {
+	tree := pagebtree.New(2)
+	for _, key := range []string{"alpha", "bravo", "charlie", "delta"} {
+		tree.Put(key, []byte(key+"-value"))
+	}
+
+	batch := tree.Batch()
+	batch.DeleteRange("bravo", "delta")
+	batch.Commit()
+
+	tree.Range(func(key string, value []byte) bool {
+		fmt.Println(key, string(value))
+		return true
+	})
+	// Output:
+	// alpha alpha-value
+	// delta delta-value
+}
+
 func ExampleWriteBatch_CommitDetailed() {
 	tree := pagebtree.New(2)
 	tree.Put("alpha", []byte("one"))

@@ -2,6 +2,7 @@ package pagebtree
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -132,6 +133,80 @@ func TestWriteBatchCommitDetailedReportsOperationResults(t *testing.T) {
 	}
 }
 
+func TestWriteBatchDeleteRangePublishesOneRevision(t *testing.T) {
+	tree := New(3)
+	for i := 0; i < 12; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	beforeRevision := tree.Revision()
+	snapshot := tree.Snapshot()
+	defer snapshot.Close()
+
+	batch := tree.Batch()
+	batch.DeleteRange("key-04", "key-08")
+
+	for i := 4; i < 8; i++ {
+		if got, ok := tree.Get(fmt.Sprintf("key-%02d", i)); !ok || string(got) != fmt.Sprintf("value-%02d", i) {
+			t.Fatalf("Get before range Commit key-%02d = %q, %v; want visible old value", i, got, ok)
+		}
+	}
+	result, err := batch.CommitDetailed()
+	if err != nil {
+		t.Fatalf("CommitDetailed DeleteRange: %v", err)
+	}
+	if !result.Changed {
+		t.Fatalf("DeleteRange Changed = false, want true")
+	}
+	if got := tree.Revision(); got != beforeRevision+1 {
+		t.Fatalf("Revision after DeleteRange = %d, want %d", got, beforeRevision+1)
+	}
+	if len(result.Operations) != 4 {
+		t.Fatalf("DeleteRange operation rows = %d, want 4", len(result.Operations))
+	}
+	for i := 4; i < 8; i++ {
+		key := fmt.Sprintf("key-%02d", i)
+		if _, ok := tree.Get(key); ok {
+			t.Fatalf("tree still contains %s after DeleteRange", key)
+		}
+		if got, ok := snapshot.Get(key); !ok || string(got) != fmt.Sprintf("value-%02d", i) {
+			t.Fatalf("snapshot Get(%s) after DeleteRange = %q, %v; want old value", key, got, ok)
+		}
+		row := result.Operations[i-4]
+		if row.Kind != BatchDeleteOperation || row.Key != key || !row.Existed || !row.Changed || string(row.OldValue) != fmt.Sprintf("value-%02d", i) {
+			t.Fatalf("DeleteRange row %d = %+v, want delete %s old value", i-4, row, key)
+		}
+	}
+	if got, ok := tree.Get("key-03"); !ok || string(got) != "value-03" {
+		t.Fatalf("Get(key-03) after DeleteRange = %q, %v; want value-03, true", got, ok)
+	}
+	if got, ok := tree.Get("key-08"); !ok || string(got) != "value-08" {
+		t.Fatalf("Get(key-08) after DeleteRange = %q, %v; want value-08, true", got, ok)
+	}
+}
+
+func TestWriteBatchDeleteRangeUsesKeysVisibleWhenStaged(t *testing.T) {
+	tree := New(3)
+	for i := 0; i < 10; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+
+	batch := tree.Batch()
+	batch.DeleteRange("key-03", "key-06")
+	tree.Put("key-04-extra", []byte("late"))
+
+	if changed := batch.Commit(); !changed {
+		t.Fatalf("DeleteRange Commit changed = false, want true")
+	}
+	if _, ok := tree.Get("key-04-extra"); !ok {
+		t.Fatalf("DeleteRange removed key staged after range expansion; want late key still present")
+	}
+	for i := 3; i < 6; i++ {
+		if _, ok := tree.Get(fmt.Sprintf("key-%02d", i)); ok {
+			t.Fatalf("DeleteRange left key-%02d present", i)
+		}
+	}
+}
+
 func TestWriteBatchCommitDetailedReturnsExplicitNoOpErrors(t *testing.T) {
 	tree := New(2)
 	rolledBack := tree.Batch()
@@ -203,5 +278,53 @@ func TestMmapWriteBatchPersistsOneRevisionAcrossReopen(t *testing.T) {
 	}
 	if got := reopened.Revision(); got != beforeRevision+1 {
 		t.Fatalf("reopened Revision = %d, want %d", got, beforeRevision+1)
+	}
+}
+
+func TestMmapWriteBatchDeleteRangePersistsAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 3, MaxPages: 128})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 16; i++ {
+		tree.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("initial Sync: %v", err)
+	}
+	beforeRevision := tree.Revision()
+
+	batch := tree.Batch()
+	batch.DeleteRange("key-05", "key-10")
+	if changed := batch.Commit(); !changed {
+		t.Fatalf("DeleteRange Commit changed = false, want true")
+	}
+	if got := tree.Revision(); got != beforeRevision+1 {
+		t.Fatalf("Revision after mmap DeleteRange = %d, want %d", got, beforeRevision+1)
+	}
+	if err := tree.Check(); err != nil {
+		t.Fatalf("Check after mmap DeleteRange: %v", err)
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync after mmap DeleteRange: %v", err)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close after mmap DeleteRange: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen: %v", err)
+	}
+	defer reopened.Close()
+	for i := 5; i < 10; i++ {
+		if _, ok := reopened.Get(fmt.Sprintf("key-%02d", i)); ok {
+			t.Fatalf("reopened tree still contains key-%02d", i)
+		}
+	}
+	if got, ok := reopened.Get("key-10"); !ok || string(got) != "value-10" {
+		t.Fatalf("reopened Get(key-10) = %q, %v; want value-10, true", got, ok)
 	}
 }

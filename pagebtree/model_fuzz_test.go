@@ -41,7 +41,7 @@ func runPageTreeModel(t *testing.T, data []byte) {
 	model := modelMap{}
 	reader := modelReader{data: data}
 	for step := 0; step < 96 && reader.hasMore(); step++ {
-		op := reader.next() % 9
+		op := reader.next() % 10
 		switch op {
 		case 0:
 			key := reader.key()
@@ -116,6 +116,20 @@ func runPageTreeModel(t *testing.T, data []byte) {
 				}
 			}
 			cursor.Close()
+		case 9:
+			start := reader.key()
+			end := reader.key()
+			if compareStrings(end, start) < 0 {
+				start, end = end, start
+			}
+			batch := tree.Batch()
+			batch.DeleteRange(start, end)
+			for _, key := range model.keys() {
+				if compareStrings(key, start) >= 0 && compareStrings(key, end) < 0 {
+					model.delete(key)
+				}
+			}
+			batch.Commit()
 		}
 		if err := tree.Check(); err != nil {
 			t.Fatalf("Check after step %d: %v", step, err)
