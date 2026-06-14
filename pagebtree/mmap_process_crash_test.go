@@ -303,6 +303,79 @@ func TestMmapReadOnlyChildProcessPinsRecyclingUntilRelease(t *testing.T) {
 	}
 }
 
+func TestMmapReadOnlyChildProcessesPinRecyclingAcrossMutations(t *testing.T) {
+	if os.Getenv(mmapReaderHoldChildEnv) == "1" {
+		runMmapReadOnlyHoldChildProcess(t)
+		return
+	}
+
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 256})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	for i := 0; i < 48; i++ {
+		writer.Put(fmt.Sprintf("key-%02d", i), []byte(fmt.Sprintf("value-%02d", i)))
+	}
+	if err := writer.Sync(); err != nil {
+		writer.Close()
+		t.Fatalf("initial Sync: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close initial writer: %v", err)
+	}
+
+	children := runMmapReadOnlyHoldChildren(t, path, 4)
+	defer children.cleanup()
+
+	writer, err = OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 256})
+	if err != nil {
+		t.Fatalf("OpenMmap concurrent writer: %v", err)
+	}
+	defer writer.Close()
+
+	stats, err := writer.MmapReaderStats()
+	if err != nil {
+		t.Fatalf("MmapReaderStats with child readers: %v", err)
+	}
+	if stats.ActiveSlots != 4 {
+		t.Fatalf("ActiveSlots with child readers = %d, want 4", stats.ActiveSlots)
+	}
+
+	for round := 0; round < 3; round++ {
+		for i := 0; i < 16; i++ {
+			key := fmt.Sprintf("key-%02d", round*16+i)
+			if _, ok := writer.Delete(key); !ok {
+				t.Fatalf("round %d Delete(%s) = false, want true", round, key)
+			}
+		}
+		pinned := writer.Stats()
+		if pinned.RetiredPages == 0 || pinned.FreePages != 0 {
+			t.Fatalf("round %d writer stats = retired:%d free:%d, want retired pinned and no free pages", round, pinned.RetiredPages, pinned.FreePages)
+		}
+	}
+
+	children.releaseOne()
+	stats, err = writer.MmapReaderStats()
+	if err != nil {
+		t.Fatalf("MmapReaderStats after first child release: %v", err)
+	}
+	if stats.ActiveSlots != 3 {
+		t.Fatalf("ActiveSlots after first child release = %d, want 3", stats.ActiveSlots)
+	}
+	if pinned := writer.Stats(); pinned.RetiredPages == 0 || pinned.FreePages != 0 {
+		t.Fatalf("writer stats while remaining children live = retired:%d free:%d, want still pinned", pinned.RetiredPages, pinned.FreePages)
+	}
+
+	children.releaseAll()
+	writer.Put("key-99", []byte("value-99"))
+	released := writer.Stats()
+	if released.RetiredPages != 0 || released.FreePages == 0 {
+		t.Fatalf("writer stats after all children release = retired:%d free:%d, want retired reclaimed into free list", released.RetiredPages, released.FreePages)
+	}
+}
+
 func runMmapSyncProcessCrash(t *testing.T, path string, fault mmapFaultPoint) {
 	t.Helper()
 
@@ -381,10 +454,16 @@ func runMmapProcessCrashChild(t *testing.T, path string, fault mmapFaultPoint, t
 }
 
 type mmapReadOnlyHoldChild struct {
-	t      *testing.T
-	cmd    *exec.Cmd
-	output *bytes.Buffer
-	waited bool
+	t       *testing.T
+	cmd     *exec.Cmd
+	release string
+	output  *bytes.Buffer
+	waited  bool
+}
+
+type mmapReadOnlyHoldChildren struct {
+	t        *testing.T
+	children []*mmapReadOnlyHoldChild
 }
 
 func runMmapReadOnlyHoldChild(t *testing.T, path, readyPath, releasePath string) *mmapReadOnlyHoldChild {
@@ -403,7 +482,59 @@ func runMmapReadOnlyHoldChild(t *testing.T, path, readyPath, releasePath string)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start read-only hold child: %v", err)
 	}
-	return &mmapReadOnlyHoldChild{t: t, cmd: cmd, output: &output}
+	return &mmapReadOnlyHoldChild{t: t, cmd: cmd, release: releasePath, output: &output}
+}
+
+func runMmapReadOnlyHoldChildren(t *testing.T, path string, count int) *mmapReadOnlyHoldChildren {
+	t.Helper()
+
+	group := &mmapReadOnlyHoldChildren{t: t}
+	for i := 0; i < count; i++ {
+		dir := t.TempDir()
+		readyPath := filepath.Join(dir, fmt.Sprintf("reader-%02d.ready", i))
+		releasePath := filepath.Join(dir, fmt.Sprintf("reader-%02d.release", i))
+		child := runMmapReadOnlyHoldChild(t, path, readyPath, releasePath)
+		group.children = append(group.children, child)
+		waitForMmapReaderHoldFile(t, readyPath)
+	}
+	return group
+}
+
+func (g *mmapReadOnlyHoldChildren) releaseOne() {
+	g.t.Helper()
+
+	if len(g.children) == 0 {
+		g.t.Fatalf("releaseOne called with no live children")
+	}
+	child := g.children[0]
+	g.children = g.children[1:]
+	child.releaseAndWait()
+}
+
+func (g *mmapReadOnlyHoldChildren) releaseAll() {
+	g.t.Helper()
+
+	for len(g.children) > 0 {
+		g.releaseOne()
+	}
+}
+
+func (g *mmapReadOnlyHoldChildren) cleanup() {
+	g.t.Helper()
+
+	for _, child := range g.children {
+		child.cleanup()
+	}
+	g.children = nil
+}
+
+func (c *mmapReadOnlyHoldChild) releaseAndWait() {
+	c.t.Helper()
+
+	if err := os.WriteFile(c.release, []byte("release"), 0o644); err != nil {
+		c.t.Fatalf("release read-only hold child: %v", err)
+	}
+	c.wait()
 }
 
 func (c *mmapReadOnlyHoldChild) wait() {
