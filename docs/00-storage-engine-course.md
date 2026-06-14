@@ -780,7 +780,10 @@ with validity, stats, persisted key-order identity, comparator kind, readable
 names for both, reachable page IDs, free page IDs, retired page IDs, metadata
 page IDs, linked-leaf validation state, and `metadata_recovery` candidate
 events showing which checked metadata records were accepted or rejected during
-the same recovery path normal open uses.
+the same recovery path normal open uses. If normal read-only open fails, the
+command still emits an invalid JSON report with the open error and any recovery
+candidate events collected before failure, so broken images can be diagnosed
+without scraping stderr.
 `--readers` closes that inspection handle first, then uses
 `InspectMmapReaderStats` to add the mmap reader-table slot summary without
 claiming an inspector slot. `--cache` adds kernel page-cache residency counts,

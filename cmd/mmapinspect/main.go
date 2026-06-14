@@ -111,9 +111,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	recovery, recoveryErr := pagebtree.InspectMmapRecovery(options.path)
 	tree, err := pagebtree.OpenMmapReadOnly(options.path)
 	if err != nil {
-		fmt.Fprintf(stderr, "mmap inspect: %v\n", err)
+		report := inspectReport{
+			Valid:            false,
+			Error:            err.Error(),
+			MetadataRecovery: recovery,
+		}
+		if err := encodeReport(stdout, report); err != nil {
+			fmt.Fprintf(stderr, "mmap inspect: encode report: %v\n", err)
+		}
+		return 1
+	}
+	if recoveryErr != nil {
+		_ = tree.Close()
+		fmt.Fprintf(stderr, "mmap inspect: metadata recovery: %v\n", recoveryErr)
 		return 1
 	}
 	treeOpen := true
@@ -126,11 +139,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 	report := inspectFromAudit(tree.Audit(), tree.MDBKernelProfile())
 	if !options.pages {
 		report.PageSummaries = nil
-	}
-	recovery, err := pagebtree.InspectMmapRecovery(options.path)
-	if err != nil {
-		fmt.Fprintf(stderr, "mmap inspect: metadata recovery: %v\n", err)
-		return 1
 	}
 	report.MetadataRecovery = recovery
 	if options.cache {
@@ -177,9 +185,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		report.ReaderStats = &stats
 	}
-	encoder := json.NewEncoder(stdout)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(report); err != nil {
+	if err := encodeReport(stdout, report); err != nil {
 		fmt.Fprintf(stderr, "mmap inspect: encode report: %v\n", err)
 		return 1
 	}
@@ -187,6 +193,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func encodeReport(stdout io.Writer, report inspectReport) error {
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(report)
 }
 
 func parseArgs(args []string) (inspectOptions, error) {

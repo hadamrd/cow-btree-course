@@ -170,6 +170,48 @@ func TestRunPrintsMetadataRecoveryCandidates(t *testing.T) {
 	}
 }
 
+func TestRunPrintsRecoveryCandidatesWhenOpenFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inspect.db")
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	tree.Put("alpha", []byte("one"))
+	root := tree.Stats().Root
+	revision := tree.Revision()
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close create: %v", err)
+	}
+	corruptInspectPagePayload(t, path, root)
+	corruptInspectMetaPage(t, path, 0)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{path}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run exit = %d, want 1", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want JSON-only failure", stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.Valid || report.Error == "" {
+		t.Fatalf("valid/error = %v/%q, want invalid report with open error", report.Valid, report.Error)
+	}
+	var sawRejected bool
+	for _, event := range report.MetadataRecovery {
+		if event.Kind == pagebtree.MmapTraceRecoveryCandidateRejected && event.Revision == revision && event.Reason != "" {
+			sawRejected = true
+		}
+	}
+	if !sawRejected {
+		t.Fatalf("MetadataRecovery = %+v, want rejected revision %d", report.MetadataRecovery, revision)
+	}
+}
+
 func TestRunPrintsOptionalReaderAndCacheSections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspect.db")
 	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 128})
@@ -846,5 +888,23 @@ func corruptInspectPagePayload(t *testing.T, path string, id pagebtree.PageID) {
 	}
 	if err := file.Sync(); err != nil {
 		t.Fatalf("Sync corrupt page %d: %v", id, err)
+	}
+}
+
+func corruptInspectMetaPage(t *testing.T, path string, metaIndex int) {
+	t.Helper()
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile corrupt meta %d: %v", metaIndex, err)
+	}
+	defer file.Close()
+
+	offset := int64(metaIndex)*pagebtree.PageSize + 7
+	if _, err := file.WriteAt([]byte{0xff}, offset); err != nil {
+		t.Fatalf("WriteAt corrupt meta %d: %v", metaIndex, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("Sync corrupt meta %d: %v", metaIndex, err)
 	}
 }

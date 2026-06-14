@@ -207,7 +207,10 @@ freelist/reclaim chains, leaf-link validation state, and `metadata_recovery`
 candidate events. Those events are collected by `InspectMmapRecovery`, which
 maps the database read-only, runs the same checked metadata and root-page
 recovery used by normal open, and reports rejected and accepted metadata
-candidates without dumping keys or values. `--readers` closes the command's own
+candidates without dumping keys or values. If normal read-only open fails,
+`mmapinspect` still writes an invalid JSON report with the open error plus any
+collected recovery candidate events, instead of only writing a stderr string.
+`--readers` closes the command's own
 read-only handle before reading the sidecar through
 `InspectMmapReaderStats`, so reader-table output reports the workload's readers
 rather than an extra inspector slot. It includes active/stale slots and oldest
