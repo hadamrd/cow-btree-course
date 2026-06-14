@@ -11,6 +11,7 @@ type Tree struct {
 	syncedRevision           uint64
 	degree                   int
 	keyOrder                 KeyOrder
+	requestedKeyOrder        KeyOrder
 	keyComparator            KeyComparator
 	customComparator         bool
 	activeReaders            map[uint64]int

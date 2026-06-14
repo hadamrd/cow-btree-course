@@ -7,8 +7,11 @@ type KeyOrder uint32
 
 const (
 	// KeyOrderBytewise sorts keys by unsigned lexicographic byte order. It is
-	// the only order currently implemented by the page format.
+	// the default order used by LMDB-style byte-string keys.
 	KeyOrderBytewise KeyOrder = 1
+	// KeyOrderReverse sorts keys in the reverse of bytewise order. It is a small
+	// built-in persisted comparator used to prove durable comparator identity.
+	KeyOrderReverse KeyOrder = 2
 )
 
 func normalizeKeyOrder(order KeyOrder) KeyOrder {
@@ -21,9 +24,9 @@ func normalizeKeyOrder(order KeyOrder) KeyOrder {
 // KeyComparator compares two logical keys in the order used by a tree.
 //
 // The comparator must define a strict total order and must remain stable for
-// the lifetime of the tree. Mmap files currently persist only KeyOrderBytewise,
-// so custom comparators are accepted for memory-backed trees and rejected for
-// mmap-backed trees until a durable comparator identity exists.
+// the lifetime of the tree. Mmap files persist named KeyOrder values; arbitrary
+// custom comparators are accepted for memory-backed trees and rejected for
+// mmap-backed trees because closures do not have a durable identity.
 type KeyComparator interface {
 	CompareKeys(left, right string) int
 }
@@ -40,13 +43,35 @@ type KeyComparatorKind uint32
 const (
 	KeyComparatorBytewise KeyComparatorKind = 1
 	KeyComparatorCustom   KeyComparatorKind = 2
+	KeyComparatorReverse  KeyComparatorKind = 3
 )
 
 var bytewiseKeyComparator KeyComparator = KeyComparatorFunc(compareStrings)
+var reverseKeyComparator KeyComparator = KeyComparatorFunc(func(left, right string) int {
+	return -compareStrings(left, right)
+})
 
 func normalizeKeyComparator(comparator KeyComparator) KeyComparator {
 	if comparator == nil {
 		return bytewiseKeyComparator
 	}
 	return comparator
+}
+
+func keyComparatorForOrder(order KeyOrder) KeyComparator {
+	switch normalizeKeyOrder(order) {
+	case KeyOrderReverse:
+		return reverseKeyComparator
+	default:
+		return bytewiseKeyComparator
+	}
+}
+
+func keyComparatorKindForOrder(order KeyOrder) KeyComparatorKind {
+	switch normalizeKeyOrder(order) {
+	case KeyOrderReverse:
+		return KeyComparatorReverse
+	default:
+		return KeyComparatorBytewise
+	}
 }

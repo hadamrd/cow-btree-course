@@ -32,7 +32,8 @@ What is credible today:
   reverse half-open bounded cursors plus tree-owned point delete.
 - Process-exit crash probes for direct sync publication and transaction commit
   followed by mmap sync publication.
-- A persisted mmap key-order identifier for the current bytewise page ordering.
+- Persisted mmap key-order identifiers for named bytewise and reverse-bytewise
+  comparators.
 - Runtime profile flags for the active byte-balance policy: byte-aware split
   points, byte-aware delete redistribution, byte-fit merge checks, and the
   normalized low-fill repair threshold.
@@ -79,7 +80,7 @@ A skeptical buyer would probably classify the repo like this:
 | mmap durability | Respectable local harness, not a product guarantee | Dirty data pages are synced before metadata publication, dual metadata pages are checked, and process-exit crash probes classify old-root/new-root recovery. | Still lacks real power-fail rigs, filesystem-specific evidence, and torn-sector simulation. |
 | Recycling | Serious but narrow | In-process readers and mmap reader-table watermarks keep retired pages out of the free list until old readers are gone; reclaim metadata survives reopen. | PID reuse and long-running multi-process operational cases need harder owner identity and soak testing. |
 | Caching | Honest and intentionally small | The Go cache stores derived branch routing only; raw page bytes stay in mmap and the kernel page cache. | No adaptive buffer manager, no workload-tuned eviction policy beyond bounded LRU branch metadata. |
-| Key ordering | Partially respectable | Memory trees now accept a custom comparator across search/range/cursor/tx/check/cache paths, while mmap rejects non-persisted custom comparators. | mmap custom comparator identity is not durable yet, so custom on-disk collations are intentionally unsupported. |
+| Key ordering | More respectable, still narrow | Memory trees accept a custom comparator across search/range/cursor/tx/check/cache paths. mmap now persists named `KeyOrder` identities for bytewise and reverse-bytewise order and reopens with the matching comparator. | Arbitrary custom comparator plugins, locale/collation identities, and prefix-compressed order-aware page formats are still unsupported. |
 | Operations | Useful lab tools | `mmapinspect`, trace hooks, cache residency stats, compact-copy commands, and benchmarks exist. | No release process, no compatibility matrix, no corruption corpus management, and no production support envelope. |
 
 The honest product label is therefore: **research-grade mmap/COW B+tree kernel
@@ -97,7 +98,7 @@ These are the files a serious reader should inspect before trusting any claim:
 | Lower-bound and bounded range scans use comparator-aware slot search and branch pruning | [`pagebtree/search.go#L54-L95`](../pagebtree/search.go#L54-L95), [`pagebtree/search.go#L148-L181`](../pagebtree/search.go#L148-L181) |
 | Copy-on-write allocates a new page and retires the old page ID | [`pagebtree/tree.go#L243-L269`](../pagebtree/tree.go#L243-L269) |
 | Readers pin retired pages until their revision is no longer visible | [`pagebtree/freelist.go#L15-L35`](../pagebtree/freelist.go#L15-L35), [`pagebtree/freelist.go#L44-L80`](../pagebtree/freelist.go#L44-L80) |
-| mmap rejects non-durable custom comparators | [`pagebtree/key_order.go#L21-L27`](../pagebtree/key_order.go#L21-L27), [`pagebtree/mmap.go#L110-L117`](../pagebtree/mmap.go#L110-L117) |
+| mmap persists named comparator identity and rejects non-durable custom closures | [`pagebtree/key_order.go#L3-L70`](../pagebtree/key_order.go#L3-L70), [`pagebtree/mmap.go#L110-L120`](../pagebtree/mmap.go#L110-L120) |
 | mmap writer setup uses sidecar locks and a shared mapped arena | [`pagebtree/mmap.go#L118-L205`](../pagebtree/mmap.go#L118-L205) |
 | mmap sync publishes dirty data before checked metadata | [`pagebtree/mmap.go#L1317-L1344`](../pagebtree/mmap.go#L1317-L1344) |
 | mmap readers are tracked through a sidecar table | [`pagebtree/reader_table_unix.go#L42-L64`](../pagebtree/reader_table_unix.go#L42-L64), [`pagebtree/reader_table_unix.go#L74-L181`](../pagebtree/reader_table_unix.go#L74-L181) |
@@ -114,7 +115,7 @@ storage-engine artifact.
 | Crash fault injection | Recovery code is only respectable when tested at every publish boundary. | Started: the internal rollback matrix covers sync, growth, and compact-shrink boundaries. The copied-image crash harness now classifies sync-publication, growth, compact-shrink, large-freelist spill, large-reclaim spill, and obsolete metadata-generation reclaim images. `TestMmapSyncProcessCrashMatrixClassifiesRecoveryRoot` kills a child writer at sync-publication fault points and reopens the same database from a fresh process. `TestMmapTxSyncProcessCrashMatrixClassifiesRecoveryRoot` does the same after a committed read-write transaction, proving transaction publication still uses the same old-root/new-root mmap sync boundary. `TestMmapGrowthProcessCrashMatrixClassifiesOldRoot` does the same for growth file-size, directory-sync, and pre-remap fault points, all recovering the old root. `TestMmapCompactShrinkProcessCrashMatrixClassifiesCompactedRoot` does the same for compact-shrink file-size, directory-sync, and pre-remap fault points, reopening live keys from the compacted root. `TestMmapLargeFreelistProcessCrashMatrixClassifiesRecoveryRoot` does the same for large-freelist spill publication, preserving old metadata before data sync and persisted reusable-page records after metadata write. `TestMmapLargeReclaimProcessCrashMatrixClassifiesReaderPinnedRetiredPages` keeps a live read-only parent handle while killing the child writer at large-reclaim publication points, proving persisted retired records remain pinned by a surviving reader watermark. | True power-fail testing, torn-write simulation, and filesystem-specific fsync matrices are still outside the local harness. |
 | Transaction batching | Real engines commit a unit of work, not one implicit root publish per call. | Advanced: `WriteBatch` stages point `Put`/`Delete` operations and half-open `DeleteRange`, hides them until `Commit`, and publishes one tree revision across memory and mmap trees. `BeginReadWrite` adds a small transaction facade with stable begin-revision reads, read-your-writes `Get`, transaction-visible `RangeBetween`, transaction cursors with staged `Delete`, range delete expansion over the staged view, rollback, byte-key wrappers, optimistic revision-conflict detection through `ErrTxConflict`, and commit through the same batch machinery. `CommitDetailed` reports per-operation old values, returns explicit invalid-commit errors, and restores the pre-commit tree state if staged replay panics before publication. `CommitSync` and `CommitSyncDetailed` now add explicit commit-then-sync helpers for batches and read-write transactions; if sync fails, the detailed result still reports the logical commit while the error says durable publication is not proven. Batch and transaction fault tests prove that retrying `Sync` after before-data-sync, after-metadata-write, and before-metadata-sync failures can publish that already-visible commit and survive close/reopen. `Sync` remains the mmap durability boundary, and the tx process-crash test verifies committed transaction changes recover as old-root before dirty data sync and new-root after metadata bytes are written. Tree-owned cursor delete outside a transaction is still point-wise and publishes immediately. | Add a fuller ACID contract: concurrent workload stress, abort/crash matrices around multi-operation conflicts, and documented fsync guarantees per filesystem. |
 | Cursor API | Real B+tree users need `seek`/`next` control, not only callback scans. | Advanced: snapshot-backed cursors support `First`, `Seek`, `Next`, `Last`, `Prev`, half-open `CursorBetween(start,end)` bounds, and tree-owned point `Delete` while keeping cursor iteration on the old snapshot. | Explore richer cursor-write semantics inside explicit transactions. |
-| Comparator and key model | Production B+trees need an explicit key-ordering contract before prefix compression, duplicate keys, or locale-aware indexes. | Advanced: page cells store byte strings and compare bytewise by default; public `PutBytes`/`GetBytes`/`DeleteBytes`/`RangeBytes`/cursor byte-key APIs expose opaque byte keys; memory-backed trees can install a `KeyComparator` used by search, range scans, cursors, transactions, validation, and derived branch-routing cache lookups; mmap metadata persists the bytewise key-order identifier and rejects unknown requested/persisted orders or non-persisted custom comparators; `pagebtree/testdata/mmap-v2-legacy-zero-key-order.db` proves reopen compatibility with the pre-key-order metadata word. | Add a durable persisted comparator identity for mmap, broader old-format fixture coverage, and a page-format path for prefix compression. |
+| Comparator and key model | Production B+trees need an explicit key-ordering contract before prefix compression, duplicate keys, or locale-aware indexes. | Advanced: page cells store byte strings; public `PutBytes`/`GetBytes`/`DeleteBytes`/`RangeBytes`/cursor byte-key APIs expose opaque byte keys; memory-backed trees can install a `KeyComparator` used by search, range scans, cursors, transactions, validation, and derived branch-routing cache lookups; mmap metadata persists named `KeyOrder` identities for bytewise and reverse-bytewise order, reopens with the matching comparator, and rejects unknown requested/persisted orders or arbitrary custom comparator closures; `pagebtree/testdata/mmap-v2-legacy-zero-key-order.db` proves reopen compatibility with the pre-key-order metadata word. | Add broader old-format fixture coverage, arbitrary comparator plugin identities or locale/collation IDs, and a page-format path for prefix compression. |
 | Fuzz and model checking | Handwritten tests miss malformed-page combinations and delete/split corner cases. | Started: `FuzzPageTreeMatchesSortedMapModel` compares `pagebtree` with a sorted-map oracle across put, delete, cursor delete, batch, batch range delete, read-write transaction, transaction cursor delete, get, range, cursor, bounded cursor, reverse bounded cursor, and `Check` operations. `FuzzMmapTreeMatchesSortedMapModelAcrossReopen` adds mmap sync/close/reopen cycles, batch range delete, read-write transaction, transaction cursor delete, and overflow-heavy values. `FuzzMmapMalformedPageGeneratorRejectsOrChecks` mutates mmap file bytes, metadata, page headers, checksums, truncation, and tree/overflow-bearing pages, then requires any accepted image to pass `Check`. | Extend model checking to longer process-crash/reopen probes, minimized malformed-page corpora, and semantic corruption oracles. |
 
 ## P1 Gaps
@@ -177,30 +178,33 @@ Code to read:
 ## Gap Advanced In This Pass: Comparator Boundary
 
 The comparator gap is not closed, but it moved from "missing abstraction" to an
-explicit durability boundary:
+explicit persisted-identity boundary:
 
 - Memory-backed trees can install `Options.KeyComparator`.
 - The comparator is used by point lookup, lower-bound lookup, range scans,
   linked-leaf range scans, cursors, transaction-visible ordering, validation,
   and the derived branch-routing cache.
-- `MDBKernelProfile.KeyComparator` reports whether the active tree is bytewise
-  or custom.
-- mmap trees still persist only `KeyOrderBytewise`.
-- `OpenMmap` rejects custom comparators because a function pointer or closure
-  cannot be recovered safely from disk.
+- `MDBKernelProfile.KeyComparator` reports whether the active tree is bytewise,
+  reverse, or custom.
+- mmap metadata persists named `KeyOrder` identities. `KeyOrderBytewise` is the
+  default and legacy-zero compatibility order; `KeyOrderReverse` is a small
+  built-in order that proves durable comparator identity.
+- `OpenMmap` rejects arbitrary custom comparator closures because a function
+  pointer or closure cannot be recovered safely from disk.
 
 This is the right failure mode for a research engine: custom in-memory order is
-available for experiments, while custom on-disk order is rejected until the file
-format can persist a stable comparator identity.
+available for experiments, named on-disk orders are durable, and arbitrary
+on-disk comparator plugins are rejected until the format can persist a stable
+plugin identity.
 
 Code to read:
 
-- Comparator API: [`../pagebtree/key_order.go#L21-L52`](../pagebtree/key_order.go#L21-L52)
+- Comparator API and persisted named-order registry: [`../pagebtree/key_order.go#L3-L70`](../pagebtree/key_order.go#L3-L70)
 - Memory tree option wiring: [`../pagebtree/tree.go#L39-L54`](../pagebtree/tree.go#L39-L54)
 - Comparator-aware search: [`../pagebtree/search.go#L12-L34`](../pagebtree/search.go#L12-L34)
 - Comparator-aware page validation: [`../pagebtree/page.go#L159-L187`](../pagebtree/page.go#L159-L187)
-- mmap rejection: [`../pagebtree/mmap.go#L110-L117`](../pagebtree/mmap.go#L110-L117)
-- Behavior tests: [`../pagebtree/tree_test.go#L86-L132`](../pagebtree/tree_test.go#L86-L132), [`../pagebtree/mmap_test.go#L6026-L6037`](../pagebtree/mmap_test.go#L6026-L6037)
+- mmap order validation and custom-closure rejection: [`../pagebtree/mmap.go#L110-L120`](../pagebtree/mmap.go#L110-L120), [`../pagebtree/mmap.go#L1154-L1170`](../pagebtree/mmap.go#L1154-L1170)
+- Behavior tests: [`../pagebtree/tree_test.go#L86-L132`](../pagebtree/tree_test.go#L86-L132), [`../pagebtree/mmap_test.go#L5974-L6043`](../pagebtree/mmap_test.go#L5974-L6043)
 
 ## Gap Advanced In This Pass: Offline Copy Compaction
 

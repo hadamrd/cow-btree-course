@@ -109,11 +109,15 @@ const (
 
 func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	if options.KeyComparator != nil {
-		return nil, fmt.Errorf("%w: custom key comparator is not persisted for mmap trees", ErrMetaInvariant)
+		return nil, fmt.Errorf("%w: custom key comparator has no persisted mmap identity; use a named KeyOrder", ErrMetaInvariant)
 	}
 	keyOrder, err := validateMmapKeyOrder(options.KeyOrder)
 	if err != nil {
 		return nil, err
+	}
+	requestedKeyOrder := KeyOrder(0)
+	if options.KeyOrder != 0 {
+		requestedKeyOrder = keyOrder
 	}
 	writerLock, err := openWriterLock(path)
 	if err != nil {
@@ -195,7 +199,8 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 		nextPage:                 firstTreePageID,
 		degree:                   normalizeDegree(options.Degree),
 		keyOrder:                 keyOrder,
-		keyComparator:            bytewiseKeyComparator,
+		requestedKeyOrder:        requestedKeyOrder,
+		keyComparator:            keyComparatorForOrder(keyOrder),
 		arena:                    arena,
 		pageCache:                newPageCache(options.PageCacheCapacity),
 		rangePrefetchLeafWindow:  normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
@@ -267,7 +272,7 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 		pages:                    map[PageID]*page{},
 		nextPage:                 firstTreePageID,
 		keyOrder:                 KeyOrderBytewise,
-		keyComparator:            bytewiseKeyComparator,
+		keyComparator:            keyComparatorForOrder(KeyOrderBytewise),
 		arena:                    arena,
 		readOnly:                 true,
 		pageCache:                newPageCache(DefaultPageCacheCapacity),
@@ -1137,6 +1142,8 @@ func (t *Tree) applyMetaRecord(record metaRecord) {
 	t.syncedRevision = record.revision
 	t.degree = normalizeDegree(record.degree)
 	t.keyOrder = record.keyOrder
+	t.keyComparator = keyComparatorForOrder(record.keyOrder)
+	t.customComparator = false
 	t.free = nil
 	t.retired = nil
 	t.metaFreelistRoot = 0
@@ -1147,18 +1154,20 @@ func (t *Tree) applyMetaRecord(record metaRecord) {
 }
 
 func (t *Tree) validateMetaKeyOrder(record metaRecord) error {
-	if record.keyOrder != t.keyOrder {
-		return fmt.Errorf("%w: metadata key order %d does not match requested key order %d", ErrMetaInvariant, record.keyOrder, t.keyOrder)
+	if t.requestedKeyOrder != 0 && record.keyOrder != t.requestedKeyOrder {
+		return fmt.Errorf("%w: metadata key order %d does not match requested key order %d", ErrMetaInvariant, record.keyOrder, t.requestedKeyOrder)
 	}
 	return nil
 }
 
 func validateMmapKeyOrder(order KeyOrder) (KeyOrder, error) {
 	order = normalizeKeyOrder(order)
-	if order != KeyOrderBytewise {
+	switch order {
+	case KeyOrderBytewise, KeyOrderReverse:
+		return order, nil
+	default:
 		return 0, fmt.Errorf("%w: key order %d unsupported", ErrMetaInvariant, order)
 	}
-	return order, nil
 }
 
 func clonePageSet(values map[PageID]bool) map[PageID]bool {

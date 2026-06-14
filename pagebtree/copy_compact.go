@@ -52,7 +52,7 @@ func CopyCompactMmap(srcPath string, dstPath string, options MmapOptions) (CopyC
 		options.MaxPages = compactInitialMaxPages
 	}
 	if options.KeyOrder == 0 {
-		options.KeyOrder = KeyOrderBytewise
+		options.KeyOrder = src.keyOrder
 	}
 
 	cleanupDestination := true

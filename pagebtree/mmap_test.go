@@ -2215,6 +2215,43 @@ func TestCopyCompactMmapCopiesLiveKeysIntoSmallerFile(t *testing.T) {
 	}
 }
 
+func TestCopyCompactMmapPreservesSourceKeyOrderByDefault(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "source.db")
+	dstPath := filepath.Join(dir, "compact.db")
+
+	src, err := OpenMmap(srcPath, MmapOptions{Degree: 2, MaxPages: 128, KeyOrder: KeyOrderReverse})
+	if err != nil {
+		t.Fatalf("OpenMmap source: %v", err)
+	}
+	for _, key := range []string{"alpha", "bravo", "charlie", "delta"} {
+		src.Put(key, []byte("value-"+key))
+	}
+	if err := src.Close(); err != nil {
+		t.Fatalf("Close source: %v", err)
+	}
+
+	if _, err := CopyCompactMmap(srcPath, dstPath, MmapOptions{Degree: 2}); err != nil {
+		t.Fatalf("CopyCompactMmap reverse source: %v", err)
+	}
+	dst, err := OpenMmap(dstPath, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap destination: %v", err)
+	}
+	defer dst.Close()
+	if got := dst.MDBKernelProfile().KeyOrder; got != KeyOrderReverse {
+		t.Fatalf("destination KeyOrder = %d, want reverse", got)
+	}
+	var keys []string
+	dst.Range(func(key string, value []byte) bool {
+		keys = append(keys, key)
+		return true
+	})
+	if want := []string{"delta", "charlie", "bravo", "alpha"}; !slices.Equal(keys, want) {
+		t.Fatalf("destination Range keys = %v, want %v", keys, want)
+	}
+}
+
 func TestCopyCompactMmapRejectsExistingDestination(t *testing.T) {
 	dir := t.TempDir()
 	srcPath := filepath.Join(dir, "source.db")
@@ -5970,6 +6007,75 @@ func TestMmapTreePersistsBytewiseKeyOrderAcrossReopen(t *testing.T) {
 	}
 	if err := explicit.Close(); err != nil {
 		t.Fatalf("Close explicit reopen: %v", err)
+	}
+}
+
+func TestMmapTreePersistsReverseKeyOrderAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 128, KeyOrder: KeyOrderReverse})
+	if err != nil {
+		t.Fatalf("OpenMmap create reverse key order: %v", err)
+	}
+	for _, key := range []string{"alpha", "bravo", "charlie", "delta", "echo"} {
+		tree.Put(key, []byte("value-"+key))
+	}
+	if err := tree.Sync(); err != nil {
+		t.Fatalf("Sync reverse key order: %v", err)
+	}
+	_, record := newestMetaPage(t, path)
+	if record.keyOrder != KeyOrderReverse {
+		t.Fatalf("metadata key order = %d, want reverse", record.keyOrder)
+	}
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close reverse key order: %v", err)
+	}
+
+	reopened, err := OpenMmap(path, MmapOptions{})
+	if err != nil {
+		t.Fatalf("OpenMmap reopen reverse key order: %v", err)
+	}
+	defer reopened.Close()
+	if got := reopened.MDBKernelProfile().KeyOrder; got != KeyOrderReverse {
+		t.Fatalf("reopened KeyOrder = %d, want reverse", got)
+	}
+	if got := reopened.MDBKernelProfile().KeyComparator; got != KeyComparatorReverse {
+		t.Fatalf("reopened KeyComparator = %d, want reverse", got)
+	}
+	if got, ok := reopened.Get("charlie"); !ok || string(got) != "value-charlie" {
+		t.Fatalf("Get(charlie) = %q, %v; want value-charlie, true", got, ok)
+	}
+
+	var ranged []string
+	reopened.Range(func(key string, value []byte) bool {
+		ranged = append(ranged, key)
+		return true
+	})
+	if want := []string{"echo", "delta", "charlie", "bravo", "alpha"}; !slices.Equal(ranged, want) {
+		t.Fatalf("Range keys = %v, want %v", ranged, want)
+	}
+
+	var bounded []string
+	reopened.RangeBetween("delta", "bravo", func(key string, value []byte) bool {
+		bounded = append(bounded, key)
+		return true
+	})
+	if want := []string{"delta", "charlie"}; !slices.Equal(bounded, want) {
+		t.Fatalf("RangeBetween(delta, bravo) keys = %v, want %v", bounded, want)
+	}
+
+	cursor := reopened.CursorBetween("echo", "bravo")
+	defer cursor.Close()
+	var cursorKeys []string
+	for cursor.Valid() {
+		cursorKeys = append(cursorKeys, cursor.Key())
+		cursor.Next()
+	}
+	if want := []string{"echo", "delta", "charlie"}; !slices.Equal(cursorKeys, want) {
+		t.Fatalf("CursorBetween(echo, bravo) keys = %v, want %v", cursorKeys, want)
+	}
+	if err := reopened.Check(); err != nil {
+		t.Fatalf("Check reverse key order: %v", err)
 	}
 }
 

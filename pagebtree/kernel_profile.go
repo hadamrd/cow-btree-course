@@ -82,6 +82,7 @@ func (t *Tree) MDBKernelProfile() MDBKernelProfile {
 	profile.ReadOnly = t.readOnly
 	profile.Closed = t.closed
 	profile.KeyOrder = normalizeKeyOrder(t.keyOrder)
+	profile.KeyComparator = keyComparatorKindForOrder(t.keyOrder)
 	if t.customComparator {
 		profile.KeyComparator = KeyComparatorCustom
 	}

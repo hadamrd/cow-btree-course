@@ -18,11 +18,12 @@
 // reuse.
 // Put and Delete publish new roots through copy-on-write. PutBytes, GetBytes,
 // DeleteBytes, RangeBytes, CursorBytesBetween, and SeekBytes expose the same
-// page format for opaque byte keys ordered lexicographically by byte value.
+// page format for opaque byte keys ordered by a named key order.
 // Memory-backed trees can also be created with Options.KeyComparator; that
 // comparator is used by search, ranges, cursors, transactions, page validation,
-// and the derived branch-routing cache. Mmap trees currently reject custom
-// comparators because persisted metadata records only the bytewise KeyOrder.
+// and the derived branch-routing cache. Mmap trees persist named KeyOrder
+// values such as bytewise and reverse bytewise, but reject arbitrary custom
+// comparator closures because those functions have no durable identity.
 // WriteBatch stages multiple point Put/Delete operations and half-open
 // DeleteRange operations, keeps the current root hidden until Commit, then
 // publishes one new revision if any staged operation changed the tree.
