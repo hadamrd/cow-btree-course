@@ -117,6 +117,47 @@ func TestStatsReportsReachablePageByteFill(t *testing.T) {
 	}
 }
 
+func TestOptionsConfigureMinRepairPageFillPercent(t *testing.T) {
+	defaultTree := New(3)
+	if got, want := defaultTree.Stats().MinRepairPageFillPercent, DefaultMinRepairPageFillPercent; got != want {
+		t.Fatalf("default MinRepairPageFillPercent = %d, want %d", got, want)
+	}
+
+	customTree := NewWithOptions(3, Options{MinRepairPageFillPercent: 40})
+	if got := customTree.Stats().MinRepairPageFillPercent; got != 40 {
+		t.Fatalf("custom MinRepairPageFillPercent = %d, want 40", got)
+	}
+	clampedTree := NewWithOptions(3, Options{MinRepairPageFillPercent: 150})
+	if got := clampedTree.Stats().MinRepairPageFillPercent; got != 100 {
+		t.Fatalf("clamped MinRepairPageFillPercent = %d, want 100", got)
+	}
+
+	disabledTree := NewWithOptions(3, Options{MinRepairPageFillPercent: -1})
+	if got := disabledTree.Stats().MinRepairPageFillPercent; got != 0 {
+		t.Fatalf("disabled MinRepairPageFillPercent = %d, want 0", got)
+	}
+	leftID := PageID(1)
+	childID := PageID(2)
+	left := disabledTree.newPage(leftID, flagLeaf)
+	child := disabledTree.newPage(childID, flagLeaf)
+	disabledTree.pages[leftID] = left
+	disabledTree.pages[childID] = child
+	small := []byte("s")
+	disabledTree.writeLeafEntries(left, []leafEntry{
+		{key: "key-00", value: small},
+		{key: "key-01", value: small},
+	})
+	disabledTree.writeLeafEntries(child, []leafEntry{
+		{key: "key-02", value: small},
+		{key: "key-03", value: small},
+	})
+
+	children := disabledTree.mergeUnderfullLeaf([]PageID{leftID, childID}, 1)
+	if len(children) != 2 {
+		t.Fatalf("children after disabled low-fill repair = %v, want no merge", children)
+	}
+}
+
 func TestLeafSplitBalancesEncodedBytes(t *testing.T) {
 	tree := New(3)
 	large := bytes.Repeat([]byte("l"), 1500)

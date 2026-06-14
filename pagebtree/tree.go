@@ -3,34 +3,36 @@ package pagebtree
 import "errors"
 
 type Tree struct {
-	pages                   map[PageID]*page
-	root                    PageID
-	nextPage                PageID
-	length                  int
-	revision                uint64
-	degree                  int
-	keyOrder                KeyOrder
-	activeReaders           map[uint64]int
-	retired                 []retiredPage
-	free                    []PageID
-	metaFreelistRoot        PageID
-	metaFreelistPages       []PageID
-	reusedPages             int
-	arena                   *mmapArena
-	closed                  bool
-	readOnly                bool
-	pageCache               pageCache
-	rangePrefetchLeafWindow int
-	rangePrefetchHints      int
-	rangePrefetchPages      int
-	mmapWarmupHints         int
-	mmapWarmupPages         int
-	traceHook               MmapTraceHook
+	pages                    map[PageID]*page
+	root                     PageID
+	nextPage                 PageID
+	length                   int
+	revision                 uint64
+	degree                   int
+	keyOrder                 KeyOrder
+	activeReaders            map[uint64]int
+	retired                  []retiredPage
+	free                     []PageID
+	metaFreelistRoot         PageID
+	metaFreelistPages        []PageID
+	reusedPages              int
+	arena                    *mmapArena
+	closed                   bool
+	readOnly                 bool
+	pageCache                pageCache
+	rangePrefetchLeafWindow  int
+	minRepairPageFillPercent int
+	rangePrefetchHints       int
+	rangePrefetchPages       int
+	mmapWarmupHints          int
+	mmapWarmupPages          int
+	traceHook                MmapTraceHook
 }
 
 type Options struct {
-	PageCacheCapacity       int
-	RangePrefetchLeafWindow int
+	PageCacheCapacity        int
+	RangePrefetchLeafWindow  int
+	MinRepairPageFillPercent int
 }
 
 func New(degree int) *Tree {
@@ -39,12 +41,13 @@ func New(degree int) *Tree {
 
 func NewWithOptions(degree int, options Options) *Tree {
 	return &Tree{
-		pages:                   map[PageID]*page{},
-		nextPage:                1,
-		degree:                  normalizeDegree(degree),
-		keyOrder:                KeyOrderBytewise,
-		pageCache:               newPageCache(options.PageCacheCapacity),
-		rangePrefetchLeafWindow: normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
+		pages:                    map[PageID]*page{},
+		nextPage:                 1,
+		degree:                   normalizeDegree(degree),
+		keyOrder:                 KeyOrderBytewise,
+		pageCache:                newPageCache(options.PageCacheCapacity),
+		rangePrefetchLeafWindow:  normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
+		minRepairPageFillPercent: normalizeMinRepairPageFillPercent(options.MinRepairPageFillPercent),
 	}
 }
 
@@ -186,6 +189,19 @@ func normalizeRangePrefetchLeafWindow(window int) int {
 		return DefaultRangePrefetchLeafWindow
 	}
 	return window
+}
+
+func normalizeMinRepairPageFillPercent(percent int) int {
+	if percent < 0 {
+		return 0
+	}
+	if percent == 0 {
+		return DefaultMinRepairPageFillPercent
+	}
+	if percent > 100 {
+		return 100
+	}
+	return percent
 }
 
 func (t *Tree) Snapshot() *Snapshot {

@@ -2,10 +2,7 @@ package pagebtree
 
 import "slices"
 
-const (
-	minLeafRepairFillBytes   = PageSize / 4
-	minBranchRepairFillBytes = PageSize / 4
-)
+const DefaultMinRepairPageFillPercent = 25
 
 // Delete removes key from the current root version.
 //
@@ -204,7 +201,7 @@ func (t *Tree) leafNeedsRepair(p *page) bool {
 	if count < minKeys(t.degree) {
 		return true
 	}
-	return count <= minKeys(t.degree) && p.slottedBytesUsed() < minLeafRepairFillBytes
+	return count <= minKeys(t.degree) && t.isBelowMinRepairFill(p)
 }
 
 func leafEntriesFitPage(entries []leafEntry) bool {
@@ -272,7 +269,16 @@ func (t *Tree) branchNeedsRepair(p *page) bool {
 	if count < minKeys(t.degree) {
 		return true
 	}
-	return count <= minKeys(t.degree) && p.slottedBytesUsed() < minBranchRepairFillBytes
+	return count <= minKeys(t.degree) && t.isBelowMinRepairFill(p)
+}
+
+func (t *Tree) isBelowMinRepairFill(p *page) bool {
+	threshold := t.minRepairPageFillBytes()
+	return threshold > 0 && p.slottedBytesUsed() < threshold
+}
+
+func (t *Tree) minRepairPageFillBytes() int {
+	return PageSize * t.minRepairPageFillPercent / 100
 }
 
 func (t *Tree) branchChildSplitIndex(children []PageID) int {

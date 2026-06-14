@@ -1560,6 +1560,20 @@ func TestMmapRangePrefetchWindowCanBeSized(t *testing.T) {
 	}
 }
 
+func TestMmapOptionsConfigureMinRepairPageFillPercent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	tree, err := OpenMmap(path, MmapOptions{Degree: 3, MaxPages: 64, MinRepairPageFillPercent: 40})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer tree.Close()
+
+	if got := tree.Stats().MinRepairPageFillPercent; got != 40 {
+		t.Fatalf("MinRepairPageFillPercent = %d, want 40", got)
+	}
+}
+
 func TestMmapRangePrefetchStatsCountPagesCovered(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

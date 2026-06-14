@@ -55,13 +55,14 @@ const firstTreePageID = PageID(metaPageCount)
 const maxMetaFreePages = (PageSize - metaFreeListOff) / 8
 
 type MmapOptions struct {
-	Degree                  int
-	MaxPages                int
-	KeyOrder                KeyOrder
-	AccessPattern           MmapAccessPattern
-	PageCacheCapacity       int
-	RangePrefetchLeafWindow int
-	TraceHook               MmapTraceHook
+	Degree                   int
+	MaxPages                 int
+	KeyOrder                 KeyOrder
+	AccessPattern            MmapAccessPattern
+	PageCacheCapacity        int
+	RangePrefetchLeafWindow  int
+	MinRepairPageFillPercent int
+	TraceHook                MmapTraceHook
 }
 
 type mmapArena struct {
@@ -186,14 +187,15 @@ func OpenMmap(path string, options MmapOptions) (*Tree, error) {
 	}
 
 	tree := &Tree{
-		pages:                   map[PageID]*page{},
-		nextPage:                firstTreePageID,
-		degree:                  normalizeDegree(options.Degree),
-		keyOrder:                keyOrder,
-		arena:                   arena,
-		pageCache:               newPageCache(options.PageCacheCapacity),
-		rangePrefetchLeafWindow: normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
-		traceHook:               options.TraceHook,
+		pages:                    map[PageID]*page{},
+		nextPage:                 firstTreePageID,
+		degree:                   normalizeDegree(options.Degree),
+		keyOrder:                 keyOrder,
+		arena:                    arena,
+		pageCache:                newPageCache(options.PageCacheCapacity),
+		rangePrefetchLeafWindow:  normalizeRangePrefetchLeafWindow(options.RangePrefetchLeafWindow),
+		minRepairPageFillPercent: normalizeMinRepairPageFillPercent(options.MinRepairPageFillPercent),
+		traceHook:                options.TraceHook,
 	}
 
 	if existingSize > 0 {
@@ -257,13 +259,14 @@ func OpenMmapReadOnly(path string) (*Tree, error) {
 		readOnly: true,
 	}
 	tree := &Tree{
-		pages:                   map[PageID]*page{},
-		nextPage:                firstTreePageID,
-		keyOrder:                KeyOrderBytewise,
-		arena:                   arena,
-		readOnly:                true,
-		pageCache:               newPageCache(DefaultPageCacheCapacity),
-		rangePrefetchLeafWindow: DefaultRangePrefetchLeafWindow,
+		pages:                    map[PageID]*page{},
+		nextPage:                 firstTreePageID,
+		keyOrder:                 KeyOrderBytewise,
+		arena:                    arena,
+		readOnly:                 true,
+		pageCache:                newPageCache(DefaultPageCacheCapacity),
+		rangePrefetchLeafWindow:  DefaultRangePrefetchLeafWindow,
+		minRepairPageFillPercent: DefaultMinRepairPageFillPercent,
 	}
 	readerTable, err := openReaderTable(path)
 	if err != nil {

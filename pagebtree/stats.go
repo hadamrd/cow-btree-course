@@ -1,40 +1,41 @@
 package pagebtree
 
 type Stats struct {
-	Root                    PageID
-	Len                     int
-	Revision                uint64
-	Degree                  int
-	Height                  int
-	Pages                   int
-	LeafPages               int
-	BranchPages             int
-	OverflowPages           int
-	Keys                    int
-	Separators              int
-	PageBytesUsed           int
-	PageBytesFree           int
-	PageBytesCapacity       int
-	LeafBytesUsed           int
-	BranchBytesUsed         int
-	OverflowBytesUsed       int
-	AllocatedPages          int
-	RetiredPages            int
-	FreePages               int
-	ActiveReaders           int
-	ReusedPages             int
-	Storage                 string
-	PageCacheEntries        int
-	PageCacheCapacity       int
-	PageCacheHits           int
-	PageCacheMisses         int
-	PageCacheInvalidations  int
-	PageCacheEvictions      int
-	RangePrefetchLeafWindow int
-	RangePrefetchHints      int
-	RangePrefetchPages      int
-	MmapWarmupHints         int
-	MmapWarmupPages         int
+	Root                     PageID
+	Len                      int
+	Revision                 uint64
+	Degree                   int
+	Height                   int
+	Pages                    int
+	LeafPages                int
+	BranchPages              int
+	OverflowPages            int
+	Keys                     int
+	Separators               int
+	PageBytesUsed            int
+	PageBytesFree            int
+	PageBytesCapacity        int
+	LeafBytesUsed            int
+	BranchBytesUsed          int
+	OverflowBytesUsed        int
+	AllocatedPages           int
+	RetiredPages             int
+	FreePages                int
+	ActiveReaders            int
+	ReusedPages              int
+	Storage                  string
+	PageCacheEntries         int
+	PageCacheCapacity        int
+	PageCacheHits            int
+	PageCacheMisses          int
+	PageCacheInvalidations   int
+	PageCacheEvictions       int
+	RangePrefetchLeafWindow  int
+	MinRepairPageFillPercent int
+	RangePrefetchHints       int
+	RangePrefetchPages       int
+	MmapWarmupHints          int
+	MmapWarmupPages          int
 }
 
 func statsFor(t *Tree) Stats {
@@ -56,6 +57,7 @@ func statsFor(t *Tree) Stats {
 	stats.PageCacheInvalidations = cacheStats.Invalidations
 	stats.PageCacheEvictions = cacheStats.Evictions
 	stats.RangePrefetchLeafWindow = t.rangePrefetchLeafWindow
+	stats.MinRepairPageFillPercent = t.minRepairPageFillPercent
 	stats.RangePrefetchHints = t.rangePrefetchHints
 	stats.RangePrefetchPages = t.rangePrefetchPages
 	stats.MmapWarmupHints = t.mmapWarmupHints

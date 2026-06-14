@@ -250,9 +250,12 @@ flowchart TD
 This is not a full production delete implementation. It has real merge and
 redistribution behavior, and both leaf and branch redistribution choose
 byte-aware split points. Leaf and branch repair now have conservative
-byte-occupancy triggers, and merge only collapses siblings when their combined
-encoded bytes fit in one page. The policy still stops short of production
-occupancy targets across variable-size records.
+byte-occupancy triggers. The default trigger repairs a minimum-key page below
+25 percent byte fill; `Options.MinRepairPageFillPercent` and
+`MmapOptions.MinRepairPageFillPercent` can tune or disable that trigger.
+Merge only collapses siblings when their combined encoded bytes fit in one
+page. The policy still stops short of production occupancy targets across
+variable-size records.
 
 Code to read:
 
@@ -769,9 +772,9 @@ Still research or incomplete compared with a production engine:
 - No pluggable comparator or locale/collation layer; byte-key APIs use the
   persisted bytewise page order.
 - Insertion and delete redistribution use byte-aware split-point selection, and
-  leaf/branch repair have low-byte-occupancy triggers at the minimum key count;
-  merge decisions check combined page bytes, but fuller occupancy-target
-  heuristics are still open.
+  leaf/branch repair have configurable low-byte-occupancy triggers at the
+  minimum key count; merge decisions check combined page bytes, but fuller
+  occupancy-target heuristics are still open.
 - No production-grade malformed-page corpus minimization or semantic repair
   oracle yet.
 - No benchstat baseline history or CI performance gate yet.
