@@ -143,6 +143,40 @@ func TestRunCanMixCommittedDeletesIntoWorkload(t *testing.T) {
 	}
 }
 
+func TestRunCanReportReaderPinnedTransactionWorkload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "txworkload.db")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--transactions", "8", "--delete-every", "2", "--readers", "2", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report txWorkloadReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.Readers != 2 || report.ActiveReadersObserved != 2 {
+		t.Fatalf("Readers/ActiveReadersObserved = %d/%d, want 2/2", report.Readers, report.ActiveReadersObserved)
+	}
+	if report.ReaderPinnedRetiredPages == 0 {
+		t.Fatalf("ReaderPinnedRetiredPages = 0, want retired pages blocked by readers")
+	}
+	if !report.ReaderPinnedReclaimPressure.BlockedByReaders {
+		t.Fatalf("ReaderPinnedReclaimPressure = %+v, want blocked-by-readers", report.ReaderPinnedReclaimPressure)
+	}
+	if report.ReaderPinnedReclaimPressure.ReaderPinnedRetiredPages != report.ReaderPinnedRetiredPages {
+		t.Fatalf("ReaderPinnedReclaimPressure.ReaderPinnedRetiredPages = %d, want %d", report.ReaderPinnedReclaimPressure.ReaderPinnedRetiredPages, report.ReaderPinnedRetiredPages)
+	}
+	if report.FinalStats.RetiredPages != 0 {
+		t.Fatalf("FinalStats.RetiredPages = %d, want reclaimed after readers close", report.FinalStats.RetiredPages)
+	}
+	if report.FinalStats.FreePages == 0 {
+		t.Fatalf("FinalStats.FreePages = 0, want reusable pages after readers close")
+	}
+}
+
 func TestRunRejectsExistingDatabaseArtifacts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "txworkload.db")
 	if err := os.WriteFile(path, []byte("already here"), 0o644); err != nil {

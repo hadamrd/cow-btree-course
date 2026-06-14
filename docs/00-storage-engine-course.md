@@ -801,18 +801,20 @@ existing database artifacts, creates a fresh mmap tree, alternates successful
 read-write transaction `CommitSyncDetailed` calls with forced optimistic
 conflicts, can stage deterministic deletes inside successful transactions with
 `--delete-every N`, verifies reopened committed/deleted/conflicted key counts,
-and can write value-free trace JSONL. Use `--redact-path` when the JSON report
-will be shared or checked in; the command still uses the real database and
-trace paths internally, but omits them from the report:
+can hold read-only mmap handles with `--readers N` to report reader-pinned
+reclaim pressure during the workload, and can write value-free trace JSONL. Use
+`--redact-path` when the JSON report will be shared or checked in; the command
+still uses the real database and trace paths internally, but omits them from the
+report:
 
 ```bash
-go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --trace tx-trace.jsonl --redact-path txworkload.db
+go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --trace tx-trace.jsonl --redact-path txworkload.db
 go run ./cmd/mmaptracesummary tx-trace.jsonl
 ```
 
 This is not a concurrency scheduler or an ACID stress rig. It is a small
-repeatable input for studying the sync path, conflict abort path, and trace
-summary output together.
+repeatable input for studying the sync path, conflict abort path, reader-table
+reclaim pressure, and trace summary output together.
 
 For an operator-style read-only validation snapshot, `cmd/mmapinspect` opens an
 mmap database through `OpenMmapReadOnly`, runs `Audit`, and writes indented JSON

@@ -15,21 +15,26 @@ import (
 const defaultTransactions = 12
 
 type txWorkloadReport struct {
-	Path                    string          `json:"path,omitempty"`
-	PathRedacted            bool            `json:"path_redacted,omitempty"`
-	TracePath               string          `json:"trace_path,omitempty"`
-	TracePathRedacted       bool            `json:"trace_path_redacted,omitempty"`
-	Transactions            int             `json:"transactions"`
-	DeleteEvery             int             `json:"delete_every,omitempty"`
-	Committed               int             `json:"committed"`
-	Conflicted              int             `json:"conflicted"`
-	DeletedCommittedKeys    int             `json:"deleted_committed_keys,omitempty"`
-	ReopenedCommittedKeys   int             `json:"reopened_committed_keys"`
-	ReopenedDeletedKeys     int             `json:"reopened_deleted_keys"`
-	ReopenedConflictedKeys  int             `json:"reopened_conflicted_keys"`
-	ReopenedOutsideKeys     int             `json:"reopened_outside_keys"`
-	FinalStats              pagebtree.Stats `json:"final_stats"`
-	TransactionConflictKind string          `json:"transaction_conflict_kind"`
+	Path                        string                          `json:"path,omitempty"`
+	PathRedacted                bool                            `json:"path_redacted,omitempty"`
+	TracePath                   string                          `json:"trace_path,omitempty"`
+	TracePathRedacted           bool                            `json:"trace_path_redacted,omitempty"`
+	Transactions                int                             `json:"transactions"`
+	DeleteEvery                 int                             `json:"delete_every,omitempty"`
+	Committed                   int                             `json:"committed"`
+	Conflicted                  int                             `json:"conflicted"`
+	DeletedCommittedKeys        int                             `json:"deleted_committed_keys,omitempty"`
+	ReopenedCommittedKeys       int                             `json:"reopened_committed_keys"`
+	ReopenedDeletedKeys         int                             `json:"reopened_deleted_keys"`
+	ReopenedConflictedKeys      int                             `json:"reopened_conflicted_keys"`
+	ReopenedOutsideKeys         int                             `json:"reopened_outside_keys"`
+	Readers                     int                             `json:"readers,omitempty"`
+	ActiveReadersObserved       int                             `json:"active_readers_observed,omitempty"`
+	ReaderPinnedRetiredPages    int                             `json:"reader_pinned_retired_pages,omitempty"`
+	ReaderPinnedFreePages       int                             `json:"reader_pinned_free_pages,omitempty"`
+	ReaderPinnedReclaimPressure *pagebtree.ReclaimPressureStats `json:"reader_pinned_reclaim_pressure,omitempty"`
+	FinalStats                  pagebtree.Stats                 `json:"final_stats"`
+	TransactionConflictKind     string                          `json:"transaction_conflict_kind"`
 }
 
 type txWorkloadOptions struct {
@@ -38,6 +43,7 @@ type txWorkloadOptions struct {
 	redactPath   bool
 	transactions int
 	deleteEvery  int
+	readers      int
 }
 
 func main() {
@@ -132,6 +138,22 @@ func parseArgs(args []string) (txWorkloadOptions, error) {
 				return txWorkloadOptions{}, fmt.Errorf("--delete-every expects a positive integer: %w", err)
 			}
 			options.deleteEvery = deleteEvery
+		case arg == "--readers":
+			value, ok := nextArg(args, &i)
+			if !ok {
+				return txWorkloadOptions{}, fmt.Errorf("--readers expects a positive integer")
+			}
+			readers, err := parsePositiveInt(value)
+			if err != nil {
+				return txWorkloadOptions{}, fmt.Errorf("--readers expects a positive integer: %w", err)
+			}
+			options.readers = readers
+		case strings.HasPrefix(arg, "--readers="):
+			readers, err := parsePositiveInt(strings.TrimPrefix(arg, "--readers="))
+			if err != nil {
+				return txWorkloadOptions{}, fmt.Errorf("--readers expects a positive integer: %w", err)
+			}
+			options.readers = readers
 		case arg == "--trace":
 			value, ok := nextArg(args, &i)
 			if !ok || value == "" {
@@ -181,7 +203,7 @@ func parsePositiveInt(text string) (int, error) {
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintln(stderr, "usage: mmaptxworkload [--transactions N] [--delete-every N] [--trace TRACE.jsonl] [--redact-path] DB.db")
+	fmt.Fprintln(stderr, "usage: mmaptxworkload [--transactions N] [--delete-every N] [--readers N] [--trace TRACE.jsonl] [--redact-path] DB.db")
 }
 
 func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (txWorkloadReport, error) {
@@ -207,10 +229,26 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 	report := txWorkloadReport{
 		Transactions:            options.transactions,
 		DeleteEvery:             options.deleteEvery,
+		Readers:                 options.readers,
 		TransactionConflictKind: string(pagebtree.MmapTraceTxConflict),
 	}
 	if !options.redactPath {
 		report.Path = options.path
+	}
+
+	readers, err := openReadOnlyReaders(options.path, options.readers)
+	if err != nil {
+		return txWorkloadReport{}, err
+	}
+	defer func() {
+		_ = closeReadOnlyReaders(readers)
+	}()
+	if options.readers > 0 {
+		readerStats, err := tree.MmapReaderStats()
+		if err != nil {
+			return txWorkloadReport{}, err
+		}
+		report.ActiveReadersObserved = readerStats.ActiveSlots
 	}
 
 	liveCommittedKeys := []string{}
@@ -258,6 +296,25 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 	if err := tree.Check(); err != nil {
 		return txWorkloadReport{}, err
 	}
+
+	if options.readers > 0 {
+		pinned := tree.Stats()
+		report.ReaderPinnedRetiredPages = pinned.RetiredPages
+		report.ReaderPinnedFreePages = pinned.FreePages
+		pressure := pinned.ReclaimPressure
+		report.ReaderPinnedReclaimPressure = &pressure
+		if err := closeReadOnlyReaders(readers); err != nil {
+			return txWorkloadReport{}, err
+		}
+		readers = nil
+		tree.Put("reader-release-reclaim-trigger", []byte("done"))
+		if err := tree.Sync(); err != nil {
+			return txWorkloadReport{}, err
+		}
+		if err := tree.Check(); err != nil {
+			return txWorkloadReport{}, err
+		}
+	}
 	report.FinalStats = tree.Stats()
 	if err := tree.Close(); err != nil {
 		return txWorkloadReport{}, err
@@ -285,6 +342,37 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 		}
 	}
 	return report, nil
+}
+
+func openReadOnlyReaders(path string, count int) ([]*pagebtree.Tree, error) {
+	readers := make([]*pagebtree.Tree, 0, count)
+	for i := 0; i < count; i++ {
+		reader, err := pagebtree.OpenMmapReadOnly(path)
+		if err != nil {
+			_ = closeReadOnlyReaders(readers)
+			return nil, err
+		}
+		if value, ok := reader.Get("seed"); !ok || len(value) == 0 {
+			_ = reader.Close()
+			_ = closeReadOnlyReaders(readers)
+			return nil, fmt.Errorf("reader %d could not observe seed key", i)
+		}
+		readers = append(readers, reader)
+	}
+	return readers, nil
+}
+
+func closeReadOnlyReaders(readers []*pagebtree.Tree) error {
+	var closeErr error
+	for _, reader := range readers {
+		if reader == nil {
+			continue
+		}
+		if err := reader.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	return closeErr
 }
 
 func refuseExistingArtifacts(path string) error {
