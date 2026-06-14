@@ -604,6 +604,11 @@ keeps retired pages pinned instead of recycling from an untrusted watermark.
 pages, how many are pinned by the oldest reader watermark, how many would be
 reclaimable at the current watermark, the oldest reader revision when known,
 and whether a reader-table scan failure forced the conservative pin.
+`InspectMmapReaderStats(path)` is the passive inspection path: it reads checked
+metadata to learn the current revision, opens an existing `.readers` sidecar
+without creating it, and scans slots without claiming one for itself. That is
+the API `cmd/mmapinspect --readers` uses after closing its own read-only handle,
+so the act of observing reader pressure does not add an extra reader watermark.
 
 Code to read:
 
@@ -613,6 +618,7 @@ Code to read:
 - Oldest reader scan and stale owner cleanup: [`pagebtree/reader_table_unix.go#L149-L180`](../pagebtree/reader_table_unix.go#L149-L180)
 - Stats and maintenance scan: [`pagebtree/reader_table_unix.go#L205-L242`](../pagebtree/reader_table_unix.go#L205-L242)
 - Fail-closed slot validation: [`pagebtree/reader_table_unix.go#L244-L252`](../pagebtree/reader_table_unix.go#L244-L252)
+- Passive reader-table inspection: [`pagebtree/reader_table_unix.go`](../pagebtree/reader_table_unix.go)
 
 ## Module 14: Kernel Page Cache, mmap Advice, and Prefetch
 
@@ -770,16 +776,18 @@ mmap database through `OpenMmapReadOnly`, runs `Audit`, and writes indented JSON
 with validity, stats, persisted key-order identity, comparator kind, readable
 names for both, reachable page IDs, free page IDs, retired page IDs, metadata
 page IDs, and linked-leaf validation state.
-`--readers` adds the mmap reader-table slot summary, `--cache` adds kernel
-page-cache residency counts, and `--space` adds logical-vs-allocated file-space
-counts plus the hole-punch capability profile. `--pages` adds value-free page
-summaries with role, kind, byte occupancy, branch children, metadata record
-counts, reclaim revision bounds, and next-page hints. Reclaim-pressure counters
-are included in the base `Stats` block so a reader-pinned freelist stall is
-visible without dumping values. `--keys N` adds a bounded first/last key sample
-in the recovered comparator order without dumping values. `--trace TRACE.jsonl`
-reads value-free trace JSONL, counts events by kind, summarizes dirty data-page
-ranges, summarizes sparse-hole
+`--readers` closes that inspection handle first, then uses
+`InspectMmapReaderStats` to add the mmap reader-table slot summary without
+claiming an inspector slot. `--cache` adds kernel page-cache residency counts,
+and `--space` adds logical-vs-allocated file-space counts plus the hole-punch
+capability profile. `--pages` adds value-free page summaries with role, kind,
+byte occupancy, branch children, metadata record counts, reclaim revision
+bounds, and next-page hints. Reclaim-pressure counters are included in the base
+`Stats` block so a reader-pinned freelist stall is visible without dumping
+values. `--keys N` adds a bounded first/last key sample in the recovered
+comparator order without dumping values. `--trace TRACE.jsonl` reads value-free
+trace JSONL, counts events by kind, summarizes dirty data-page ranges,
+summarizes sparse-hole
 punched ranges/pages/bytes and skipped fallback-recoverable pages, records the
 last traced revision/root/nextPage/maxPages geometry, reports trace failure
 reasons, and checks whether the last traced revision/root/nextPage matches the

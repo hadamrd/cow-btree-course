@@ -68,6 +68,22 @@ func openReaderTable(dbPath string) (*readerTable, error) {
 	return table, nil
 }
 
+func openExistingReaderTable(dbPath string) (*readerTable, error) {
+	file, err := os.Open(dbPath + ".readers")
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	table := &readerTable{file: file, slot: -1}
+	if err := table.withLock(table.ensureExistingFileLocked); err != nil {
+		file.Close()
+		return nil, err
+	}
+	return table, nil
+}
+
 func openWriterLock(dbPath string) (*os.File, error) {
 	file, err := os.OpenFile(dbPath+".writer", os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
@@ -280,6 +296,24 @@ func validateReaderSlotRevision(slot int, current readerSlot, maxRevision uint64
 	return nil
 }
 
+// InspectMmapReaderStats reports mmap reader-table slots without claiming a
+// reader slot for the inspection itself. It opens only existing sidecar state.
+func InspectMmapReaderStats(path string) (MmapReaderStats, error) {
+	maxRevision, err := inspectMmapMaxRevision(path)
+	if err != nil {
+		return MmapReaderStats{}, err
+	}
+	table, err := openExistingReaderTable(path)
+	if err != nil {
+		return MmapReaderStats{}, err
+	}
+	if table == nil {
+		return MmapReaderStats{}, nil
+	}
+	defer table.file.Close()
+	return table.stats(maxRevision)
+}
+
 // MmapReaderStats reports the current mmap reader-table slots for this tree.
 func (t *Tree) MmapReaderStats() (MmapReaderStats, error) {
 	if t == nil || t.closed || t.arena == nil || t.arena.readerTable == nil {
@@ -301,6 +335,61 @@ func (t *Tree) CleanStaleMmapReaders() (int, error) {
 	return cleared, nil
 }
 
+func inspectMmapMaxRevision(path string) (uint64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	if err := lockFile(file, false); err != nil {
+		return 0, err
+	}
+	defer unlockFile(file)
+
+	info, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if err := validateExistingMmapFileSize(info.Size()); err != nil {
+		return 0, err
+	}
+
+	page := make([]byte, PageSize)
+	var maxRevision uint64
+	found := false
+	var lastMetaErr error
+	var lastMetaErrRevision uint64
+	var lastMetaErrHasRevision bool
+	for index := 0; index < metaPageCount; index++ {
+		if _, err := file.ReadAt(page, int64(index*PageSize)); err != nil {
+			return 0, err
+		}
+		record, ok, err := readMetaPageChecked(page)
+		if err != nil {
+			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaError(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, page)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if err := validateMetaSlot(record, index); err != nil {
+			lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision = newestMetaErrorForRevision(lastMetaErr, lastMetaErrRevision, lastMetaErrHasRevision, err, record.revision)
+			continue
+		}
+		if !found || record.revision > maxRevision {
+			maxRevision = record.revision
+			found = true
+		}
+	}
+	if !found {
+		if lastMetaErr != nil {
+			return 0, lastMetaErr
+		}
+		return 0, fmt.Errorf("no valid mmap tree metadata page")
+	}
+	return maxRevision, nil
+}
+
 func (r *readerTable) ensureFileLocked() error {
 	info, err := r.file.Stat()
 	if err != nil {
@@ -313,6 +402,31 @@ func (r *readerTable) ensureFileLocked() error {
 		return fmt.Errorf("%w: reader table size %d, want at least %d", ErrReaderTable, info.Size(), readerTableHeaderSize)
 	}
 
+	header := make([]byte, readerTableHeaderSize)
+	if _, err := r.file.ReadAt(header, 0); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if string(header[:8]) != readerTableMagic || binary.LittleEndian.Uint64(header[16:24]) != readerTableSlotCount {
+		return fmt.Errorf("%w: reader table header mismatch", ErrReaderTable)
+	}
+	version := binary.LittleEndian.Uint64(header[8:16])
+	if err := r.setFormat(version); err != nil {
+		return err
+	}
+	if info.Size() != int64(r.tableSize) {
+		return fmt.Errorf("%w: reader table size %d, want %d", ErrReaderTable, info.Size(), r.tableSize)
+	}
+	return nil
+}
+
+func (r *readerTable) ensureExistingFileLocked() error {
+	info, err := r.file.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() < readerTableHeaderSize {
+		return fmt.Errorf("%w: reader table size %d, want at least %d", ErrReaderTable, info.Size(), readerTableHeaderSize)
+	}
 	header := make([]byte, readerTableHeaderSize)
 	if _, err := r.file.ReadAt(header, 0); err != nil && !errors.Is(err, io.EOF) {
 		return err

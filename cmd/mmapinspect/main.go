@@ -115,19 +115,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "mmap inspect: %v\n", err)
 		return 1
 	}
-	defer tree.Close()
+	treeOpen := true
+	defer func() {
+		if treeOpen {
+			_ = tree.Close()
+		}
+	}()
 
 	report := inspectFromAudit(tree.Audit(), tree.MDBKernelProfile())
 	if !options.pages {
 		report.PageSummaries = nil
-	}
-	if options.readers {
-		stats, err := tree.MmapReaderStats()
-		if err != nil {
-			fmt.Fprintf(stderr, "mmap inspect: reader stats: %v\n", err)
-			return 1
-		}
-		report.ReaderStats = &stats
 	}
 	if options.cache {
 		stats, err := tree.MmapCacheStats()
@@ -158,6 +155,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		report.TraceSummary = &summary
+	}
+	if err := tree.Close(); err != nil {
+		treeOpen = false
+		fmt.Fprintf(stderr, "mmap inspect: close read-only database: %v\n", err)
+		return 1
+	}
+	treeOpen = false
+	if options.readers {
+		stats, err := pagebtree.InspectMmapReaderStats(options.path)
+		if err != nil {
+			fmt.Fprintf(stderr, "mmap inspect: reader stats: %v\n", err)
+			return 1
+		}
+		report.ReaderStats = &stats
 	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")

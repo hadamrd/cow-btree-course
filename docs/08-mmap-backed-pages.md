@@ -203,8 +203,10 @@ the validity bit, validation error if any, stats including reclaim pressure,
 persisted `key_order`, `key_order_name`, `key_comparator`,
 `key_comparator_name`, reachable page IDs, free page IDs, retired page IDs,
 metadata page IDs for persisted
-freelist/reclaim chains, and leaf-link validation state. `--readers`
-adds reader-table slot statistics, including active/stale slots and oldest
+freelist/reclaim chains, and leaf-link validation state. `--readers` closes the
+command's own read-only handle before reading the sidecar through
+`InspectMmapReaderStats`, so reader-table output reports the workload's readers
+rather than an extra inspector slot. It includes active/stale slots and oldest
 pinned revision. `--cache` adds `mincore`-backed mapped/resident page counts,
 and `--space` adds `stat(2)` logical-vs-allocated file-space counts plus the
 hole-punch capability profile for sparse experiments. `--pages` adds value-free
@@ -314,6 +316,8 @@ flowchart TD
 `OpenMmapReadOnly` opens the database file with a shared advisory lock and a read-only mapping, then claims a sidecar reader-table slot with revision `0` before metadata recovery reads a root. Revision `0` is a conservative provisional pin: writers that scan the table during that short window must keep all retired pages unavailable for reuse. After metadata recovery chooses a root, the reader updates its slot to the recovered revision and validates the table against that recovered revision before returning the handle. Writable `OpenMmap` performs the same validation after recovering metadata from an existing file. The version-3 slot records the process ID, revision, claim token, process-start token, and boot/session token when the platform exposes them; Linux reads process start from `/proc/<pid>/stat` and boot identity from `/proc/sys/kernel/random/boot_id`, while Darwin reads process start from `kern.proc.pid` and boot identity from `kern.boottime`. Version-1 and version-2 sidecars still reopen as older, weaker slot formats. When a writer reclaims retired pages, it combines in-process snapshots with the oldest live revision found in that reader table. If any active reader can still see a retired page, the writer allocates new pages instead of recycling that page ID. Version-3 metadata can persist those still-pinned retired records in checked reclaim pages, so a writer can close and a later writer can recover the same pending retired list. When the read-only handle closes, the next writer reclaim pass can move those records into the reusable free list.
 
 `MmapReaderStats()` exposes the table shape: format version, whether this build can produce process-start and boot/session tokens, total slots, live active slots, stale slots whose process no longer exists or whose owner tokens no longer match, process-start-tagged slots, boot-tagged slots, and the oldest live reader revision. `CleanStaleMmapReaders()` clears stale slots explicitly. Writers also clean dead or detectably reused slots when scanning the oldest reader, but the public maintenance call makes reader-table hygiene visible in tests, demos, and operational experiments. A live slot whose revision is newer than the tree's current revision, or whose claim token is zero, is treated as malformed reader-table state. If a writer sees that while reclaiming retired pages, it fails closed by pinning all retired pages instead of recycling from an untrusted watermark.
+
+`InspectMmapReaderStats(path)` is different from `OpenMmapReadOnly(...).MmapReaderStats()`: it opens the database file only long enough to read checked metadata revisions, opens an already-existing `.readers` file without initializing it, and scans the table without claiming a slot. Use it for offline or command-line observation when the measurement itself should not hold back page recycling.
 
 Reader-table initialization is fail-closed. A missing or brand-new zero-length `.readers` file is initialized with the expected magic, version, and slot count. An existing sidecar with the wrong size, magic, version, or slot count returns `ErrReaderTable` instead of being reset. That matters because silently recreating a malformed table while read-only handles exist would erase their page-recycling watermarks.
 

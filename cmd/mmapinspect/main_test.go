@@ -152,11 +152,18 @@ func TestRunPrintsOptionalReaderAndCacheSections(t *testing.T) {
 	if report.ReaderStats == nil {
 		t.Fatalf("ReaderStats = nil, want section with --readers")
 	}
-	if report.ReaderStats.ActiveSlots < 2 {
-		t.Fatalf("ActiveSlots = %d, want pinned reader plus inspector", report.ReaderStats.ActiveSlots)
+	if report.ReaderStats.ActiveSlots != 1 {
+		t.Fatalf("ActiveSlots = %d, want only the pinned reader", report.ReaderStats.ActiveSlots)
 	}
 	if !report.ReaderStats.HasOldestRevision {
 		t.Fatalf("HasOldestRevision = false, want true with active readers")
+	}
+	stats, err := pagebtree.InspectMmapReaderStats(path)
+	if err != nil {
+		t.Fatalf("InspectMmapReaderStats after run: %v", err)
+	}
+	if stats.ActiveSlots != 1 || !stats.HasOldestRevision || stats.OldestRevision != pinned.Revision() {
+		t.Fatalf("reader stats after run = %+v, want no inspector slot left behind", stats)
 	}
 	if report.CacheStats == nil {
 		t.Fatalf("CacheStats = nil, want section with --cache")

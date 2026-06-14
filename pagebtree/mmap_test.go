@@ -5938,6 +5938,41 @@ func TestMmapReaderStatsReportsActiveReadOnlySlot(t *testing.T) {
 	}
 }
 
+func TestInspectMmapReaderStatsDoesNotClaimReaderSlot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+
+	writer, err := OpenMmap(path, MmapOptions{Degree: 2, MaxPages: 64})
+	if err != nil {
+		t.Fatalf("OpenMmap writer: %v", err)
+	}
+	writer.Put("alpha", []byte("one"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close writer: %v", err)
+	}
+
+	reader, err := OpenMmapReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenMmapReadOnly: %v", err)
+	}
+	defer reader.Close()
+
+	stats, err := InspectMmapReaderStats(path)
+	if err != nil {
+		t.Fatalf("InspectMmapReaderStats: %v", err)
+	}
+	if stats.ActiveSlots != 1 || !stats.HasOldestRevision || stats.OldestRevision != reader.Revision() {
+		t.Fatalf("InspectMmapReaderStats = %+v, want only the existing read-only reader", stats)
+	}
+
+	again, err := InspectMmapReaderStats(path)
+	if err != nil {
+		t.Fatalf("second InspectMmapReaderStats: %v", err)
+	}
+	if again.ActiveSlots != 1 || !again.HasOldestRevision || again.OldestRevision != reader.Revision() {
+		t.Fatalf("second InspectMmapReaderStats = %+v, want no inspector slot", again)
+	}
+}
+
 func TestMmapReaderTableOpensLegacyV1Sidecar(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 
