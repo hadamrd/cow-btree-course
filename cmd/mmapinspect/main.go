@@ -52,6 +52,12 @@ type inspectTraceSummary struct {
 	DirtyDataPages             int              `json:"dirty_data_pages"`
 	MaxDirtyRangePages         int              `json:"max_dirty_range_pages"`
 	MaxDirtyRangeDurationNanos int64            `json:"max_dirty_range_duration_nanos"`
+	PunchRanges                int              `json:"punch_ranges"`
+	PunchedPages               int              `json:"punched_pages"`
+	PunchedBytes               int64            `json:"punched_bytes"`
+	SkippedRecoverablePages    int              `json:"skipped_recoverable_pages"`
+	MaxPunchRangePages         int              `json:"max_punch_range_pages"`
+	PunchFailures              int              `json:"punch_failures"`
 	LastRevision               uint64           `json:"last_revision,omitempty"`
 	LastRoot                   pagebtree.PageID `json:"last_root,omitempty"`
 	LastNextPage               pagebtree.PageID `json:"last_next_page,omitempty"`
@@ -330,6 +336,47 @@ func (s *inspectTraceSummary) add(event pagebtree.MmapTraceEvent) {
 		}
 		if event.DurationNanos > s.MaxDirtyRangeDurationNanos {
 			s.MaxDirtyRangeDurationNanos = event.DurationNanos
+		}
+	}
+	if event.SkippedRecoverablePages != 0 {
+		s.SkippedRecoverablePages = event.SkippedRecoverablePages
+	}
+	switch event.Kind {
+	case pagebtree.MmapTracePunchRange:
+		pages := event.PunchedPages
+		if pages == 0 && event.EndPage > event.StartPage {
+			pages = int(event.EndPage - event.StartPage)
+		}
+		bytes := event.PunchedBytes
+		if bytes == 0 && pages > 0 {
+			bytes = int64(pages * pagebtree.PageSize)
+		}
+		if pages > 0 {
+			s.PunchRanges++
+			s.PunchedPages += pages
+			s.PunchedBytes += bytes
+			if pages > s.MaxPunchRangePages {
+				s.MaxPunchRangePages = pages
+			}
+		}
+	case pagebtree.MmapTracePunchEnd:
+		if s.PunchRanges == 0 {
+			s.PunchRanges = event.PunchRanges
+			s.PunchedPages = event.PunchedPages
+			s.PunchedBytes = event.PunchedBytes
+			if event.PunchedPages > s.MaxPunchRangePages {
+				s.MaxPunchRangePages = event.PunchedPages
+			}
+		}
+	case pagebtree.MmapTracePunchFailed:
+		s.PunchFailures++
+		if s.PunchRanges == 0 {
+			s.PunchRanges = event.PunchRanges
+			s.PunchedPages = event.PunchedPages
+			s.PunchedBytes = event.PunchedBytes
+			if event.PunchedPages > s.MaxPunchRangePages {
+				s.MaxPunchRangePages = event.PunchedPages
+			}
 		}
 	}
 	if strings.Contains(string(event.Kind), "failed") || event.Kind == pagebtree.MmapTraceRecoveryCandidateRejected {

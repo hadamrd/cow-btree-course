@@ -326,6 +326,33 @@ func TestRunCorrelatesTraceJSONL(t *testing.T) {
 	if err := tree.Compact(); err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
+	traceHook := exporter.Hook()
+	traceHook(pagebtree.MmapTraceEvent{Kind: pagebtree.MmapTracePunchBegin, Revision: tree.Revision()})
+	traceHook(pagebtree.MmapTraceEvent{
+		Kind:         pagebtree.MmapTracePunchRange,
+		Revision:     tree.Revision(),
+		StartPage:    5,
+		EndPage:      8,
+		PunchedPages: 3,
+		PunchedBytes: 3 * pagebtree.PageSize,
+	})
+	traceHook(pagebtree.MmapTraceEvent{
+		Kind:         pagebtree.MmapTracePunchRange,
+		Revision:     tree.Revision(),
+		StartPage:    11,
+		EndPage:      13,
+		PunchedPages: 2,
+		PunchedBytes: 2 * pagebtree.PageSize,
+	})
+	traceHook(pagebtree.MmapTraceEvent{
+		Kind:                    pagebtree.MmapTracePunchEnd,
+		Revision:                tree.Revision(),
+		FreePages:               9,
+		SkippedRecoverablePages: 4,
+		PunchRanges:             2,
+		PunchedPages:            5,
+		PunchedBytes:            5 * pagebtree.PageSize,
+	})
 	if err := tree.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -364,12 +391,77 @@ func TestRunCorrelatesTraceJSONL(t *testing.T) {
 	if summary.DirtyDataRanges == 0 || summary.DirtyDataPages == 0 {
 		t.Fatalf("dirty range summary = ranges %d pages %d, want nonzero", summary.DirtyDataRanges, summary.DirtyDataPages)
 	}
+	if summary.PunchRanges != 2 || summary.PunchedPages != 5 || summary.PunchedBytes != 5*pagebtree.PageSize {
+		t.Fatalf("punch summary = ranges %d pages %d bytes %d, want 2/5/%d", summary.PunchRanges, summary.PunchedPages, summary.PunchedBytes, 5*pagebtree.PageSize)
+	}
+	if summary.SkippedRecoverablePages != 4 || summary.MaxPunchRangePages != 3 {
+		t.Fatalf("punch skipped/max range = %d/%d, want 4/3", summary.SkippedRecoverablePages, summary.MaxPunchRangePages)
+	}
 	if !summary.MatchesCurrentRevision || !summary.MatchesCurrentRoot || !summary.MatchesCurrentNextPage {
 		t.Fatalf("trace/current match flags = revision %v root %v nextPage %v, summary=%+v stats=%+v",
 			summary.MatchesCurrentRevision, summary.MatchesCurrentRoot, summary.MatchesCurrentNextPage, *summary, report.Stats)
 	}
 	if summary.HasFailures {
 		t.Fatalf("HasFailures = true, reasons=%v", summary.FailureReasons)
+	}
+}
+
+func TestRunCorrelatesTracePunchFailures(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "inspect.db")
+	tracePath := filepath.Join(dir, "trace.jsonl")
+	tree, err := pagebtree.OpenMmap(path, pagebtree.MmapOptions{Degree: 2, MaxPages: 16})
+	if err != nil {
+		t.Fatalf("OpenMmap: %v", err)
+	}
+	tree.Put("key", []byte("value"))
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	var trace bytes.Buffer
+	exporter := pagebtree.NewMmapTraceJSONLExporter(&trace)
+	exporter.Hook()(pagebtree.MmapTraceEvent{
+		Kind:                    pagebtree.MmapTracePunchFailed,
+		Revision:                1,
+		StartPage:               6,
+		EndPage:                 8,
+		FreePages:               5,
+		SkippedRecoverablePages: 1,
+		PunchRanges:             1,
+		PunchedPages:            3,
+		PunchedBytes:            3 * pagebtree.PageSize,
+		Reason:                  "punch denied",
+	})
+	if err := exporter.Err(); err != nil {
+		t.Fatalf("trace exporter Err: %v", err)
+	}
+	if err := os.WriteFile(tracePath, trace.Bytes(), 0o644); err != nil {
+		t.Fatalf("write trace: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--trace", tracePath, path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report inspectReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	summary := report.TraceSummary
+	if summary == nil {
+		t.Fatalf("TraceSummary = nil, want section with --trace")
+	}
+	if !summary.HasFailures || summary.PunchFailures != 1 {
+		t.Fatalf("failure summary = has %v punch %d reasons=%v", summary.HasFailures, summary.PunchFailures, summary.FailureReasons)
+	}
+	if len(summary.FailureReasons) != 1 || summary.FailureReasons[0] != "punch denied" {
+		t.Fatalf("FailureReasons = %v, want punch denied", summary.FailureReasons)
+	}
+	if summary.SkippedRecoverablePages != 1 || summary.PunchedPages != 3 || summary.PunchedBytes != 3*pagebtree.PageSize {
+		t.Fatalf("punch failure counters = skipped %d pages %d bytes %d", summary.SkippedRecoverablePages, summary.PunchedPages, summary.PunchedBytes)
 	}
 }
 

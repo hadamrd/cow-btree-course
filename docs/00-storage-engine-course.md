@@ -749,10 +749,11 @@ counts. `--pages` adds value-free page summaries with role, kind, byte
 occupancy, branch children, and next-page hints. `--keys N`
 adds a bounded first/last key sample in the recovered comparator order without
 dumping values. `--trace TRACE.jsonl` reads value-free trace JSONL, counts
-events by kind, summarizes dirty data-page ranges, records the last traced
-revision/root/nextPage/maxPages geometry, reports trace failure reasons, and
-checks whether the last traced revision/root/nextPage matches the inspected
-database:
+events by kind, summarizes dirty data-page ranges, summarizes sparse-hole
+punched ranges/pages/bytes and skipped fallback-recoverable pages, records the
+last traced revision/root/nextPage/maxPages geometry, reports trace failure
+reasons, and checks whether the last traced revision/root/nextPage matches the
+inspected database:
 
 ```bash
 go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db
