@@ -30,6 +30,14 @@ func (t *Tree) emitMmapTraceDataRange(startPage, endPage PageID, durationNanos i
 	t.traceHook(event)
 }
 
+func (t *Tree) emitMmapTraceFailure(kind MmapTraceEventKind, err error) {
+	if t == nil || t.traceHook == nil || err == nil {
+		return
+	}
+	event := t.mmapTraceEvent(kind, nil, -1, err.Error())
+	t.traceHook(event)
+}
+
 func (t *Tree) emitMmapTraceResize(kind MmapTraceEventKind, oldMaxPages, newMaxPages int, oldNextPage, newNextPage PageID, fileSizeBytes int64) {
 	if t == nil || t.traceHook == nil {
 		return

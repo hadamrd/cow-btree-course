@@ -11,6 +11,7 @@ const (
 	MmapTraceSyncDataSynced               MmapTraceEventKind = "mmap-sync-data-synced"
 	MmapTraceSyncMetaPublished            MmapTraceEventKind = "mmap-sync-meta-published"
 	MmapTraceSyncEnd                      MmapTraceEventKind = "mmap-sync-end"
+	MmapTraceSyncFailed                   MmapTraceEventKind = "mmap-sync-failed"
 	MmapTraceRecoveryCandidateRejected    MmapTraceEventKind = "mmap-recovery-candidate-rejected"
 	MmapTraceRecoveryCandidateAccepted    MmapTraceEventKind = "mmap-recovery-candidate-accepted"
 	MmapTraceReclaimObsoleteMetadataPages MmapTraceEventKind = "mmap-reclaim-obsolete-metadata-pages"

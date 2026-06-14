@@ -1291,15 +1291,18 @@ func (t *Tree) syncMmap() error {
 	t.emitMmapTrace(MmapTraceSyncBegin)
 	restoreFreelistPages, err := t.prepareMetaFreelistPages()
 	if err != nil {
+		t.emitMmapTraceFailure(MmapTraceSyncFailed, err)
 		return err
 	}
 	if err := t.arena.syncDataPages(t.nextPage, t.emitMmapTraceDataRange); err != nil {
 		restoreFreelistPages()
+		t.emitMmapTraceFailure(MmapTraceSyncFailed, err)
 		return err
 	}
 	t.emitMmapTrace(MmapTraceSyncDataSynced)
 	if err := t.publishMeta(); err != nil {
 		restoreFreelistPages()
+		t.emitMmapTraceFailure(MmapTraceSyncFailed, err)
 		return err
 	}
 	t.emitMmapTrace(MmapTraceSyncMetaPublished)

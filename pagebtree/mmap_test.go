@@ -3815,6 +3815,56 @@ func TestMmapTraceHookReportsDirtyDataSyncRanges(t *testing.T) {
 	}
 }
 
+func TestMmapTraceHookReportsSyncFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "course.db")
+	var events []MmapTraceEvent
+
+	tree, err := OpenMmap(path, MmapOptions{
+		Degree:   2,
+		MaxPages: 64,
+		TraceHook: func(event MmapTraceEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenMmap create: %v", err)
+	}
+	defer func() {
+		tree.arena.faultInjector = nil
+		if err := tree.Close(); err != nil {
+			t.Fatalf("Close traced tree: %v", err)
+		}
+	}()
+
+	events = nil
+	forced := errors.New("forced trace sync failure")
+	tree.arena.faultInjector = func(point mmapFaultPoint) error {
+		if point == mmapFaultBeforeDataSync {
+			return forced
+		}
+		return nil
+	}
+	tree.Put("alpha", []byte("one"))
+	err = tree.Sync()
+	if !errors.Is(err, forced) {
+		t.Fatalf("Sync error = %v, want forced failure", err)
+	}
+
+	failed := findTraceEvent(events, MmapTraceSyncFailed, tree.Revision())
+	if failed == nil {
+		t.Fatalf("missing sync-failed event in trace kinds %v", traceKinds(events))
+	}
+	if failed.Reason != forced.Error() {
+		t.Fatalf("sync-failed reason = %q, want %q", failed.Reason, forced.Error())
+	}
+	if failed.Root != tree.Stats().Root || failed.NextPage != tree.nextPage {
+		t.Fatalf("sync-failed event geometry = root:%d next:%d, want root:%d next:%d", failed.Root, failed.NextPage, tree.Stats().Root, tree.nextPage)
+	}
+	if traceKindIndex(events, MmapTraceSyncEnd) >= 0 {
+		t.Fatalf("sync trace emitted sync-end despite failure: %v", traceKinds(events))
+	}
+}
+
 func TestMmapTraceHookReportsRecoveryCandidateFallback(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "course.db")
 

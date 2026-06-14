@@ -157,7 +157,7 @@ That makes the distinction visible between the project's 4096-byte database page
 
 Counters answer "how much"; trace events answer "why did this path happen?" The project now exposes `MmapOptions.TraceHook`, an optional synchronous callback that receives `MmapTraceEvent` structs. The hook is intentionally narrow and storage-engine-shaped, not a general logging framework. It reports:
 
-- `mmap-sync-begin`, `mmap-sync-data-range`, `mmap-sync-data-synced`, `mmap-sync-meta-published`, and `mmap-sync-end` around the dirty-data-before-metadata publish path
+- `mmap-sync-begin`, `mmap-sync-data-range`, `mmap-sync-data-synced`, `mmap-sync-meta-published`, `mmap-sync-end`, and `mmap-sync-failed` around the dirty-data-before-metadata publish path
 - `mmap-recovery-candidate-rejected` when a metadata candidate fails checksum, slot, bounds, reachable-page, freelist, reclaim, leaf-link, or length validation
 - `mmap-recovery-candidate-accepted` when recovery chooses the root that will serve reads
 - `mmap-reclaim-obsolete-metadata-pages` when old freelist/reclaim metadata pages become reusable after neither checked metadata slot references them
@@ -165,7 +165,7 @@ Counters answer "how much"; trace events answer "why did this path happen?" The 
 - `mmap-compact-begin` and `mmap-compact-end` around successful tail compaction, with old/new `nextPage`, capacity, and file size
 - `mmap-reader-table-cleanup` when stale dead-PID reader-table slots are explicitly cleared
 
-Each event carries stable revision/page geometry: root page ID, `nextPage`, mapped capacity, old/new geometry for growth and compaction, logical length, dirty/free/retired counts, reclaimed-page count for reclaim events, cleared-slot count for reader cleanup, metadata slot, file-size bytes when a remap is involved, and a rejection reason when one exists. Dirty data-range events also carry half-open `StartPage`/`EndPage` boundaries matching the coalesced logical page IDs passed to `msync`, plus `DurationNanos` for that range flush. A hook should return quickly and should not call back into the same tree; use it to append to a test buffer, increment a probe, or hand off to an external logger.
+Each event carries stable revision/page geometry: root page ID, `nextPage`, mapped capacity, old/new geometry for growth and compaction, logical length, dirty/free/retired counts, reclaimed-page count for reclaim events, cleared-slot count for reader cleanup, metadata slot, file-size bytes when a remap is involved, and a rejection or failure reason when one exists. Dirty data-range events also carry half-open `StartPage`/`EndPage` boundaries matching the coalesced logical page IDs passed to `msync`, plus `DurationNanos` for that range flush. A hook should return quickly and should not call back into the same tree; use it to append to a test buffer, increment a probe, or hand off to an external logger.
 
 For simple experiments, `NewMmapTraceJSONLExporter` adapts the hook to newline-delimited JSON. Trace hooks cannot return errors, so the exporter keeps the first write or encode error and exposes it through `Err()` after `Sync`, `Close`, or the experiment block. The JSON schema uses lower-snake field names and omits the internal negative `MetadataSlot` sentinel when an event is not tied to a checked metadata page. The `cmd/mmaptrace-demo` command writes pure JSONL to stdout:
 
@@ -177,7 +177,7 @@ This is useful when studying recovery fallback. If the newest metadata page poin
 
 Code to read:
 
-- Trace event API and JSON field schema: [`../pagebtree/mmap_trace.go#L3-L108`](../pagebtree/mmap_trace.go#L3-L108)
+- Trace event API and JSON field schema: [`../pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
 - JSONL exporter: [`../pagebtree/mmap_trace_export.go#L9-L72`](../pagebtree/mmap_trace_export.go#L9-L72)
 - JSONL exporter example: [`../pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)
 - JSONL trace demo command: [`../cmd/mmaptrace-demo/main.go#L12-L42`](../cmd/mmaptrace-demo/main.go#L12-L42)
@@ -189,7 +189,7 @@ Code to read:
 - Growth trace emissions: [`../pagebtree/mmap.go#L346-L394`](../pagebtree/mmap.go#L346-L394)
 - Compact trace emissions: [`../pagebtree/mmap.go#L408-L482`](../pagebtree/mmap.go#L408-L482)
 - Reader cleanup trace emission: [`../pagebtree/reader_table_unix.go#L262-L272`](../pagebtree/reader_table_unix.go#L262-L272)
-- Trace hook behavior tests: [`../pagebtree/mmap_test.go#L3712-L3813`](../pagebtree/mmap_test.go#L3712-L3813), [`../pagebtree/mmap_test.go#L3815-L3859`](../pagebtree/mmap_test.go#L3815-L3859), [`../pagebtree/mmap_test.go#L5010-L5075`](../pagebtree/mmap_test.go#L5010-L5075), and [`../pagebtree/mmap_trace_export_test.go#L12-L87`](../pagebtree/mmap_trace_export_test.go#L12-L87)
+- Trace hook behavior tests: [`../pagebtree/mmap_test.go#L3712-L3866`](../pagebtree/mmap_test.go#L3712-L3866), [`../pagebtree/mmap_test.go#L3868-L3911`](../pagebtree/mmap_test.go#L3868-L3911), [`../pagebtree/mmap_test.go#L5132-L5183`](../pagebtree/mmap_test.go#L5132-L5183), and [`../pagebtree/mmap_trace_export_test.go#L12-L87`](../pagebtree/mmap_trace_export_test.go#L12-L87)
 
 ## Live Integrity Checks
 

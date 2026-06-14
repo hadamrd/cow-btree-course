@@ -341,11 +341,12 @@ adjacent runs before syncing.
 `MmapOptions.TraceHook` can observe this path without parsing logs. A traced
 sync emits `mmap-sync-begin`, one `mmap-sync-data-range` event per coalesced
 dirty data-page run, `mmap-sync-data-synced`, `mmap-sync-meta-published`, and
-`mmap-sync-end`. Phase events carry the revision, root page, `nextPage`, dirty
-count, free count, retired count, and mapped capacity as structured fields.
-Range events also carry the half-open `StartPage`/`EndPage` page-id interval
-that was successfully passed through `msync`, plus `DurationNanos` for that
-range flush.
+`mmap-sync-end`. If the sync path fails, it emits `mmap-sync-failed` with the
+error text in `Reason` and does not emit `mmap-sync-end`. Phase events carry the
+revision, root page, `nextPage`, dirty count, free count, retired count, and
+mapped capacity as structured fields. Range events also carry the half-open
+`StartPage`/`EndPage` page-id interval that was successfully passed through
+`msync`, plus `DurationNanos` for that range flush.
 
 Code to read:
 
@@ -354,7 +355,7 @@ Code to read:
 - Dirty data-page sync: [`pagebtree/mmap.go#L540-L588`](../pagebtree/mmap.go#L540-L588)
 - Per-range `msync`: [`pagebtree/mmap.go#L602-L613`](../pagebtree/mmap.go#L602-L613)
 - Metadata page sync: [`pagebtree/mmap.go#L617-L635`](../pagebtree/mmap.go#L617-L635)
-- Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L108`](../pagebtree/mmap_trace.go#L3-L108)
+- Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
 
 ## Module 10: Dual Checked Metadata Pages
 
@@ -597,15 +598,16 @@ flowchart TD
 This matters because a serious engine should explain decisions, not only final
 state. If `OpenMmap` accepts an older metadata page after rejecting the newest
 candidate, a trace hook can show the rejected revision, metadata slot, and
-validation reason. If `Sync` stalls in a larger experiment, the phase events
-let you separate "dirty data pages flushed" from "metadata published." If old
-freelist/reclaim metadata pages become reusable only after both alternating
-metadata slots move past them, the reclaim trace event marks that decision.
-Growth and compaction events carry old/new mapped capacity, old/new `nextPage`,
-and resulting file size. Dirty sync range events carry `StartPage`, `EndPage`,
-and `DurationNanos`, so slow write stalls can be tied back to concrete page-id
-intervals. Reader cleanup events report how many dead-PID slots were cleared
-from the sidecar reader table.
+validation reason. If `Sync` stalls in a larger experiment, the phase events let
+you separate "dirty data pages flushed" from "metadata published"; if it fails,
+`mmap-sync-failed` carries the returned error reason and `mmap-sync-end` is
+absent. If old freelist/reclaim metadata pages become reusable only after both
+alternating metadata slots move past them, the reclaim trace event marks that
+decision. Growth and compaction events carry old/new mapped capacity, old/new
+`nextPage`, and resulting file size. Dirty sync range events carry `StartPage`,
+`EndPage`, and `DurationNanos`, so slow write stalls can be tied back to
+concrete page-id intervals. Reader cleanup events report how many dead-PID slots
+were cleared from the sidecar reader table.
 
 The hook is synchronous and should stay lightweight. In a real product you
 can start with `NewMmapTraceJSONLExporter`, which writes one lower-snake-field
@@ -634,7 +636,7 @@ Code to read:
 
 - Stats byte-fill fields and reachable-page walk: [`pagebtree/stats.go#L3-L170`](../pagebtree/stats.go#L3-L170)
 - Stats byte-fill tests: [`pagebtree/tree_test.go#L78-L117`](../pagebtree/tree_test.go#L78-L117), [`pagebtree/mmap_test.go#L53-L93`](../pagebtree/mmap_test.go#L53-L93)
-- Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L108`](../pagebtree/mmap_trace.go#L3-L108)
+- Trace event API and JSON field schema: [`pagebtree/mmap_trace.go#L3-L109`](../pagebtree/mmap_trace.go#L3-L109)
 - JSONL exporter: [`pagebtree/mmap_trace_export.go#L9-L72`](../pagebtree/mmap_trace_export.go#L9-L72)
 - JSONL exporter example: [`pagebtree/example_test.go#L137-L157`](../pagebtree/example_test.go#L137-L157)
 - JSONL trace demo command: [`cmd/mmaptrace-demo/main.go#L12-L42`](../cmd/mmaptrace-demo/main.go#L12-L42)
@@ -645,10 +647,10 @@ Code to read:
 - Growth trace emissions: [`pagebtree/mmap.go#L346-L394`](../pagebtree/mmap.go#L346-L394)
 - Compact trace emissions: [`pagebtree/mmap.go#L408-L482`](../pagebtree/mmap.go#L408-L482)
 - Reader cleanup trace emission: [`pagebtree/reader_table_unix.go#L262-L272`](../pagebtree/reader_table_unix.go#L262-L272)
-- Reclaim trace test: [`pagebtree/mmap_test.go#L2715-L2769`](../pagebtree/mmap_test.go#L2715-L2769)
-- Growth and compact trace tests: [`pagebtree/mmap_test.go#L2771-L2862`](../pagebtree/mmap_test.go#L2771-L2862)
-- Sync and recovery trace tests: [`pagebtree/mmap_test.go#L3465-L3553`](../pagebtree/mmap_test.go#L3465-L3553)
-- Reader cleanup trace test: [`pagebtree/mmap_test.go#L4773-L4824`](../pagebtree/mmap_test.go#L4773-L4824)
+- Reclaim trace test: [`pagebtree/mmap_test.go#L2962-L3016`](../pagebtree/mmap_test.go#L2962-L3016)
+- Growth and compact trace tests: [`pagebtree/mmap_test.go#L3018-L3105`](../pagebtree/mmap_test.go#L3018-L3105)
+- Sync and recovery trace tests: [`pagebtree/mmap_test.go#L3712-L3911`](../pagebtree/mmap_test.go#L3712-L3911)
+- Reader cleanup trace test: [`pagebtree/mmap_test.go#L5132-L5183`](../pagebtree/mmap_test.go#L5132-L5183)
 
 ## Module 16: OpenLDAP/LMDB Versus OpenDJ/Berkeley JE
 
