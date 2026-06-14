@@ -99,6 +99,28 @@ func TestRunCanRedactReportPaths(t *testing.T) {
 	}
 }
 
+func TestRunCanLabelShareableReport(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "txworkload.db")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--transactions", "2", "--label", "reader-pinned-local", "--redact-path", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+
+	var report txWorkloadReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if report.Label != "reader-pinned-local" {
+		t.Fatalf("Label = %q, want reader-pinned-local", report.Label)
+	}
+	if report.Path != "" || !report.PathRedacted {
+		t.Fatalf("path redaction = %q/%v, want redacted path", report.Path, report.PathRedacted)
+	}
+}
+
 func TestRunCanMixCommittedDeletesIntoWorkload(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "txworkload.db")
@@ -207,5 +229,19 @@ func TestRunRejectsInvalidArguments(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "--transactions") {
 		t.Fatalf("stderr = %q, want transactions validation", stderr.String())
+	}
+}
+
+func TestRunRejectsWhitespacePaddedLabel(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--label", " reader-pinned-local ", "db"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run exit = %d, want 2", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--label") {
+		t.Fatalf("stderr = %q, want label validation", stderr.String())
 	}
 }

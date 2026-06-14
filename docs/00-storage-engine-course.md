@@ -808,10 +808,16 @@ still uses the real database and trace paths internally, but omits them from the
 report:
 
 ```bash
-go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --trace tx-trace.jsonl --redact-path txworkload.db > tx-report.json
+go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --label local-tx --trace tx-trace.jsonl --redact-path txworkload.db > tx-report.json
 go run ./cmd/mmaptxsummary tx-report.json
 go run ./cmd/mmaptracesummary tx-trace.jsonl
 ```
+
+The checked examples under [`txworkloads/`](txworkloads/) keep one redacted
+reader-pinned transaction report and its generated Markdown summary in the
+repository. `scripts/verify-tx-workload-artifacts.sh` regenerates the table and
+fails if a sample exposes a database path, exposes a trace path, or lacks a
+stable label.
 
 This is not a concurrency scheduler or an ACID stress rig. It is a small
 repeatable input for studying the sync path, conflict abort path, reader-table

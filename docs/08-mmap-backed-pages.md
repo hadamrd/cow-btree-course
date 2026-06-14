@@ -209,10 +209,15 @@ local database and trace paths from the JSON report while still writing the
 trace file at the supplied path:
 
 ```bash
-go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --trace tx-trace.jsonl --redact-path txworkload.db > tx-report.json
+go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --label local-tx --trace tx-trace.jsonl --redact-path txworkload.db > tx-report.json
 go run ./cmd/mmaptxsummary tx-report.json
 go run ./cmd/mmaptracesummary tx-trace.jsonl
 ```
+
+Checked examples live under [`txworkloads/`](txworkloads/). They are generated
+from redacted JSON reports and verified by
+`scripts/verify-tx-workload-artifacts.sh`, which keeps the Markdown summary in
+sync with the reports and rejects path leakage.
 
 For a one-shot read-only integrity snapshot, `cmd/mmapinspect` opens the
 database with `OpenMmapReadOnly`, runs `Audit`, and prints indented JSON with

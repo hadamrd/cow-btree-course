@@ -27,7 +27,7 @@ go run ./cmd/mmaptracesummary mmap-trace.jsonl > mmap-trace-summary.md
 go run ./cmd/mmapinspect --readers --cache --space --pages --keys=4 --trace mmap-trace.jsonl /path/to/source.db
 go run ./cmd/mmappunch --trace punch-trace.jsonl /path/to/source.db
 go run ./cmd/mmapreadersoak --readers 4 --rounds 5 --keys 128 /path/to/soak.db
-go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --trace tx-trace.jsonl --redact-path /path/to/txworkload.db > tx-report.json
+go run ./cmd/mmaptxworkload --transactions 12 --delete-every 2 --readers 2 --label local-tx --trace tx-trace.jsonl --redact-path /path/to/txworkload.db > tx-report.json
 go run ./cmd/mmaptxsummary tx-report.json > tx-summary.md
 go run ./cmd/mmaptearlab --mode metadata /path/to/tear.db
 go run ./cmd/mmaptearlab --mode root /path/to/tear.db
@@ -110,6 +110,11 @@ Then read the focused chapters in order:
 10. [`docs/10-respectability-gap-audit.md`](docs/10-respectability-gap-audit.md)
 11. [`docs/11-benchmarking-and-baselines.md`](docs/11-benchmarking-and-baselines.md)
 12. [`docs/12-platform-matrix.md`](docs/12-platform-matrix.md)
+
+Checked example artifacts live under [`docs/probes/`](docs/probes/) for local
+filesystem behavior and [`docs/txworkloads/`](docs/txworkloads/) for
+reader-pinned transaction/reclaim behavior. Their generated summaries are
+verified by `scripts/ci-local.sh`.
 
 ## Deliberate Scope
 

@@ -11,6 +11,7 @@ import (
 )
 
 type txReport struct {
+	Label                       string            `json:"label,omitempty"`
 	Path                        string            `json:"path,omitempty"`
 	Transactions                int               `json:"transactions"`
 	DeleteEvery                 int               `json:"delete_every,omitempty"`
@@ -162,6 +163,9 @@ func rowForReport(report txReport, inputName string) txRow {
 }
 
 func reportName(report txReport, inputName string) string {
+	if report.Label != "" {
+		return report.Label
+	}
 	if report.Path != "" {
 		if base := filepath.Base(report.Path); base != "." && base != string(filepath.Separator) && base != "" {
 			return base

@@ -75,6 +75,28 @@ func TestRunReadsMmapTxWorkloadReportFromStdin(t *testing.T) {
 	}
 }
 
+func TestRunPrefersMmapTxWorkloadLabelOverInputName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "redacted-tx.json")
+	report := strings.Replace(sampleTxWorkloadReport, `"path_redacted": true,`, `"label": "reader-pinned-local",
+  "path_redacted": true,`, 1)
+	if err := os.WriteFile(path, []byte(report), 0o644); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{path}, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "| reader-pinned-local | 8 | 2 | 2/2 |") {
+		t.Fatalf("stdout missing label report row:\n%s", output)
+	}
+	if strings.Contains(output, "redacted-tx.json") {
+		t.Fatalf("stdout used input name despite label:\n%s", output)
+	}
+}
+
 func TestRunAcceptsMultipleMmapTxWorkloadReports(t *testing.T) {
 	dir := t.TempDir()
 	first := filepath.Join(dir, "first.json")

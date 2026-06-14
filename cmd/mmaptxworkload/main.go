@@ -19,6 +19,7 @@ type txWorkloadReport struct {
 	PathRedacted                bool                            `json:"path_redacted,omitempty"`
 	TracePath                   string                          `json:"trace_path,omitempty"`
 	TracePathRedacted           bool                            `json:"trace_path_redacted,omitempty"`
+	Label                       string                          `json:"label,omitempty"`
 	Transactions                int                             `json:"transactions"`
 	DeleteEvery                 int                             `json:"delete_every,omitempty"`
 	Committed                   int                             `json:"committed"`
@@ -40,6 +41,7 @@ type txWorkloadReport struct {
 type txWorkloadOptions struct {
 	path         string
 	tracePath    string
+	label        string
 	redactPath   bool
 	transactions int
 	deleteEvery  int
@@ -154,6 +156,14 @@ func parseArgs(args []string) (txWorkloadOptions, error) {
 				return txWorkloadOptions{}, fmt.Errorf("--readers expects a positive integer: %w", err)
 			}
 			options.readers = readers
+		case arg == "--label":
+			value, ok := nextArg(args, &i)
+			if !ok {
+				return txWorkloadOptions{}, fmt.Errorf("--label expects a value")
+			}
+			options.label = value
+		case strings.HasPrefix(arg, "--label="):
+			options.label = strings.TrimPrefix(arg, "--label=")
 		case arg == "--trace":
 			value, ok := nextArg(args, &i)
 			if !ok || value == "" {
@@ -180,6 +190,9 @@ func parseArgs(args []string) (txWorkloadOptions, error) {
 	if options.path == "" {
 		return txWorkloadOptions{}, fmt.Errorf("expected one DB path")
 	}
+	if strings.TrimSpace(options.label) != options.label || (options.label == "" && labelWasExplicit(args)) {
+		return txWorkloadOptions{}, fmt.Errorf("--label must be non-empty and must not have leading or trailing whitespace")
+	}
 	return options, nil
 }
 
@@ -203,7 +216,16 @@ func parsePositiveInt(text string) (int, error) {
 }
 
 func printUsage(stderr io.Writer) {
-	fmt.Fprintln(stderr, "usage: mmaptxworkload [--transactions N] [--delete-every N] [--readers N] [--trace TRACE.jsonl] [--redact-path] DB.db")
+	fmt.Fprintln(stderr, "usage: mmaptxworkload [--transactions N] [--delete-every N] [--readers N] [--label NAME] [--trace TRACE.jsonl] [--redact-path] DB.db")
+}
+
+func labelWasExplicit(args []string) bool {
+	for _, arg := range args {
+		if arg == "--label" || strings.HasPrefix(arg, "--label=") {
+			return true
+		}
+	}
+	return false
 }
 
 func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (txWorkloadReport, error) {
@@ -227,6 +249,7 @@ func runWorkload(options txWorkloadOptions, traceHook pagebtree.MmapTraceHook) (
 	}
 
 	report := txWorkloadReport{
+		Label:                   options.label,
 		Transactions:            options.transactions,
 		DeleteEvery:             options.deleteEvery,
 		Readers:                 options.readers,
